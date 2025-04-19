@@ -18,7 +18,7 @@ use crate::{
 use clap::Parser;
 use log::LevelFilter;
 use simplelog::{ColorChoice, ConfigBuilder, TermLogger, TerminalMode};
-use std::{fmt::Display, io::Read};
+use std::{fmt::Display, io::Read, process::ExitCode};
 
 #[derive(Parser)]
 struct Arguments {
@@ -27,7 +27,7 @@ struct Arguments {
     debug_phase: Vec<String>,
 }
 
-fn main() -> std::io::Result<()> {
+fn main() -> std::io::Result<ExitCode> {
     let arguments = Arguments::parse();
 
     TermLogger::init(
@@ -63,19 +63,22 @@ fn main() -> std::io::Result<()> {
     let typed_ast =
         unwrap_phase_result(TypecheckerPhase.execute_and_debug(&simplified_ast, debug_phases));
 
-    if let Err(error) = compile_and_execute_program(
-        &typed_ast,
-        arguments
-            .debug_phase
-            .iter()
-            .any(|name| name == "jit_compiler"),
-    ) {
-        eprintln!("{}", error);
+    Ok(
+        match compile_and_execute_program(
+            &typed_ast,
+            arguments
+                .debug_phase
+                .iter()
+                .any(|name| name == "jit_compiler"),
+        ) {
+            Ok(code) => ExitCode::from(code),
+            Err(error) => {
+                eprintln!("{}", error);
 
-        std::process::exit(1);
-    }
-
-    Ok(())
+                ExitCode::FAILURE
+            }
+        },
+    )
 }
 
 fn unwrap_phase_result<Output, Error: Display>(result: Result<Output, Error>) -> Output {

@@ -11,6 +11,7 @@ println_bool(false && true);
 println_bool(true && false);
 println_bool(true && true);
 ",
+        true,
     )?;
 
     assert_eq!(output, "false\nfalse\nfalse\ntrue\n");
@@ -27,6 +28,7 @@ println_bool(false || true);
 println_bool(true || false);
 println_bool(true || true);
 ",
+        true,
     )?;
 
     assert_eq!(output, "false\ntrue\ntrue\ntrue\n");

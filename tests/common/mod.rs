@@ -4,7 +4,7 @@ use std::{
     process::{Command, Stdio},
 };
 
-pub fn evaluate_program(program: &str) -> anyhow::Result<String> {
+pub fn evaluate_program(program: &str, expect_success: bool) -> anyhow::Result<String> {
     let ular_executable = std::env::current_exe()?
         .parent()
         .unwrap()
@@ -25,13 +25,24 @@ pub fn evaluate_program(program: &str) -> anyhow::Result<String> {
 
     let output = process.wait_with_output()?;
 
-    if output.status.success() {
+    if output.status.success() == expect_success {
         Ok(String::from_utf8(output.stdout)?)
     } else {
         std::io::stdout().write_all(&output.stdout)?;
 
+        let expected = if expect_success {
+            "a successful code"
+        } else {
+            "a failure code"
+        };
+
         Err(match output.status.code() {
-            Some(code) => anyhow!("ular returned a status code of {}.", code),
+            Some(code) => anyhow!(
+                "ular returned a status code of {}, but expected a {}.",
+                code,
+                expected
+            ),
+
             None => anyhow!("ular was unexpectedly terminated."),
         })
     }

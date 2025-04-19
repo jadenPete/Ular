@@ -10,15 +10,18 @@ fn addition_works() -> anyhow::Result<()> {
      * - A small number
      * - A large number
      */
-    let output = evaluate_program(&format!(
-        "\
+    let output = evaluate_program(
+        &format!(
+            "\
 println_number({min} + 0);
 println_number({min} + 1);
 println_number({min} + {max});
 ",
-        min = i32::MIN,
-        max = i32::MAX,
-    ))?;
+            min = i32::MIN,
+            max = i32::MAX,
+        ),
+        true,
+    )?;
 
     assert_eq!(
         output,
@@ -51,6 +54,7 @@ println_number(1 - -1);
 println_number(1 - 0);
 println_number(1 - 1);
 ",
+        true,
     )?;
 
     assert_eq!(
@@ -87,6 +91,7 @@ println_number(-2 * 0);
 println_number(-2 * 1);
 println_number(-2 * 2);
 ",
+        true,
     )?;
 
     assert_eq!(
@@ -126,6 +131,7 @@ println_number(4 / 1);
 println_number(4 / 2);
 println_number(4 / 8);
 ",
+        true,
     )?;
 
     assert_eq!(
@@ -143,6 +149,13 @@ println_number(4 / 8);
 0
 "
     );
+
+    Ok(())
+}
+
+#[test]
+fn divide_by_zero() -> anyhow::Result<()> {
+    evaluate_program("1 / 0;", false)?;
 
     Ok(())
 }

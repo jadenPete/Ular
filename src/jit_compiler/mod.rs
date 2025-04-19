@@ -8,28 +8,32 @@ use crate::{
     jit_compiler::{
         built_in_values::BuiltInValues,
         module::UlarModule,
-        scope::JitCompilerScope,
+        scope::{JitCompilerScope, LocalName},
         value::{UlarFunction, UlarValue},
     },
     parser::program::Operator,
-    typechecker::typed_program::{
-        Typed, TypedBlock, TypedCall, TypedExpression, TypedIdentifier, TypedIf, TypedInfix,
-        TypedNumber, TypedProgram, TypedStatement,
+    typechecker::{
+        type_::Type,
+        typed_program::{
+            Typed, TypedBlock, TypedCall, TypedExpression, TypedIdentifier, TypedIf, TypedInfix,
+            TypedNumber, TypedProgram, TypedStatement,
+        },
     },
 };
 
+use built_in_values::BuiltInFunction;
 use inkwell::{
     basic_block::BasicBlock,
     builder::Builder,
     context::Context,
     execution_engine::{ExecutionEngine, JitFunction},
-    values::{AnyValue, BasicMetadataValueEnum, FunctionValue, IntValue},
-    OptimizationLevel,
+    values::{BasicMetadataValueEnum, FunctionValue, IntValue},
+    AddressSpace, OptimizationLevel,
 };
 
 use log::debug;
 
-type MainFunction = unsafe extern "C" fn();
+type MainFunction = unsafe extern "C" fn() -> u8;
 
 struct JitFunctionCompiler<'a, 'context> {
     context: &'context Context,
@@ -179,44 +183,69 @@ impl<'a, 'context> JitFunctionCompiler<'a, 'context> {
         let right_value: IntValue = self.compile_expression(scope, &infix.right)?.try_into()?;
         let name = scope.get_local_name();
 
-        Ok(match infix.operator {
-            Operator::Addition => {
-                self.builder
-                    .build_int_add(left_value, right_value, &name.to_string())
-            }
+        match infix.operator {
+            Operator::Addition => Ok(self
+                .builder
+                .build_int_add(left_value, right_value, &name.to_string())
+                .unwrap()
+                .into()),
 
-            Operator::Subtraction => {
-                self.builder
-                    .build_int_sub(left_value, right_value, &name.to_string())
-            }
+            Operator::Subtraction => Ok(self
+                .builder
+                .build_int_sub(left_value, right_value, &name.to_string())
+                .unwrap()
+                .into()),
 
-            Operator::Multiplication => {
-                self.builder
-                    .build_int_mul(left_value, right_value, &name.to_string())
-            }
+            Operator::Multiplication => Ok(self
+                .builder
+                .build_int_mul(left_value, right_value, &name.to_string())
+                .unwrap()
+                .into()),
 
-            Operator::Division => {
-                self.builder
-                    .build_int_signed_div(left_value, right_value, &name.to_string())
-            }
+            Operator::Division => self.compile_infix_division(name, left_value, right_value),
+            Operator::Modulo => Ok(self
+                .builder
+                .build_int_signed_rem(left_value, right_value, &name.to_string())
+                .unwrap()
+                .into()),
 
-            Operator::Modulo => {
-                self.builder
-                    .build_int_signed_rem(left_value, right_value, &name.to_string())
-            }
+            Operator::LogicalAnd => Ok(self
+                .builder
+                .build_and(left_value, right_value, &name.to_string())
+                .unwrap()
+                .into()),
 
-            Operator::LogicalAnd => {
-                self.builder
-                    .build_and(left_value, right_value, &name.to_string())
-            }
-
-            Operator::LogicalOr => {
-                self.builder
-                    .build_or(left_value, right_value, &name.to_string())
-            }
+            Operator::LogicalOr => Ok(self
+                .builder
+                .build_or(left_value, right_value, &name.to_string())
+                .unwrap()
+                .into()),
         }
-        .unwrap()
-        .into())
+    }
+
+    fn compile_infix_division(
+        &mut self,
+        name: LocalName,
+        left_value: IntValue<'context>,
+        right_value: IntValue<'context>,
+    ) -> Result<UlarValue<'context>, CompilationError> {
+        let division_function = self.built_in_values._divide_number.get_inkwell_function(
+            self.context,
+            self.execution_engine,
+            self.module,
+        );
+
+        UlarValue::from_call_site_value(
+            &self.context,
+            Type::Number,
+            self.builder
+                .build_call(
+                    division_function,
+                    &[left_value.into(), right_value.into()],
+                    &name.to_string(),
+                )
+                .unwrap(),
+        )
     }
 
     fn compile_statement(
@@ -258,19 +287,124 @@ fn compile_program<'a>(
     let main_function =
         module
             .underlying
-            .add_function("main", context.void_type().fn_type(&[], false), None);
+            .add_function("main", context.i8_type().fn_type(&[], false), None);
 
-    let entry_block = context.append_basic_block(main_function, "entry");
+    let main_may_throw_function = module.underlying.add_function(
+        "main_may_throw",
+        context.void_type().fn_type(&[], false),
+        None,
+    );
 
-    builder.position_at_end(entry_block);
+    let main_entry_block = context.append_basic_block(main_function, "entry");
+    let main_then_block = context.append_basic_block(main_function, "then");
+    let main_catch_block = context.append_basic_block(main_function, "catch");
 
-    let mut scope = JitCompilerScope::new(entry_block, None);
+    builder.position_at_end(main_entry_block);
+    builder
+        .build_invoke(
+            main_may_throw_function,
+            &[],
+            main_then_block,
+            main_catch_block,
+            "",
+        )
+        .unwrap();
+
+    builder.position_at_end(main_then_block);
+
+    let then_return_value = context.i8_type().const_int(0, false);
+
+    builder.build_return(Some(&then_return_value)).unwrap();
+    builder.position_at_end(main_catch_block);
+
+    let landing_pad_result_type = context.struct_type(
+        &[
+            context.ptr_type(AddressSpace::default()).into(),
+            context.i32_type().into(),
+        ],
+        false,
+    );
+
+    let landing_pad_result = builder
+        .build_landing_pad(
+            landing_pad_result_type,
+            built_in_values.__gxx_personality_v0.get_inkwell_function(
+                context,
+                execution_engine,
+                module,
+            ),
+            &[context
+                .ptr_type(AddressSpace::default())
+                .const_zero()
+                .into()],
+            false,
+            "landing_pad_result",
+        )
+        .unwrap()
+        .into_struct_value();
+
+    let exception_structure = builder
+        .build_extract_value(landing_pad_result, 0, "exception_structure")
+        .unwrap();
+
+    let exception_object = builder
+        .build_call(
+            built_in_values.__cxa_begin_catch.get_inkwell_function(
+                context,
+                execution_engine,
+                module,
+            ),
+            &[exception_structure.into()],
+            "exception_object",
+        )
+        .unwrap()
+        .try_as_basic_value()
+        .unwrap_left()
+        .into_pointer_value();
+
+    let exception_value = builder
+        .build_load(
+            context.ptr_type(AddressSpace::default()),
+            exception_object,
+            "exception_value",
+        )
+        .unwrap();
+
+    builder
+        .build_call(
+            built_in_values
+                ._print_c_string
+                .get_inkwell_function(context, execution_engine, module),
+            &[exception_value.into()],
+            "",
+        )
+        .unwrap();
+
+    builder
+        .build_call(
+            built_in_values
+                .__cxa_end_catch
+                .get_inkwell_function(context, execution_engine, module),
+            &[],
+            "",
+        )
+        .unwrap();
+
+    let catch_return_value = context.i8_type().const_int(1, false);
+
+    builder.build_return(Some(&catch_return_value)).unwrap();
+
+    let main_may_throw_entry_block = context.append_basic_block(main_may_throw_function, "entry");
+
+    builder.position_at_end(main_may_throw_entry_block);
+
+    let mut scope = JitCompilerScope::new(main_may_throw_entry_block, None);
     let mut function_compiler = JitFunctionCompiler {
         context: &context,
         builder: &builder,
         built_in_values: built_in_values,
         execution_engine: &execution_engine,
-        function: main_function,
+        function: main_may_throw_function,
         module,
     };
 
@@ -282,7 +416,7 @@ fn compile_program<'a>(
 
     if print_to_stderr {
         debug!("Output of the jit_compiler phase:");
-        debug!("{}", main_function.print_to_string().to_string());
+        debug!("{}", module.underlying.print_to_string().to_string());
     }
 
     Ok(unsafe { execution_engine.get_function("main").unwrap() })
@@ -291,7 +425,7 @@ fn compile_program<'a>(
 pub fn compile_and_execute_program(
     program: &TypedProgram,
     print_to_stderr: bool,
-) -> Result<(), CompilationError> {
+) -> Result<u8, CompilationError> {
     let context = Context::create();
     let builder = context.create_builder();
     let mut built_in_values = BuiltInValues::new(&context);
@@ -311,9 +445,5 @@ pub fn compile_and_execute_program(
         print_to_stderr,
     )?;
 
-    unsafe {
-        main_function.call();
-    }
-
-    Ok(())
+    Ok(unsafe { main_function.call() })
 }
