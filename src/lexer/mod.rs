@@ -245,7 +245,7 @@ macro_rules! lexer_function {
 }
 
 lexer_function! { lex_comma, ",", Token::Comma }
-lexer_function! { lex_definition, ":=", Token::Definition }
+lexer_function! { lex_definition, "=", Token::Definition }
 lexer_function! { lex_i8_type, "i8", Token::I8Type }
 lexer_function! { lex_i16_type, "i16", Token::I16Type }
 lexer_function! { lex_i32_type, "i32", Token::I32Type }

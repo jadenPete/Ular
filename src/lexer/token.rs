@@ -9,7 +9,7 @@ use std::{
 /// Grammer:
 /// ```ebnf
 /// COMMA = ",";
-/// DEFINITION = ":=";
+/// DEFINITION = "=";
 /// I8_TYPE = "i8";
 /// I16_TYPE = "i16";
 /// I32_TYPE = "i32";
