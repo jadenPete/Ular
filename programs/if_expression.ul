@@ -1,5 +1,0 @@
-if true {
-	println_number(42);
-} else {
-	println_number(21);
-};

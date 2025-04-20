@@ -1,5 +1,0 @@
-x := 5;
-y := 4;
-z := x * y + 2;
-
-println_number(z);
