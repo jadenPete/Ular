@@ -16,7 +16,7 @@ use nom::{
     error::{ErrorKind, ParseError},
     multi::{many0, separated_list1},
     sequence::{delimited, tuple},
-    IResult, InputIter, Slice,
+    IResult, InputIter, Parser, Slice,
 };
 
 pub struct ParserPhase;
@@ -84,87 +84,87 @@ fn parse_expression(input: Tokens) -> IResult<Tokens, Expression> {
     parse_logical_or(input)
 }
 
-fn parse_logical_or(input: Tokens) -> IResult<Tokens, Expression> {
-    alt((
+fn parse_infix_operation<
+    'a,
+    Term: Parser<Tokens<'a>, Expression, nom::error::Error<Tokens<'a>>> + Copy,
+    Operator: Parser<Tokens<'a>, InfixOperator, nom::error::Error<Tokens<'a>>>,
+    /*
+     * This is needed because many of the parsers returned by nom's combinators don't implement
+     * `Copy` or `Clone`:
+     * https://github.com/rust-bakery/nom/issues/1492
+     */
+    OperatorGenerator: Fn() -> Operator,
+>(
+    parse_term: Term,
+    parse_operator: OperatorGenerator,
+) -> impl FnMut(Tokens<'a>) -> IResult<Tokens<'a>, Expression> {
+    move |input| {
         map(
-            tuple((
-                parse_logical_and,
-                parse_token(Token::LogicalOr),
-                parse_logical_or,
-            )),
-            |(left, _, right)| {
-                Expression::InfixOperation(InfixOperation {
-                    left: Box::new(left),
-                    operator: InfixOperator::LogicalOr,
-                    right: Box::new(right),
-                })
+            /*
+             * nom is left-associative (meaning it evaluates from left to right), so if we parsed
+             * infix operations like this:
+             *
+             * ```
+             * operation = term operator operation;
+             * ```
+             *
+             * then our left-associative operations would be evaluated as if they were
+             * right-associative (from right to left). To get around this, we employ a classic
+             * parsing trick and parse operators like this:
+             *
+             * ```
+             * operation = term (operator operation)*;
+             * ```
+             */
+            tuple((parse_term, many0(tuple((parse_operator(), parse_term))))),
+            |(left, operations)| {
+                let mut result = left;
+
+                for (operator, right) in operations {
+                    result = Expression::InfixOperation(InfixOperation {
+                        left: Box::new(result),
+                        operator,
+                        right: Box::new(right),
+                    });
+                }
+
+                result
             },
-        ),
-        parse_logical_and,
-    ))(input)
+        )(input)
+    }
+}
+
+fn parse_logical_or(input: Tokens) -> IResult<Tokens, Expression> {
+    parse_infix_operation(parse_logical_and, || {
+        map(parse_token(Token::LogicalOr), |_| InfixOperator::LogicalOr)
+    })(input)
 }
 
 fn parse_logical_and(input: Tokens) -> IResult<Tokens, Expression> {
-    alt((
-        map(
-            tuple((parse_sum, parse_token(Token::LogicalAnd), parse_logical_and)),
-            |(left, _, right)| {
-                Expression::InfixOperation(InfixOperation {
-                    left: Box::new(left),
-                    operator: InfixOperator::LogicalAnd,
-                    right: Box::new(right),
-                })
-            },
-        ),
-        parse_sum,
-    ))(input)
+    parse_infix_operation(parse_sum, || {
+        map(parse_token(Token::LogicalAnd), |_| {
+            InfixOperator::LogicalAnd
+        })
+    })(input)
 }
 
 fn parse_sum(input: Tokens) -> IResult<Tokens, Expression> {
-    alt((
-        map(
-            tuple((
-                parse_product,
-                alt((
-                    map(parse_token(Token::Plus), |_| InfixOperator::Addition),
-                    map(parse_token(Token::Minus), |_| InfixOperator::Subtraction),
-                )),
-                parse_sum,
-            )),
-            |(left, operator, right)| {
-                Expression::InfixOperation(InfixOperation {
-                    left: Box::new(left),
-                    operator,
-                    right: Box::new(right),
-                })
-            },
-        ),
-        parse_product,
-    ))(input)
+    parse_infix_operation(parse_product, || {
+        alt((
+            map(parse_token(Token::Plus), |_| InfixOperator::Addition),
+            map(parse_token(Token::Minus), |_| InfixOperator::Subtraction),
+        ))
+    })(input)
 }
 
 fn parse_product(input: Tokens) -> IResult<Tokens, Expression> {
-    alt((
-        map(
-            tuple((
-                parse_prefix_operation,
-                alt((
-                    map(parse_token(Token::Times), |_| InfixOperator::Multiplication),
-                    map(parse_token(Token::Over), |_| InfixOperator::Division),
-                    map(parse_token(Token::Modulo), |_| InfixOperator::Modulo),
-                )),
-                parse_product,
-            )),
-            |(left, operator, right)| {
-                Expression::InfixOperation(InfixOperation {
-                    left: Box::new(left),
-                    operator,
-                    right: Box::new(right),
-                })
-            },
-        ),
-        parse_prefix_operation,
-    ))(input)
+    parse_infix_operation(parse_prefix_operation, || {
+        alt((
+            map(parse_token(Token::Times), |_| InfixOperator::Multiplication),
+            map(parse_token(Token::Over), |_| InfixOperator::Division),
+            map(parse_token(Token::Modulo), |_| InfixOperator::Modulo),
+        ))
+    })(input)
 }
 
 fn parse_prefix_operation(input: Tokens) -> IResult<Tokens, Expression> {

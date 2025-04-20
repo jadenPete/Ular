@@ -8,23 +8,15 @@ use std::fmt::{Debug, Display, Formatter};
 /// statement = variable_definition | expression ';' | ';';
 /// variable_definition = identifier ':=' expression ';';
 /// expression =  logical_or;
-/// logical_or =
-///     | logical_and '||' logical_or
-///     | logical_and;
-///
-/// logical_and =
-///     | sum '&&' logical_and
-///     | sum;
-///
+/// logical_or = logical_and ('||' logical_and)*;
+/// logical_and = sum ('&&' sum)*;
 /// sum =
-/// 	| product '+' sum
-/// 	| product '-' sum
-/// 	| product;
+/// 	| product ('+' product)*
+/// 	| product ('-' product)*;
 ///
 /// product =
-/// 	| prefix_operation '*' product
-/// 	| prefix_operation '/' product
-/// 	| prefix_operation;
+/// 	| prefix_operation ('*' prefix_operation)*
+/// 	| prefix_operation ('/' prefix_operation)*;
 ///
 /// prefix_operation =
 ///     | '!' if
