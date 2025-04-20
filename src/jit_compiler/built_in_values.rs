@@ -1,7 +1,10 @@
-use crate::jit_compiler::{
-    module::UlarModule,
-    scope::LocalName,
-    value::{UlarFunction, UlarValue},
+use crate::{
+    jit_compiler::{
+        module::UlarModule,
+        scope::LocalName,
+        value::{UlarFunction, UlarValue},
+    },
+    parser::program::NumericType,
 };
 
 use inkwell::{
@@ -14,9 +17,12 @@ use inkwell::{
     AddressSpace, GlobalVisibility,
 };
 
+use num::Zero;
 use std::{
     collections::HashMap,
     ffi::{c_char, CString},
+    fmt::Display,
+    ops::Div,
     ptr::null,
 };
 
@@ -248,7 +254,14 @@ pub struct BuiltInValues<'a> {
     pub __cxa_end_catch: BuiltInLinkedFunction<'a>,
     pub __cxa_throw: BuiltInLinkedFunction<'a>,
     pub __gxx_personality_v0: BuiltInLinkedFunction<'a>,
-    pub _divide_number: BuiltInMappedFunction<'a>,
+    pub _divide_i8: BuiltInMappedFunction<'a>,
+    pub _divide_i16: BuiltInMappedFunction<'a>,
+    pub _divide_i32: BuiltInMappedFunction<'a>,
+    pub _divide_i64: BuiltInMappedFunction<'a>,
+    pub _divide_u8: BuiltInMappedFunction<'a>,
+    pub _divide_u16: BuiltInMappedFunction<'a>,
+    pub _divide_u32: BuiltInMappedFunction<'a>,
+    pub _divide_u64: BuiltInMappedFunction<'a>,
     pub _print_c_string: BuiltInMappedFunction<'a>,
 }
 
@@ -271,6 +284,22 @@ impl<'a> BuiltInValues<'a> {
         ))
     }
 
+    pub fn get_division_function_mut(
+        &mut self,
+        numeric_type: NumericType,
+    ) -> &mut BuiltInMappedFunction<'a> {
+        match numeric_type {
+            NumericType::I8 => &mut self._divide_i8,
+            NumericType::I16 => &mut self._divide_i16,
+            NumericType::I32 => &mut self._divide_i32,
+            NumericType::I64 => &mut self._divide_i64,
+            NumericType::U8 => &mut self._divide_u8,
+            NumericType::U16 => &mut self._divide_u16,
+            NumericType::U32 => &mut self._divide_u32,
+            NumericType::U64 => &mut self._divide_u64,
+        }
+    }
+
     pub fn new(context: &'a Context) -> Self {
         let mut referencable_values = HashMap::<String, Box<dyn BuiltInValue>>::new();
 
@@ -288,13 +317,90 @@ impl<'a> BuiltInValues<'a> {
         );
 
         referencable_values.insert(
-            String::from("println_number"),
+            String::from("println_i8"),
             Box::new(BuiltInMappedFunction::new(
-                String::from("println_number"),
+                String::from("println_i8"),
+                context
+                    .void_type()
+                    .fn_type(&[context.i8_type().into()], false),
+                println_display::<i8> as usize,
+            )),
+        );
+
+        referencable_values.insert(
+            String::from("println_i16"),
+            Box::new(BuiltInMappedFunction::new(
+                String::from("println_i16"),
+                context
+                    .void_type()
+                    .fn_type(&[context.i16_type().into()], false),
+                println_display::<i16> as usize,
+            )),
+        );
+
+        referencable_values.insert(
+            String::from("println_i32"),
+            Box::new(BuiltInMappedFunction::new(
+                String::from("println_i32"),
                 context
                     .void_type()
                     .fn_type(&[context.i32_type().into()], false),
-                println_number as usize,
+                println_display::<i32> as usize,
+            )),
+        );
+
+        referencable_values.insert(
+            String::from("println_i64"),
+            Box::new(BuiltInMappedFunction::new(
+                String::from("println_i64"),
+                context
+                    .void_type()
+                    .fn_type(&[context.i64_type().into()], false),
+                println_display::<i64> as usize,
+            )),
+        );
+
+        referencable_values.insert(
+            String::from("println_u8"),
+            Box::new(BuiltInMappedFunction::new(
+                String::from("println_u8"),
+                context
+                    .void_type()
+                    .fn_type(&[context.i8_type().into()], false),
+                println_display::<u8> as usize,
+            )),
+        );
+
+        referencable_values.insert(
+            String::from("println_u16"),
+            Box::new(BuiltInMappedFunction::new(
+                String::from("println_u16"),
+                context
+                    .void_type()
+                    .fn_type(&[context.i16_type().into()], false),
+                println_display::<u16> as usize,
+            )),
+        );
+
+        referencable_values.insert(
+            String::from("println_u32"),
+            Box::new(BuiltInMappedFunction::new(
+                String::from("println_u32"),
+                context
+                    .void_type()
+                    .fn_type(&[context.i32_type().into()], false),
+                println_display::<u32> as usize,
+            )),
+        );
+
+        referencable_values.insert(
+            String::from("println_u64"),
+            Box::new(BuiltInMappedFunction::new(
+                String::from("println_u64"),
+                context
+                    .void_type()
+                    .fn_type(&[context.i64_type().into()], false),
+                println_display::<u64> as usize,
             )),
         );
 
@@ -334,14 +440,14 @@ impl<'a> BuiltInValues<'a> {
             context.i32_type().fn_type(&[], true),
         );
 
-        let _divide_number = BuiltInMappedFunction::new(
-            String::from("_divide_number"),
-            context.i32_type().fn_type(
-                &[context.i32_type().into(), context.i32_type().into()],
-                false,
-            ),
-            _divide_number as usize,
-        );
+        let _divide_i8 = divide_built_in_function::<i8>(context, NumericType::I8);
+        let _divide_i16 = divide_built_in_function::<i16>(context, NumericType::I16);
+        let _divide_i32 = divide_built_in_function::<i32>(context, NumericType::I32);
+        let _divide_i64 = divide_built_in_function::<i64>(context, NumericType::I64);
+        let _divide_u8 = divide_built_in_function::<u8>(context, NumericType::U8);
+        let _divide_u16 = divide_built_in_function::<u16>(context, NumericType::U16);
+        let _divide_u32 = divide_built_in_function::<u32>(context, NumericType::U32);
+        let _divide_u64 = divide_built_in_function::<u64>(context, NumericType::U64);
 
         let _print_c_string = BuiltInMappedFunction::new(
             String::from("_print_c_string"),
@@ -358,7 +464,14 @@ impl<'a> BuiltInValues<'a> {
             __cxa_end_catch,
             __cxa_throw,
             __gxx_personality_v0,
-            _divide_number,
+            _divide_i8,
+            _divide_i16,
+            _divide_i32,
+            _divide_i64,
+            _divide_u8,
+            _divide_u16,
+            _divide_u32,
+            _divide_u64,
             _print_c_string,
         }
     }
@@ -368,12 +481,12 @@ pub extern "C" fn println_bool(value: u8) {
     println!("{}", value == 1);
 }
 
-pub extern "C" fn println_number(value: i32) {
+pub extern "C" fn println_display<A: Display>(value: A) {
     println!("{}", value);
 }
 
-pub extern "C" fn _divide_number(x: i32, y: i32) -> i32 {
-    if y == 0 {
+pub extern "C" fn _divide_number<A: Display + Div<Output = A> + Zero>(x: A, y: A) -> A {
+    if y.is_zero() {
         unsafe {
             let exception_object = __cxa_allocate_exception(std::mem::size_of::<*const str>());
             let exception = CString::new(format!("Attempted to divide {} by zero.", x)).unwrap();
@@ -389,4 +502,21 @@ pub extern "C" fn _divide_number(x: i32, y: i32) -> i32 {
 
 pub extern "C" fn _print_c_string(string: *mut c_char) {
     println!("{}", unsafe { CString::from_raw(string) }.to_str().unwrap());
+}
+
+fn divide_built_in_function<A: Display + Div<Output = A> + Zero>(
+    context: &Context,
+    numeric_type: NumericType,
+) -> BuiltInMappedFunction<'_> {
+    BuiltInMappedFunction::new(
+        format!("_divide_{}", numeric_type),
+        numeric_type.inkwell_type(context).fn_type(
+            &[
+                numeric_type.inkwell_type(context).into(),
+                numeric_type.inkwell_type(context).into(),
+            ],
+            false,
+        ),
+        _divide_number::<A> as usize,
+    )
 }

@@ -10,6 +10,14 @@ use std::{
 /// ```ebnf
 /// COMMA = ",";
 /// DEFINITION = ":=";
+/// I8_TYPE = "i8";
+/// I16_TYPE = "i16";
+/// I32_TYPE = "i32";
+/// I64_TYPE = "i64";
+/// U8_TYPE = "u8";
+/// U16_TYPE = "u8";
+/// U32_TYPE = "u16";
+/// U64_TYPE = "u64";
 /// IF_KEYWORD = "if";
 /// ELSE_KEYWORD = "else";
 /// IDENTIFIER = ?[a-zA-Z_][a-zA-Z0-9_]*?;
@@ -31,6 +39,14 @@ use std::{
 pub enum Token {
     Comma,
     Definition,
+    I8Type,
+    I16Type,
+    I32Type,
+    I64Type,
+    U8Type,
+    U16Type,
+    U32Type,
+    U64Type,
     IfKeyword,
     ElseKeyword,
     Identifier(String),
@@ -44,7 +60,7 @@ pub enum Token {
     Plus,
     Minus,
     Modulo,
-    Number(i32),
+    Number(i128),
     Times,
     Semicolon,
 }

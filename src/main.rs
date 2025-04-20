@@ -73,7 +73,7 @@ fn main() -> std::io::Result<ExitCode> {
         ) {
             Ok(code) => ExitCode::from(code),
             Err(error) => {
-                eprintln!("{}", error);
+                println!("{}", error);
 
                 ExitCode::FAILURE
             }
@@ -83,7 +83,7 @@ fn main() -> std::io::Result<ExitCode> {
 
 fn unwrap_phase_result<Output, Error: Display>(result: Result<Output, Error>) -> Output {
     result.unwrap_or_else(|error| {
-        eprintln!("{}", error);
+        println!("{}", error);
 
         std::process::exit(1)
     })

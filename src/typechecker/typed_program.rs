@@ -1,5 +1,7 @@
-use crate::parser::program::{Identifier, Number, Operator};
-use crate::typechecker::type_::Type;
+use crate::{
+    parser::program::{Identifier, NumericType, Operator},
+    typechecker::type_::Type,
+};
 
 pub trait Typed {
     fn get_type(&self) -> Type;
@@ -113,10 +115,13 @@ impl Typed for TypedIdentifier {
 }
 
 #[derive(Clone, Debug)]
-pub struct TypedNumber(pub Number);
+pub struct TypedNumber {
+    pub value: i128,
+    pub type_: NumericType,
+}
 
 impl Typed for TypedNumber {
     fn get_type(&self) -> Type {
-        Type::Number
+        Type::Numeric(self.type_)
     }
 }

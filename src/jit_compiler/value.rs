@@ -1,4 +1,9 @@
-use crate::{error::CompilationError, jit_compiler::scope::LocalName, typechecker::type_::Type};
+use crate::{
+    error::{CompilationError, InternalError},
+    jit_compiler::scope::LocalName,
+    typechecker::type_::Type,
+};
+
 use either::Either::{Left, Right};
 use inkwell::{
     basic_block::BasicBlock,
@@ -25,7 +30,7 @@ impl<'a> UlarValue<'a> {
     pub fn build_phi(
         context: &'a Context,
         builder: &Builder<'a>,
-        type_: Type,
+        type_: &Type,
         incoming: &[(UlarValue<'a>, BasicBlock<'a>)],
         name: LocalName,
     ) -> Result<UlarValue<'a>, CompilationError> {
@@ -48,7 +53,7 @@ impl<'a> UlarValue<'a> {
 
     fn from_basic_value<A: BasicValue<'a>>(
         context: &'a Context,
-        type_: Type,
+        type_: &Type,
         value: A,
     ) -> Result<Self, CompilationError> {
         let basic_value_enum = value.as_basic_value_enum();
@@ -65,7 +70,7 @@ impl<'a> UlarValue<'a> {
 
     pub fn from_call_site_value(
         context: &'a Context,
-        type_: Type,
+        type_: &Type,
         call_site_value: CallSiteValue<'a>,
     ) -> Result<Self, CompilationError> {
         match call_site_value.try_as_basic_value() {
@@ -88,10 +93,12 @@ impl<'a> TryFrom<UlarValue<'a>> for BasicValueEnum<'a> {
         match value {
             UlarValue::Function(function) => Ok(BasicValueEnum::PointerValue(function.pointer)),
             UlarValue::Int(int_value) => Ok(BasicValueEnum::IntValue(int_value)),
-            UlarValue::Unit => Err(CompilationError::JitCompilerTypeMismatch {
-                expected_type: String::from("BasicValue"),
-                actual_value: format!("{:?}", value),
-            }),
+            UlarValue::Unit => Err(CompilationError::InternalError(
+                InternalError::JitCompilerTypeMismatch {
+                    expected_type: String::from("BasicValue"),
+                    actual_value: format!("{:?}", value),
+                },
+            )),
         }
     }
 }
@@ -102,10 +109,12 @@ impl<'a> TryFrom<UlarValue<'a>> for IntValue<'a> {
     fn try_from(value: UlarValue<'a>) -> Result<Self, Self::Error> {
         match value {
             UlarValue::Int(int_value) => Ok(int_value),
-            _ => Err(CompilationError::JitCompilerTypeMismatch {
-                expected_type: String::from("IntValue"),
-                actual_value: format!("{:?}", value),
-            }),
+            _ => Err(CompilationError::InternalError(
+                InternalError::JitCompilerTypeMismatch {
+                    expected_type: String::from("IntValue"),
+                    actual_value: format!("{:?}", value),
+                },
+            )),
         }
     }
 }
@@ -116,10 +125,12 @@ impl<'a> TryFrom<UlarValue<'a>> for UlarFunction<'a> {
     fn try_from(value: UlarValue<'a>) -> Result<Self, Self::Error> {
         match value {
             UlarValue::Function(function) => Ok(function),
-            _ => Err(CompilationError::JitCompilerTypeMismatch {
-                expected_type: String::from("PointerValue"),
-                actual_value: format!("{:?}", value),
-            }),
+            _ => Err(CompilationError::InternalError(
+                InternalError::JitCompilerTypeMismatch {
+                    expected_type: String::from("PointerValue"),
+                    actual_value: format!("{:?}", value),
+                },
+            )),
         }
     }
 }

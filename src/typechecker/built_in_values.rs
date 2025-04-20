@@ -1,4 +1,7 @@
-use crate::typechecker::type_::{FunctionType, Type};
+use crate::{
+    parser::program::NumericType,
+    typechecker::type_::{FunctionType, Type},
+};
 use std::collections::HashMap;
 
 pub struct BuiltInValues {
@@ -21,13 +24,15 @@ impl BuiltInValues {
             }),
         );
 
-        value_types.insert(
-            String::from("println_number"),
-            Type::Function(FunctionType {
-                parameters: vec![Type::Number],
-                result: Box::new(Type::Unit),
-            }),
-        );
+        for numeric_type in enum_iterator::all::<NumericType>() {
+            value_types.insert(
+                String::from(format!("println_{}", numeric_type)),
+                Type::Function(FunctionType {
+                    parameters: vec![Type::Numeric(numeric_type)],
+                    result: Box::new(Type::Unit),
+                }),
+            );
+        }
 
         value_types.insert(String::from("true"), Type::Boolean);
         value_types.insert(String::from("false"), Type::Boolean);

@@ -7,7 +7,7 @@ use typed_program::TypedBlock;
 
 use crate::{
     error::CompilationError,
-    parser::program::{Identifier, OperatorType},
+    parser::program::{Identifier, Number, NumericType, OperatorType},
     phase::Phase,
     simplifier::simple_program::{
         SimpleBlock, SimpleCall, SimpleExpression, SimpleIf, SimpleInfix, SimpleProgram,
@@ -29,7 +29,11 @@ struct Typechecker<'a> {
 }
 
 impl<'a> Typechecker<'a> {
-    fn typecheck_block(&self, block: &SimpleBlock) -> Result<TypedBlock, CompilationError> {
+    fn typecheck_block(
+        &self,
+        block: &SimpleBlock,
+        suggested_type: Option<&Type>,
+    ) -> Result<TypedBlock, CompilationError> {
         let mut typechecker = Typechecker {
             scope: TypecheckerScope::with_parent(&self.scope),
         };
@@ -41,7 +45,9 @@ impl<'a> Typechecker<'a> {
         }
 
         let typechecked_result = match &block.result {
-            Some(result) => Some(Box::new(typechecker.typecheck_expression(&result)?)),
+            Some(result) => Some(Box::new(
+                typechecker.typecheck_expression(&result, suggested_type)?,
+            )),
             None => None,
         };
 
@@ -68,8 +74,10 @@ impl<'a> Typechecker<'a> {
 
                 let mut typechecked_arguments = Vec::with_capacity(call.arguments.len());
 
-                for argument in &call.arguments {
-                    typechecked_arguments.push(self.typecheck_expression(&argument)?);
+                for (i, argument) in call.arguments.iter().enumerate() {
+                    typechecked_arguments.push(
+                        self.typecheck_expression(&argument, Some(&function_type.parameters[i]))?,
+                    );
                 }
 
                 for i in 0..expected_arguments {
@@ -89,21 +97,25 @@ impl<'a> Typechecker<'a> {
     fn typecheck_expression(
         &self,
         expression: &SimpleExpression,
+        suggested_type: Option<&Type>,
     ) -> Result<TypedExpression, CompilationError> {
         match expression {
-            SimpleExpression::If(if_expression) => {
-                Ok(TypedExpression::If(self.typecheck_if(if_expression)?))
-            }
+            SimpleExpression::If(if_expression) => Ok(TypedExpression::If(
+                self.typecheck_if(if_expression, suggested_type)?,
+            )),
 
-            SimpleExpression::Infix(infix) => {
-                Ok(TypedExpression::Infix(self.typecheck_infix(infix)?))
-            }
+            SimpleExpression::Infix(infix) => Ok(TypedExpression::Infix(
+                self.typecheck_infix(infix, suggested_type)?,
+            )),
+
             SimpleExpression::Call(call) => Ok(TypedExpression::Call(self.typecheck_call(call)?)),
             SimpleExpression::Identifier(identifier) => Ok(TypedExpression::Identifier(
                 self.typecheck_identifier(identifier)?,
             )),
 
-            SimpleExpression::Number(number) => Ok(TypedExpression::Number(TypedNumber(*number))),
+            SimpleExpression::Number(number) => Ok(TypedExpression::Number(
+                self.typecheck_number(number, suggested_type)?,
+            )),
         }
     }
 
@@ -120,13 +132,22 @@ impl<'a> Typechecker<'a> {
             .ok_or_else(|| CompilationError::UnknownValue(identifier.0.clone()))
     }
 
-    fn typecheck_if(&self, if_expression: &SimpleIf) -> Result<TypedIf, CompilationError> {
-        let typechecked_condition = self.typecheck_expression(&if_expression.condition)?;
+    fn typecheck_if(
+        &self,
+        if_expression: &SimpleIf,
+        suggested_type: Option<&Type>,
+    ) -> Result<TypedIf, CompilationError> {
+        let typechecked_condition =
+            self.typecheck_expression(&if_expression.condition, Some(&Type::Boolean))?;
 
         assert_type(&typechecked_condition, &Type::Boolean)?;
 
-        let typechecked_then_block = self.typecheck_block(&if_expression.then_block)?;
-        let typechecked_else_block = self.typecheck_block(&if_expression.else_block)?;
+        let typechecked_then_block =
+            self.typecheck_block(&if_expression.then_block, suggested_type)?;
+
+        let typechecked_else_block =
+            self.typecheck_block(&if_expression.else_block, suggested_type)?;
+
         let type_ = if typechecked_then_block.get_type() == Type::Unit
             || typechecked_else_block.get_type() == Type::Unit
         {
@@ -145,15 +166,19 @@ impl<'a> Typechecker<'a> {
         })
     }
 
-    fn typecheck_infix(&self, infix: &SimpleInfix) -> Result<TypedInfix, CompilationError> {
-        let typechecked_left = self.typecheck_expression(&infix.left)?;
-        let typechecked_right = self.typecheck_expression(&infix.right)?;
+    fn typecheck_infix(
+        &self,
+        infix: &SimpleInfix,
+        suggested_type: Option<&Type>,
+    ) -> Result<TypedInfix, CompilationError> {
+        let typechecked_left = self.typecheck_expression(&infix.left, suggested_type)?;
+        let typechecked_right = self.typecheck_expression(&infix.right, suggested_type)?;
         let type_ = match infix.operator.operator_type() {
             OperatorType::Arithmetic => {
-                assert_type(&typechecked_left, &Type::Number)?;
-                assert_type(&typechecked_right, &Type::Number)?;
+                assert_numeric(&typechecked_left)?;
+                assert_type(&typechecked_right, &typechecked_left.get_type())?;
 
-                Type::Number
+                typechecked_left.get_type()
             }
 
             OperatorType::Logical => {
@@ -172,6 +197,37 @@ impl<'a> Typechecker<'a> {
         })
     }
 
+    fn typecheck_number(
+        &self,
+        number: &Number,
+        suggested_type: Option<&Type>,
+    ) -> Result<TypedNumber, CompilationError> {
+        let result = match (number.suffix, suggested_type) {
+            (Some(suffix), _) => TypedNumber {
+                value: number.value,
+                type_: suffix,
+            },
+
+            (None, Some(Type::Numeric(suggested))) => TypedNumber {
+                value: number.value,
+                type_: suggested.clone(),
+            },
+
+            (None, _) => TypedNumber {
+                value: number.value,
+                type_: NumericType::I32,
+            },
+        };
+
+        if result.type_.is_valid(result.value) {
+            Ok(result)
+        } else {
+            Err(CompilationError::NumberOutOfRange {
+                type_: format!("{}", result.type_),
+            })
+        }
+    }
+
     fn typecheck_statement(
         &mut self,
         statement: &SimpleStatement,
@@ -182,7 +238,7 @@ impl<'a> Typechecker<'a> {
             ),
 
             SimpleStatement::Expression(expression) => Ok(TypedStatement::Expression(
-                self.typecheck_expression(expression)?,
+                self.typecheck_expression(expression, Some(&Type::Unit))?,
             )),
 
             SimpleStatement::NoOp => Ok(TypedStatement::NoOp),
@@ -193,7 +249,7 @@ impl<'a> Typechecker<'a> {
         &mut self,
         definition: &SimpleVariableDefinition,
     ) -> Result<TypedVariableDefinition, CompilationError> {
-        let result = self.typecheck_expression(&definition.value)?;
+        let result = self.typecheck_expression(&definition.value, None)?;
 
         if self
             .scope
@@ -231,6 +287,15 @@ impl Phase<&SimpleProgram, TypedProgram, CompilationError> for TypecheckerPhase 
         }
 
         Ok(TypedProgram { statements })
+    }
+}
+
+fn assert_numeric<A: Typed>(value: &A) -> Result<(), CompilationError> {
+    match value.get_type() {
+        Type::Numeric(_) => Ok(()),
+        type_ => Err(CompilationError::ExpectedNumericType {
+            actual_type: format!("{}", type_),
+        }),
     }
 }
 

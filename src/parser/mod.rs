@@ -3,8 +3,8 @@ pub mod program;
 use crate::{
     lexer::token::{Token, Tokens},
     parser::program::{
-        Block, Call, ElseClause, ElseIfClause, Expression, Identifier, If, Infix, Number, Operator,
-        Program, Statement, VariableDefinition,
+        Block, Call, ElseClause, ElseIfClause, Expression, Identifier, If, Infix, Number,
+        NumericType, Operator, Program, Statement, VariableDefinition,
     },
     phase::Phase,
 };
@@ -277,16 +277,36 @@ fn parse_identifier(input: Tokens) -> IResult<Tokens, Identifier> {
     }
 }
 
-fn parse_number(input: Tokens) -> IResult<Tokens, Number> {
+fn parse_raw_number(input: Tokens) -> IResult<Tokens, i128> {
     let (remaining, token) = take_token(input)?;
 
     match token {
-        Token::Number(value) => Ok((remaining, Number(value))),
+        Token::Number(value) => Ok((remaining, value)),
         _ => Err(nom::Err::Error(nom::error::Error::new(
             input,
             ErrorKind::IsNot,
         ))),
     }
+}
+
+fn parse_number_type(input: Tokens) -> IResult<Tokens, NumericType> {
+    alt((
+        map(parse_token(Token::I8Type), |_| NumericType::I8),
+        map(parse_token(Token::I16Type), |_| NumericType::I16),
+        map(parse_token(Token::I32Type), |_| NumericType::I32),
+        map(parse_token(Token::I64Type), |_| NumericType::I64),
+        map(parse_token(Token::U8Type), |_| NumericType::U8),
+        map(parse_token(Token::U16Type), |_| NumericType::U16),
+        map(parse_token(Token::U32Type), |_| NumericType::U32),
+        map(parse_token(Token::U64Type), |_| NumericType::U64),
+    ))(input)
+}
+
+fn parse_number(input: Tokens) -> IResult<Tokens, Number> {
+    map(
+        tuple((parse_raw_number, opt(parse_number_type))),
+        |(value, suffix)| Number { value, suffix },
+    )(input)
 }
 
 fn take_token(input: Tokens) -> IResult<Tokens, Token> {

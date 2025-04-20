@@ -4,19 +4,19 @@ mod scope;
 mod value;
 
 use crate::{
-    error::CompilationError,
+    error::{CompilationError, InternalError},
     jit_compiler::{
         built_in_values::BuiltInValues,
         module::UlarModule,
         scope::{JitCompilerScope, LocalName},
         value::{UlarFunction, UlarValue},
     },
-    parser::program::Operator,
+    parser::program::{NumericType, Operator},
     typechecker::{
         type_::Type,
         typed_program::{
             Typed, TypedBlock, TypedCall, TypedExpression, TypedIdentifier, TypedIf, TypedInfix,
-            TypedNumber, TypedProgram, TypedStatement,
+            TypedProgram, TypedStatement,
         },
     },
 };
@@ -85,7 +85,7 @@ impl<'a, 'context> JitFunctionCompiler<'a, 'context> {
 
         UlarValue::from_call_site_value(
             &self.context,
-            call.get_type(),
+            &call.get_type(),
             self.builder
                 .build_indirect_call(
                     function.type_,
@@ -107,11 +107,12 @@ impl<'a, 'context> JitFunctionCompiler<'a, 'context> {
             TypedExpression::Identifier(identifier) => self.compile_identifier(scope, identifier),
             TypedExpression::If(if_expression) => self.compile_if_expression(scope, if_expression),
             TypedExpression::Infix(infix) => self.compile_infix(scope, infix),
-            TypedExpression::Number(TypedNumber(number)) => Ok(self
-                .context
-                .i32_type()
-                .const_int(number.0 as u64, true)
-                .into()),
+            TypedExpression::Number(number) => Ok(UlarValue::Int(
+                number
+                    .type_
+                    .inkwell_type(self.context)
+                    .const_int(number.value as u64, number.type_.is_signed()),
+            )),
         }
     }
 
@@ -168,7 +169,7 @@ impl<'a, 'context> JitFunctionCompiler<'a, 'context> {
         UlarValue::build_phi(
             &self.context,
             self.builder,
-            if_expression.type_.clone(),
+            &if_expression.type_,
             &[(then_value, then_block), (else_value, else_block)],
             scope.get_local_name(),
         )
@@ -202,12 +203,35 @@ impl<'a, 'context> JitFunctionCompiler<'a, 'context> {
                 .unwrap()
                 .into()),
 
-            Operator::Division => self.compile_infix_division(name, left_value, right_value),
-            Operator::Modulo => Ok(self
-                .builder
-                .build_int_signed_rem(left_value, right_value, &name.to_string())
+            Operator::Division => match infix.get_type() {
+                Type::Numeric(numeric_type) => {
+                    self.compile_infix_division(name, numeric_type, left_value, right_value)
+                }
+
+                type_ => Err(CompilationError::InternalError(
+                    InternalError::JitCompilerExpectedNumericType {
+                        actual_type: format!("{}", type_),
+                    },
+                )),
+            },
+
+            Operator::Modulo => match infix.get_type() {
+                Type::Numeric(numeric_type) => Ok(if numeric_type.is_signed() {
+                    self.builder
+                        .build_int_signed_rem(left_value, right_value, &name.to_string())
+                } else {
+                    self.builder
+                        .build_int_signed_rem(left_value, right_value, &name.to_string())
+                }
                 .unwrap()
                 .into()),
+
+                type_ => Err(CompilationError::InternalError(
+                    InternalError::JitCompilerExpectedNumericType {
+                        actual_type: format!("{}", type_),
+                    },
+                )),
+            },
 
             Operator::LogicalAnd => Ok(self
                 .builder
@@ -226,18 +250,18 @@ impl<'a, 'context> JitFunctionCompiler<'a, 'context> {
     fn compile_infix_division(
         &mut self,
         name: LocalName,
+        numeric_type: NumericType,
         left_value: IntValue<'context>,
         right_value: IntValue<'context>,
     ) -> Result<UlarValue<'context>, CompilationError> {
-        let division_function = self.built_in_values._divide_number.get_inkwell_function(
-            self.context,
-            self.execution_engine,
-            self.module,
-        );
+        let division_function = self
+            .built_in_values
+            .get_division_function_mut(numeric_type)
+            .get_inkwell_function(self.context, self.execution_engine, self.module);
 
         UlarValue::from_call_site_value(
             &self.context,
-            Type::Number,
+            &Type::Numeric(numeric_type),
             self.builder
                 .build_call(
                     division_function,

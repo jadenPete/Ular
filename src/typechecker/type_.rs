@@ -1,4 +1,4 @@
-use crate::error::CompilationError;
+use crate::{error::CompilationError, parser::program::NumericType};
 use inkwell::{
     context::Context,
     types::{BasicType, BasicTypeEnum},
@@ -10,7 +10,7 @@ use std::fmt::{Debug, Display};
 pub enum Type {
     Boolean,
     Function(FunctionType),
-    Number,
+    Numeric(NumericType),
     Unit,
 }
 
@@ -22,7 +22,7 @@ impl Type {
                 context.ptr_type(AddressSpace::default()),
             )),
 
-            Self::Number => Some(BasicTypeEnum::IntType(context.i32_type())),
+            Self::Numeric(type_) => Some(BasicTypeEnum::IntType(type_.inkwell_type(context))),
             Self::Unit => None,
         }
     }
@@ -50,7 +50,7 @@ impl Debug for Type {
                 write!(formatter, " -> {:?}", function.result)
             }
 
-            Self::Number => write!(formatter, "number"),
+            Self::Numeric(numeric_type) => write!(formatter, "{}", numeric_type),
             Self::Unit => write!(formatter, "unit"),
         }
     }

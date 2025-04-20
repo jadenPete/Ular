@@ -13,9 +13,9 @@ fn addition_works() -> anyhow::Result<()> {
     let output = evaluate_program(
         &format!(
             "\
-println_number({min} + 0);
-println_number({min} + 1);
-println_number({min} + {max});
+println_i32({min} + 0);
+println_i32({min} + 1);
+println_i32({min} + {max});
 ",
             min = i32::MIN,
             max = i32::MAX,
@@ -44,15 +44,15 @@ fn subtraction_works() -> anyhow::Result<()> {
     // Subtract combinations of a negative number, the additive identity, and a positive number
     let output = evaluate_program(
         "\
-println_number(-1 - -1);
-println_number(-1 - 0);
-println_number(-1 - 1);
-println_number(0 - -1);
-println_number(0 - 0);
-println_number(0 - 1);
-println_number(1 - -1);
-println_number(1 - 0);
-println_number(1 - 1);
+println_i32(-1 - -1);
+println_i32(-1 - 0);
+println_i32(-1 - 1);
+println_i32(0 - -1);
+println_i32(0 - 0);
+println_i32(0 - 1);
+println_i32(1 - -1);
+println_i32(1 - 0);
+println_i32(1 - 1);
 ",
         true,
     )?;
@@ -86,10 +86,10 @@ fn multiplication_works() -> anyhow::Result<()> {
      */
     let output = evaluate_program(
         "\
-println_number(-2 * -2);
-println_number(-2 * 0);
-println_number(-2 * 1);
-println_number(-2 * 2);
+println_i32(-2 * -2);
+println_i32(-2 * 0);
+println_i32(-2 * 1);
+println_i32(-2 * 2);
 ",
         true,
     )?;
@@ -120,16 +120,16 @@ fn division_works() -> anyhow::Result<()> {
 
     let output = evaluate_program(
         "\
-println_number(-4 / -8);
-println_number(-4 / -2);
-println_number(-4 / 1);
-println_number(-4 / 2);
-println_number(-4 / 8);
-println_number(4 / -8);
-println_number(4 / -2);
-println_number(4 / 1);
-println_number(4 / 2);
-println_number(4 / 8);
+println_i32(-4 / -8);
+println_i32(-4 / -2);
+println_i32(-4 / 1);
+println_i32(-4 / 2);
+println_i32(-4 / 8);
+println_i32(4 / -8);
+println_i32(4 / -2);
+println_i32(4 / 1);
+println_i32(4 / 2);
+println_i32(4 / 8);
 ",
         true,
     )?;
@@ -155,7 +155,30 @@ println_number(4 / 8);
 
 #[test]
 fn divide_by_zero() -> anyhow::Result<()> {
-    evaluate_program("1 / 0;", false)?;
+    let output = evaluate_program("1 / 0;", false)?;
+
+    assert_eq!(output, "Attempted to divide 1 by zero.\n");
+
+    Ok(())
+}
+
+#[test]
+fn out_of_range_checking() -> anyhow::Result<()> {
+    let output = evaluate_program("256u8;", false)?;
+
+    assert_eq!(output, "Literal out of range for type `u8`.\n");
+
+    Ok(())
+}
+
+#[test]
+fn heterogenous_arithmetic_prohibited() -> anyhow::Result<()> {
+    let output = evaluate_program("4u16 / 2u8;", false)?;
+
+    assert_eq!(
+        output,
+        "Expected a value of type `u16`, but got one of type `u8`.\n"
+    );
 
     Ok(())
 }

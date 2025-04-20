@@ -246,6 +246,14 @@ macro_rules! lexer_function {
 
 lexer_function! { lex_comma, ",", Token::Comma }
 lexer_function! { lex_definition, ":=", Token::Definition }
+lexer_function! { lex_i8_type, "i8", Token::I8Type }
+lexer_function! { lex_i16_type, "i16", Token::I16Type }
+lexer_function! { lex_i32_type, "i32", Token::I32Type }
+lexer_function! { lex_i64_type, "i64", Token::I64Type }
+lexer_function! { lex_u8_type, "u8", Token::U8Type }
+lexer_function! { lex_u16_type, "u16", Token::U16Type }
+lexer_function! { lex_u32_type, "u32", Token::U32Type }
+lexer_function! { lex_u64_type, "u64", Token::U64Type }
 lexer_function! { lex_if_keyword, "if", Token::IfKeyword }
 lexer_function! { lex_else_keyword, "else", Token::ElseKeyword }
 lexer_function! { lex_left_curly_bracket, "{", Token::LeftCurlyBracket }
@@ -279,7 +287,7 @@ fn lex_identifier(input: PositionedSource) -> IResult<PositionedSource, Position
 
 fn lex_number(input: PositionedSource) -> IResult<PositionedSource, PositionedToken> {
     map(
-        consumed(nom::character::complete::i32::<PositionedSource, _>),
+        consumed(nom::character::complete::i128::<PositionedSource, _>),
         |(consumed, value)| PositionedToken {
             token: Token::Number(value),
             start: consumed.index,
@@ -290,24 +298,37 @@ fn lex_number(input: PositionedSource) -> IResult<PositionedSource, PositionedTo
 
 fn lex_token(input: PositionedSource) -> IResult<PositionedSource, PositionedToken> {
     alt((
-        lex_comma,
-        lex_definition,
-        lex_if_keyword,
-        lex_else_keyword,
-        lex_identifier,
-        lex_left_curly_bracket,
-        lex_right_curly_bracket,
-        lex_left_parenthesis,
-        lex_right_parenthesis,
-        lex_logical_and,
-        lex_logical_or,
-        lex_modulo,
-        lex_number,
-        lex_minus, // This needs to come after `lex_number` so signs aren't interpreted as operators
-        lex_over,
-        lex_plus,
-        lex_semicolon,
-        lex_times,
+        alt((
+            lex_comma,
+            lex_definition,
+            lex_i8_type,
+            lex_i16_type,
+            lex_i32_type,
+            lex_i64_type,
+            lex_u8_type,
+            lex_u16_type,
+            lex_u32_type,
+            lex_u64_type,
+            lex_if_keyword,
+            lex_else_keyword,
+            lex_identifier,
+            lex_left_curly_bracket,
+            lex_right_curly_bracket,
+            lex_left_parenthesis,
+            lex_right_parenthesis,
+            lex_logical_and,
+            lex_logical_or,
+            lex_modulo,
+            lex_number,
+        )),
+        alt((
+            // This needs to come after `lex_number` so signs aren't interpreted as operators
+            lex_minus,
+            lex_over,
+            lex_plus,
+            lex_semicolon,
+            lex_times,
+        )),
     ))(input)
 }
 
