@@ -3,23 +3,23 @@ mod scope;
 pub mod type_;
 pub mod typed_program;
 
-use typed_program::TypedBlock;
-
 use crate::{
     error::CompilationError,
     parser::program::{Identifier, Number, NumericType, OperatorType},
     phase::Phase,
     simplifier::simple_program::{
-        SimpleBlock, SimpleCall, SimpleExpression, SimpleIf, SimpleInfix, SimpleProgram,
-        SimpleStatement, SimpleVariableDefinition,
+        SimpleBlock, SimpleCall, SimpleExpression, SimpleIf, SimpleInfixOperation,
+        SimplePrefixOperation, SimplePrefixOperator, SimpleProgram, SimpleStatement,
+        SimpleVariableDefinition,
     },
     typechecker::{
         built_in_values::BuiltInValues,
         scope::TypecheckerScope,
         type_::Type,
         typed_program::{
-            Typed, TypedCall, TypedExpression, TypedIdentifier, TypedIf, TypedInfix, TypedNumber,
-            TypedProgram, TypedStatement, TypedVariableDefinition,
+            Typed, TypedBlock, TypedCall, TypedExpression, TypedIdentifier, TypedIf,
+            TypedInfixOperation, TypedNumber, TypedPrefixOperation, TypedProgram, TypedStatement,
+            TypedVariableDefinition,
         },
     },
 };
@@ -104,9 +104,11 @@ impl<'a> Typechecker<'a> {
                 self.typecheck_if(if_expression, suggested_type)?,
             )),
 
-            SimpleExpression::Infix(infix) => Ok(TypedExpression::Infix(
-                self.typecheck_infix(infix, suggested_type)?,
-            )),
+            SimpleExpression::InfixOperation(infix_operation) => {
+                Ok(TypedExpression::InfixOperation(
+                    self.typecheck_infix_operation(infix_operation, suggested_type)?,
+                ))
+            }
 
             SimpleExpression::Call(call) => Ok(TypedExpression::Call(self.typecheck_call(call)?)),
             SimpleExpression::Identifier(identifier) => Ok(TypedExpression::Identifier(
@@ -116,6 +118,12 @@ impl<'a> Typechecker<'a> {
             SimpleExpression::Number(number) => Ok(TypedExpression::Number(
                 self.typecheck_number(number, suggested_type)?,
             )),
+
+            SimpleExpression::PrefixOperation(prefix_operation) => {
+                Ok(TypedExpression::PrefixOperation(
+                    self.typecheck_prefix_operation(prefix_operation, suggested_type)?,
+                ))
+            }
         }
     }
 
@@ -166,14 +174,16 @@ impl<'a> Typechecker<'a> {
         })
     }
 
-    fn typecheck_infix(
+    fn typecheck_infix_operation(
         &self,
-        infix: &SimpleInfix,
+        infix_operation: &SimpleInfixOperation,
         suggested_type: Option<&Type>,
-    ) -> Result<TypedInfix, CompilationError> {
-        let typechecked_left = self.typecheck_expression(&infix.left, suggested_type)?;
-        let typechecked_right = self.typecheck_expression(&infix.right, suggested_type)?;
-        let type_ = match infix.operator.operator_type() {
+    ) -> Result<TypedInfixOperation, CompilationError> {
+        let typechecked_left = self.typecheck_expression(&infix_operation.left, suggested_type)?;
+        let typechecked_right =
+            self.typecheck_expression(&infix_operation.right, suggested_type)?;
+
+        let type_ = match infix_operation.operator.operator_type() {
             OperatorType::Arithmetic => {
                 assert_numeric(&typechecked_left)?;
                 assert_type(&typechecked_right, &typechecked_left.get_type())?;
@@ -189,9 +199,9 @@ impl<'a> Typechecker<'a> {
             }
         };
 
-        Ok(TypedInfix {
+        Ok(TypedInfixOperation {
             left: Box::new(typechecked_left),
-            operator: infix.operator,
+            operator: infix_operation.operator,
             right: Box::new(typechecked_right),
             type_,
         })
@@ -226,6 +236,29 @@ impl<'a> Typechecker<'a> {
                 type_: format!("{}", result.type_),
             })
         }
+    }
+
+    fn typecheck_prefix_operation(
+        &self,
+        prefix_operation: &SimplePrefixOperation,
+        suggested_type: Option<&Type>,
+    ) -> Result<TypedPrefixOperation, CompilationError> {
+        let typechecked_expression =
+            self.typecheck_expression(&prefix_operation.expression, suggested_type)?;
+
+        let type_ = match prefix_operation.operator {
+            SimplePrefixOperator::Not => {
+                assert_type(&typechecked_expression, &Type::Boolean)?;
+
+                Type::Boolean
+            }
+        };
+
+        Ok(TypedPrefixOperation {
+            operator: prefix_operation.operator,
+            expression: Box::new(typechecked_expression),
+            type_,
+        })
     }
 
     fn typecheck_statement(

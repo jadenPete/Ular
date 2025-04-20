@@ -1,5 +1,6 @@
 use crate::{
-    parser::program::{Identifier, NumericType, Operator},
+    parser::program::{Identifier, InfixOperator, NumericType},
+    simplifier::simple_program::SimplePrefixOperator,
     typechecker::type_::Type,
 };
 
@@ -28,20 +29,22 @@ pub struct TypedVariableDefinition {
 #[derive(Clone, Debug)]
 pub enum TypedExpression {
     If(TypedIf),
-    Infix(TypedInfix),
+    InfixOperation(TypedInfixOperation),
     Call(TypedCall),
     Identifier(TypedIdentifier),
     Number(TypedNumber),
+    PrefixOperation(TypedPrefixOperation),
 }
 
 impl Typed for TypedExpression {
     fn get_type(&self) -> Type {
         match self {
             TypedExpression::If(if_expression) => if_expression.get_type(),
-            TypedExpression::Infix(infix) => infix.get_type(),
+            TypedExpression::InfixOperation(infix_operation) => infix_operation.get_type(),
             TypedExpression::Call(call) => call.get_type(),
             TypedExpression::Identifier(identifier) => identifier.get_type(),
             TypedExpression::Number(number) => number.get_type(),
+            TypedExpression::PrefixOperation(prefix_operation) => prefix_operation.get_type(),
         }
     }
 }
@@ -76,14 +79,27 @@ impl Typed for TypedBlock {
 }
 
 #[derive(Clone, Debug)]
-pub struct TypedInfix {
+pub struct TypedInfixOperation {
     pub left: Box<TypedExpression>,
-    pub operator: Operator,
+    pub operator: InfixOperator,
     pub right: Box<TypedExpression>,
     pub type_: Type,
 }
 
-impl Typed for TypedInfix {
+impl Typed for TypedInfixOperation {
+    fn get_type(&self) -> Type {
+        self.type_.clone()
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct TypedPrefixOperation {
+    pub operator: SimplePrefixOperator,
+    pub expression: Box<TypedExpression>,
+    pub type_: Type,
+}
+
+impl Typed for TypedPrefixOperation {
     fn get_type(&self) -> Type {
         self.type_.clone()
     }

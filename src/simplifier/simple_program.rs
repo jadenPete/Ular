@@ -1,4 +1,4 @@
-use crate::parser::program::{Identifier, Number, Operator};
+use crate::parser::program::{Identifier, InfixOperator, Number};
 
 #[derive(Debug)]
 pub struct SimpleProgram {
@@ -21,10 +21,11 @@ pub struct SimpleVariableDefinition {
 #[derive(Debug)]
 pub enum SimpleExpression {
     If(SimpleIf),
-    Infix(SimpleInfix),
+    InfixOperation(SimpleInfixOperation),
     Call(SimpleCall),
     Identifier(Identifier),
     Number(Number),
+    PrefixOperation(SimplePrefixOperation),
 }
 
 #[derive(Debug)]
@@ -41,10 +42,21 @@ pub struct SimpleBlock {
 }
 
 #[derive(Debug)]
-pub struct SimpleInfix {
+pub struct SimpleInfixOperation {
     pub left: Box<SimpleExpression>,
-    pub operator: Operator,
+    pub operator: InfixOperator,
     pub right: Box<SimpleExpression>,
+}
+
+#[derive(Debug)]
+pub struct SimplePrefixOperation {
+    pub operator: SimplePrefixOperator,
+    pub expression: Box<SimpleExpression>,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub enum SimplePrefixOperator {
+    Not,
 }
 
 #[derive(Debug)]

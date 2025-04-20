@@ -1,11 +1,16 @@
 pub mod simple_program;
 
+use simple_program::SimplePrefixOperator;
+
 use crate::{
-    parser::program::{Block, Call, Expression, If, Infix, Program, Statement, VariableDefinition},
+    parser::program::{
+        Block, Call, Expression, If, InfixOperation, InfixOperator, Number, PrefixOperation,
+        PrefixOperator, Program, Statement, VariableDefinition,
+    },
     phase::Phase,
     simplifier::simple_program::{
-        SimpleBlock, SimpleCall, SimpleExpression, SimpleIf, SimpleInfix, SimpleProgram,
-        SimpleStatement, SimpleVariableDefinition,
+        SimpleBlock, SimpleCall, SimpleExpression, SimpleIf, SimpleInfixOperation,
+        SimplePrefixOperation, SimpleProgram, SimpleStatement, SimpleVariableDefinition,
     },
 };
 
@@ -41,10 +46,16 @@ fn simplify_call(call: &Call) -> SimpleCall {
 fn simplify_expression(expression: &Expression) -> SimpleExpression {
     match expression {
         Expression::If(if_expression) => SimpleExpression::If(simplify_if(if_expression)),
-        Expression::Infix(infix) => SimpleExpression::Infix(simplify_infix(infix)),
+        Expression::InfixOperation(infix_operation) => {
+            SimpleExpression::InfixOperation(simplify_infix_operation(infix_operation))
+        }
+
         Expression::Call(call) => SimpleExpression::Call(simplify_call(call)),
         Expression::Identifier(identifier) => SimpleExpression::Identifier(identifier.clone()),
         Expression::Number(number) => SimpleExpression::Number(number.clone()),
+        Expression::PrefixOperation(prefix_operation) => {
+            simplify_prefix_operation(prefix_operation)
+        }
     }
 }
 
@@ -89,11 +100,31 @@ fn simplify_if(if_expression: &If) -> SimpleIf {
     }
 }
 
-pub fn simplify_infix(infix: &Infix) -> SimpleInfix {
-    SimpleInfix {
-        left: Box::new(simplify_expression(&infix.left)),
-        operator: infix.operator,
-        right: Box::new(simplify_expression(&infix.right)),
+fn simplify_infix_operation(infix_operation: &InfixOperation) -> SimpleInfixOperation {
+    SimpleInfixOperation {
+        left: Box::new(simplify_expression(&infix_operation.left)),
+        operator: infix_operation.operator,
+        right: Box::new(simplify_expression(&infix_operation.right)),
+    }
+}
+
+fn simplify_prefix_operation(prefix_operation: &PrefixOperation) -> SimpleExpression {
+    let simple_expression = Box::new(simplify_expression(&prefix_operation.expression));
+
+    match prefix_operation.operator {
+        PrefixOperator::Negate => SimpleExpression::InfixOperation(SimpleInfixOperation {
+            left: simple_expression,
+            operator: InfixOperator::Multiplication,
+            right: Box::new(SimpleExpression::Number(Number {
+                value: -1,
+                suffix: None,
+            })),
+        }),
+
+        PrefixOperator::Not => SimpleExpression::PrefixOperation(SimplePrefixOperation {
+            operator: SimplePrefixOperator::Not,
+            expression: simple_expression,
+        }),
     }
 }
 

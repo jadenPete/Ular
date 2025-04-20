@@ -11,12 +11,13 @@ use crate::{
         scope::{JitCompilerScope, LocalName},
         value::{UlarFunction, UlarValue},
     },
-    parser::program::{NumericType, Operator},
+    parser::program::{InfixOperator, NumericType},
+    simplifier::simple_program::SimplePrefixOperator,
     typechecker::{
         type_::Type,
         typed_program::{
-            Typed, TypedBlock, TypedCall, TypedExpression, TypedIdentifier, TypedIf, TypedInfix,
-            TypedProgram, TypedStatement,
+            Typed, TypedBlock, TypedCall, TypedExpression, TypedIdentifier, TypedIf,
+            TypedInfixOperation, TypedPrefixOperation, TypedProgram, TypedStatement,
         },
     },
 };
@@ -106,13 +107,20 @@ impl<'a, 'context> JitFunctionCompiler<'a, 'context> {
             TypedExpression::Call(call) => self.compile_call(scope, call),
             TypedExpression::Identifier(identifier) => self.compile_identifier(scope, identifier),
             TypedExpression::If(if_expression) => self.compile_if_expression(scope, if_expression),
-            TypedExpression::Infix(infix) => self.compile_infix(scope, infix),
+            TypedExpression::InfixOperation(infix_operation) => {
+                self.compile_infix_operation(scope, infix_operation)
+            }
+
             TypedExpression::Number(number) => Ok(UlarValue::Int(
                 number
                     .type_
                     .inkwell_type(self.context)
                     .const_int(number.value as u64, number.type_.is_signed()),
             )),
+
+            TypedExpression::PrefixOperation(prefix_operation) => {
+                self.compile_prefix_operation(scope, prefix_operation)
+            }
         }
     }
 
@@ -175,35 +183,41 @@ impl<'a, 'context> JitFunctionCompiler<'a, 'context> {
         )
     }
 
-    fn compile_infix(
+    fn compile_infix_operation(
         &mut self,
         scope: &mut JitCompilerScope<'_, 'context>,
-        infix: &TypedInfix,
+        infix_operation: &TypedInfixOperation,
     ) -> Result<UlarValue<'context>, CompilationError> {
-        let left_value: IntValue = self.compile_expression(scope, &infix.left)?.try_into()?;
-        let right_value: IntValue = self.compile_expression(scope, &infix.right)?.try_into()?;
+        let left_value: IntValue = self
+            .compile_expression(scope, &infix_operation.left)?
+            .try_into()?;
+
+        let right_value: IntValue = self
+            .compile_expression(scope, &infix_operation.right)?
+            .try_into()?;
+
         let name = scope.get_local_name();
 
-        match infix.operator {
-            Operator::Addition => Ok(self
+        match infix_operation.operator {
+            InfixOperator::Addition => Ok(self
                 .builder
                 .build_int_add(left_value, right_value, &name.to_string())
                 .unwrap()
                 .into()),
 
-            Operator::Subtraction => Ok(self
+            InfixOperator::Subtraction => Ok(self
                 .builder
                 .build_int_sub(left_value, right_value, &name.to_string())
                 .unwrap()
                 .into()),
 
-            Operator::Multiplication => Ok(self
+            InfixOperator::Multiplication => Ok(self
                 .builder
                 .build_int_mul(left_value, right_value, &name.to_string())
                 .unwrap()
                 .into()),
 
-            Operator::Division => match infix.get_type() {
+            InfixOperator::Division => match infix_operation.get_type() {
                 Type::Numeric(numeric_type) => {
                     self.compile_infix_division(name, numeric_type, left_value, right_value)
                 }
@@ -215,7 +229,7 @@ impl<'a, 'context> JitFunctionCompiler<'a, 'context> {
                 )),
             },
 
-            Operator::Modulo => match infix.get_type() {
+            InfixOperator::Modulo => match infix_operation.get_type() {
                 Type::Numeric(numeric_type) => Ok(if numeric_type.is_signed() {
                     self.builder
                         .build_int_signed_rem(left_value, right_value, &name.to_string())
@@ -233,13 +247,13 @@ impl<'a, 'context> JitFunctionCompiler<'a, 'context> {
                 )),
             },
 
-            Operator::LogicalAnd => Ok(self
+            InfixOperator::LogicalAnd => Ok(self
                 .builder
                 .build_and(left_value, right_value, &name.to_string())
                 .unwrap()
                 .into()),
 
-            Operator::LogicalOr => Ok(self
+            InfixOperator::LogicalOr => Ok(self
                 .builder
                 .build_or(left_value, right_value, &name.to_string())
                 .unwrap()
@@ -270,6 +284,27 @@ impl<'a, 'context> JitFunctionCompiler<'a, 'context> {
                 )
                 .unwrap(),
         )
+    }
+
+    fn compile_prefix_operation(
+        &mut self,
+        scope: &mut JitCompilerScope<'_, 'context>,
+        prefix_operation: &TypedPrefixOperation,
+    ) -> Result<UlarValue<'context>, CompilationError> {
+        let expression = self.compile_expression(scope, &prefix_operation.expression)?;
+        let name = scope.get_local_name();
+
+        match prefix_operation.operator {
+            SimplePrefixOperator::Not => Ok(self
+                .builder
+                .build_xor(
+                    TryInto::<IntValue>::try_into(expression)?,
+                    self.context.i8_type().const_int(1, false),
+                    &name.to_string(),
+                )
+                .unwrap()
+                .into()),
+        }
     }
 
     fn compile_statement(

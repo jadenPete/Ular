@@ -262,6 +262,7 @@ lexer_function! { lex_left_parenthesis, "(", Token::LeftParenthesis }
 lexer_function! { lex_right_parenthesis, ")", Token::RightParenthesis }
 lexer_function! { lex_logical_and, "&&", Token::LogicalAnd }
 lexer_function! { lex_logical_or, "||", Token::LogicalOr }
+lexer_function! { lex_not, "!", Token::Not }
 lexer_function! { lex_over, "/", Token::Over }
 lexer_function! { lex_plus, "+", Token::Plus }
 lexer_function! { lex_minus, "-", Token::Minus }
@@ -319,9 +320,10 @@ fn lex_token(input: PositionedSource) -> IResult<PositionedSource, PositionedTok
             lex_logical_and,
             lex_logical_or,
             lex_modulo,
-            lex_number,
+            lex_not,
         )),
         alt((
+            lex_number,
             // This needs to come after `lex_number` so signs aren't interpreted as operators
             lex_minus,
             lex_over,

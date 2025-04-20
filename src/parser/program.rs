@@ -7,14 +7,7 @@ use std::fmt::{Debug, Display, Formatter};
 /// program = statement*;
 /// statement = variable_definition | expression ';' | ';';
 /// variable_definition = identifier ':=' expression ';';
-/// expression = if;
-/// if =
-///     | 'if' expression block else_if_clause* else_clause?
-///     | logical_or;
-///
-/// else_if_clause = 'else' 'if' expression block;
-/// else_clause = 'else' block;
-/// block = '{' statement* expression? '}';
+/// expression =  logical_or;
 /// logical_or =
 ///     | logical_and '||' logical_or
 ///     | logical_and;
@@ -29,10 +22,22 @@ use std::fmt::{Debug, Display, Formatter};
 /// 	| product;
 ///
 /// product =
-/// 	| call '*' product
-/// 	| call '/' product
-/// 	| call;
+/// 	| prefix_operation '*' product
+/// 	| prefix_operation '/' product
+/// 	| prefix_operation;
 ///
+/// prefix_operation =
+///     | '!' if
+///     | '-' if
+///     | if;
+///
+/// if =
+///     | 'if' expression block else_if_clause* else_clause?
+///     | call;
+///
+/// else_if_clause = 'else' 'if' expression block;
+/// else_clause = 'else' block;
+/// block = '{' statement* expression? '}';
 /// call =
 /// 	| identifier '(' (expression ',')* expression ')'
 /// 	| primary
@@ -40,6 +45,7 @@ use std::fmt::{Debug, Display, Formatter};
 /// primary =
 /// 	| identifier
 /// 	| number;
+///     | '(' expression ')';
 ///
 /// identifier = IDENTIFIER;
 /// number = NUMBER number_type?;
@@ -66,10 +72,11 @@ pub struct VariableDefinition {
 #[derive(Debug)]
 pub enum Expression {
     If(If),
-    Infix(Infix),
+    InfixOperation(InfixOperation),
     Call(Call),
     Identifier(Identifier),
     Number(Number),
+    PrefixOperation(PrefixOperation),
 }
 
 #[derive(Debug)]
@@ -98,14 +105,14 @@ pub struct Block {
 }
 
 #[derive(Debug)]
-pub struct Infix {
+pub struct InfixOperation {
     pub left: Box<Expression>,
-    pub operator: Operator,
+    pub operator: InfixOperator,
     pub right: Box<Expression>,
 }
 
 #[derive(Clone, Copy, Debug)]
-pub enum Operator {
+pub enum InfixOperator {
     Addition,
     Subtraction,
     Multiplication,
@@ -115,16 +122,16 @@ pub enum Operator {
     LogicalOr,
 }
 
-impl Operator {
+impl InfixOperator {
     pub fn operator_type(self) -> OperatorType {
         match self {
-            Operator::Addition
-            | Operator::Subtraction
-            | Operator::Multiplication
-            | Operator::Division
-            | Operator::Modulo => OperatorType::Arithmetic,
+            Self::Addition
+            | Self::Subtraction
+            | Self::Multiplication
+            | Self::Division
+            | Self::Modulo => OperatorType::Arithmetic,
 
-            Operator::LogicalAnd | Operator::LogicalOr => OperatorType::Logical,
+            Self::LogicalAnd | Self::LogicalOr => OperatorType::Logical,
         }
     }
 }
@@ -133,6 +140,18 @@ impl Operator {
 pub enum OperatorType {
     Arithmetic,
     Logical,
+}
+
+#[derive(Debug)]
+pub struct PrefixOperation {
+    pub operator: PrefixOperator,
+    pub expression: Box<Expression>,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub enum PrefixOperator {
+    Negate,
+    Not,
 }
 
 #[derive(Debug)]

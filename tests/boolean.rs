@@ -35,3 +35,33 @@ println_bool(true || true);
 
     Ok(())
 }
+
+#[test]
+fn not_works() -> anyhow::Result<()> {
+    let output = evaluate_program(
+        "\
+println_bool(!false);
+println_bool(!true);
+",
+        true,
+    )?;
+
+    assert_eq!(output, "true\nfalse\n");
+
+    Ok(())
+}
+
+#[test]
+fn operator_precedence_works() -> anyhow::Result<()> {
+    let output = evaluate_program(
+        "\
+println_bool(!false || true);
+println_bool(!false && true);
+",
+        true,
+    )?;
+
+    assert_eq!(output, "true\ntrue\n");
+
+    Ok(())
+}

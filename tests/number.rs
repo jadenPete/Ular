@@ -182,3 +182,78 @@ fn heterogenous_arithmetic_prohibited() -> anyhow::Result<()> {
 
     Ok(())
 }
+
+#[test]
+fn negation_works() -> anyhow::Result<()> {
+    let output = evaluate_program(
+        "\
+println_i32(---5);
+println_i32(-(3 + 4));
+println_i32(--5 * 4);
+println_i32(-if true { 5 } else { -5 });
+",
+        true,
+    )?;
+
+    assert_eq!(
+        output,
+        "\
+-5
+-7
+20
+-5
+"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn operator_precedence_works() -> anyhow::Result<()> {
+    let output = evaluate_program(
+        "\
+println_i32(3 + 4 * 2);
+println_i32(10 - 6 / 2);
+println_i32(8 + 9 % 4);
+println_i32(20 / 4 * 2 % 3);
+println_i32(5 + 12 / 4 * 2 - 3 % 2);
+",
+        true,
+    )?;
+
+    assert_eq!(
+        output,
+        "\
+11
+7
+9
+1
+10
+"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn operator_associativity_works() -> anyhow::Result<()> {
+    let output = evaluate_program(
+        "\
+println_i32(20 - 5 - 2);
+println_i32(8 / 2 / 2);
+println_i32(18 % 5 % 2);
+",
+        true,
+    )?;
+
+    assert_eq!(
+        output,
+        "\
+13
+2
+1
+"
+    );
+
+    Ok(())
+}

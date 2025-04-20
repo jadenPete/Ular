@@ -27,6 +27,7 @@ use std::{
 /// RIGHT_PARENTHESIS = ")";
 /// LOGICAL_AND = "&&";
 /// LOGICAL_OR = "||";
+/// NOT = "!";
 /// OVER = "/";
 /// PLUS = "+";
 /// MINUS = "-";
@@ -56,6 +57,7 @@ pub enum Token {
     RightParenthesis,
     LogicalAnd,
     LogicalOr,
+    Not,
     Over,
     Plus,
     Minus,

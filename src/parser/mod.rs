@@ -3,8 +3,9 @@ pub mod program;
 use crate::{
     lexer::token::{Token, Tokens},
     parser::program::{
-        Block, Call, ElseClause, ElseIfClause, Expression, Identifier, If, Infix, Number,
-        NumericType, Operator, Program, Statement, VariableDefinition,
+        Block, Call, ElseClause, ElseIfClause, Expression, Identifier, If, InfixOperation,
+        InfixOperator, Number, NumericType, PrefixOperation, PrefixOperator, Program, Statement,
+        VariableDefinition,
     },
     phase::Phase,
 };
@@ -14,7 +15,7 @@ use nom::{
     combinator::{eof, map, opt},
     error::{ErrorKind, ParseError},
     multi::{many0, separated_list1},
-    sequence::tuple,
+    sequence::{delimited, tuple},
     IResult, InputIter, Slice,
 };
 
@@ -92,9 +93,9 @@ fn parse_logical_or(input: Tokens) -> IResult<Tokens, Expression> {
                 parse_logical_or,
             )),
             |(left, _, right)| {
-                Expression::Infix(Infix {
+                Expression::InfixOperation(InfixOperation {
                     left: Box::new(left),
-                    operator: Operator::LogicalOr,
+                    operator: InfixOperator::LogicalOr,
                     right: Box::new(right),
                 })
             },
@@ -108,9 +109,9 @@ fn parse_logical_and(input: Tokens) -> IResult<Tokens, Expression> {
         map(
             tuple((parse_sum, parse_token(Token::LogicalAnd), parse_logical_and)),
             |(left, _, right)| {
-                Expression::Infix(Infix {
+                Expression::InfixOperation(InfixOperation {
                     left: Box::new(left),
-                    operator: Operator::LogicalAnd,
+                    operator: InfixOperator::LogicalAnd,
                     right: Box::new(right),
                 })
             },
@@ -119,59 +120,70 @@ fn parse_logical_and(input: Tokens) -> IResult<Tokens, Expression> {
     ))(input)
 }
 
-fn parse_plus_or_minus(
-    operator_token: Token,
-    operator: Operator,
-) -> impl Fn(Tokens) -> IResult<Tokens, Expression> {
-    move |input| {
+fn parse_sum(input: Tokens) -> IResult<Tokens, Expression> {
+    alt((
         map(
             tuple((
                 parse_product,
-                parse_token(operator_token.clone()),
+                alt((
+                    map(parse_token(Token::Plus), |_| InfixOperator::Addition),
+                    map(parse_token(Token::Minus), |_| InfixOperator::Subtraction),
+                )),
                 parse_sum,
             )),
-            |(left, _, right)| {
-                Expression::Infix(Infix {
+            |(left, operator, right)| {
+                Expression::InfixOperation(InfixOperation {
                     left: Box::new(left),
                     operator,
                     right: Box::new(right),
                 })
             },
-        )(input)
-    }
-}
-
-fn parse_sum(input: Tokens) -> IResult<Tokens, Expression> {
-    alt((
-        parse_plus_or_minus(Token::Plus, Operator::Addition),
-        parse_plus_or_minus(Token::Minus, Operator::Subtraction),
+        ),
         parse_product,
     ))(input)
 }
 
-fn parse_times_or_over_or_modulo(
-    operator_token: Token,
-    operator: Operator,
-) -> impl Fn(Tokens) -> IResult<Tokens, Expression> {
-    move |input| {
+fn parse_product(input: Tokens) -> IResult<Tokens, Expression> {
+    alt((
         map(
-            tuple((parse_if, parse_token(operator_token.clone()), parse_product)),
-            |(left, _, right)| {
-                Expression::Infix(Infix {
+            tuple((
+                parse_prefix_operation,
+                alt((
+                    map(parse_token(Token::Times), |_| InfixOperator::Multiplication),
+                    map(parse_token(Token::Over), |_| InfixOperator::Division),
+                    map(parse_token(Token::Modulo), |_| InfixOperator::Modulo),
+                )),
+                parse_product,
+            )),
+            |(left, operator, right)| {
+                Expression::InfixOperation(InfixOperation {
                     left: Box::new(left),
                     operator,
                     right: Box::new(right),
                 })
             },
-        )(input)
-    }
+        ),
+        parse_prefix_operation,
+    ))(input)
 }
 
-fn parse_product(input: Tokens) -> IResult<Tokens, Expression> {
+fn parse_prefix_operation(input: Tokens) -> IResult<Tokens, Expression> {
     alt((
-        parse_times_or_over_or_modulo(Token::Times, Operator::Multiplication),
-        parse_times_or_over_or_modulo(Token::Over, Operator::Division),
-        parse_times_or_over_or_modulo(Token::Modulo, Operator::Modulo),
+        map(
+            tuple((
+                alt((
+                    map(parse_token(Token::Minus), |_| PrefixOperator::Negate),
+                    map(parse_token(Token::Not), |_| PrefixOperator::Not),
+                )),
+                parse_prefix_operation,
+            )),
+            |(operator, expression)| {
+                Expression::PrefixOperation(PrefixOperation {
+                    operator,
+                    expression: Box::new(expression),
+                })
+            },
+        ),
         parse_if,
     ))(input)
 }
@@ -262,6 +274,11 @@ fn parse_primary(input: Tokens) -> IResult<Tokens, Expression> {
             Expression::Identifier(identifier)
         }),
         map(parse_number, |number| Expression::Number(number)),
+        delimited(
+            parse_token(Token::LeftParenthesis),
+            parse_expression,
+            parse_token(Token::RightParenthesis),
+        ),
     ))(input)
 }
 
