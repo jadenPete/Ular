@@ -10,7 +10,7 @@ use nom::{
     bytes::complete::tag,
     character::complete::{multispace0, satisfy},
     combinator::{consumed, eof, map, recognize},
-    error::ParseError,
+    error::{ErrorKind, ParseError},
     multi::many0,
     sequence::{delimited, tuple},
     AsChar, Compare, CompareResult, IResult, InputIter, InputLength, InputTake,
@@ -26,6 +26,16 @@ use std::{
 struct PositionedSource<'a> {
     source: &'a str,
     index: usize,
+}
+
+impl<'a> PositionedSource<'a> {
+    fn to_positioned_token(&self, token: Token) -> PositionedToken {
+        PositionedToken {
+            token,
+            start: self.index,
+            end: self.index + self.source.len(),
+        }
+    }
 }
 
 impl<'a, A> Compare<A> for PositionedSource<'a>
@@ -228,118 +238,113 @@ impl<'a> InputTakeAtPosition for PositionedSource<'a> {
     }
 }
 
-macro_rules! lexer_function {
-    ($function_name: ident, $tag_string: literal, $token: expr) => {
-        fn $function_name<'a>(
-            input: PositionedSource<'a>,
-        ) -> IResult<PositionedSource<'a>, PositionedToken> {
-            map(recognize(tag($tag_string)), |consumed: PositionedSource| {
-                PositionedToken {
-                    token: $token,
-                    start: consumed.index,
-                    end: consumed.index + consumed.source.len(),
-                }
-            })(input)
-        }
-    };
+fn lex_identifier_like(input: PositionedSource) -> IResult<PositionedSource, PositionedSource> {
+    recognize(tuple((
+        satisfy(|character| character.is_alpha() || character == '_'),
+        many0(satisfy(|character| {
+            character.is_alphanumeric() || character == '_'
+        })),
+    )))(input)
 }
 
-lexer_function! { lex_arrow, "=>", Token::Arrow }
-lexer_function! { lex_comma, ",", Token::Comma }
-lexer_function! { lex_definition, "=", Token::Definition }
-lexer_function! { lex_fn_keyword, "fn", Token::FnKeyword}
-lexer_function! { lex_i8_type, "i8", Token::I8Type }
-lexer_function! { lex_i16_type, "i16", Token::I16Type }
-lexer_function! { lex_i32_type, "i32", Token::I32Type }
-lexer_function! { lex_i64_type, "i64", Token::I64Type }
-lexer_function! { lex_u8_type, "u8", Token::U8Type }
-lexer_function! { lex_u16_type, "u16", Token::U16Type }
-lexer_function! { lex_u32_type, "u32", Token::U32Type }
-lexer_function! { lex_u64_type, "u64", Token::U64Type }
-lexer_function! { lex_bool_type, "bool", Token::BoolType }
-lexer_function! { lex_unit_type, "unit", Token::UnitType }
-lexer_function! { lex_if_keyword, "if", Token::IfKeyword }
-lexer_function! { lex_else_keyword, "else", Token::ElseKeyword }
-lexer_function! { lex_left_curly_bracket, "{", Token::LeftCurlyBracket }
-lexer_function! { lex_right_curly_bracket, "}", Token::RightCurlyBracket }
-lexer_function! { lex_left_parenthesis, "(", Token::LeftParenthesis }
-lexer_function! { lex_right_parenthesis, ")", Token::RightParenthesis }
-lexer_function! { lex_logical_and, "&&", Token::LogicalAnd }
-lexer_function! { lex_logical_or, "||", Token::LogicalOr }
-lexer_function! { lex_not, "!", Token::Not }
-lexer_function! { lex_over, "/", Token::Over }
-lexer_function! { lex_plus, "+", Token::Plus }
-lexer_function! { lex_minus, "-", Token::Minus }
-lexer_function! { lex_modulo, "%", Token::Modulo }
-lexer_function! { lex_times, "*", Token::Times }
-lexer_function! { lex_semicolon, ";", Token::Semicolon }
-lexer_function! { lex_type_annotation, ":", Token::TypeAnnotation }
-
 fn lex_identifier(input: PositionedSource) -> IResult<PositionedSource, PositionedToken> {
-    map(
-        recognize(tuple((
-            satisfy(|character| character.is_alpha() || character == '_'),
-            many0(satisfy(|character| {
-                character.is_alphanumeric() || character == '_'
-            })),
-        ))),
-        |consumed: PositionedSource<'_>| PositionedToken {
-            token: Token::Identifier(String::from(consumed.source)),
-            start: consumed.index,
-            end: consumed.index + consumed.source.len(),
-        },
-    )(input)
+    map(lex_identifier_like, |consumed: PositionedSource<'_>| {
+        consumed.to_positioned_token(Token::Identifier(String::from(consumed.source)))
+    })(input)
+}
+
+/*
+ * Both this function and `lex_static_token` match against a provided string.
+ *
+ * The difference between this function and `lex_static_token` is that this one pulls an entire
+ * "identifier-like" string instead of just matching on `content` so that substrings like "boolean"
+ * aren't falsly interpreted as a keyword ("bool") plus an identifier ("ean").
+ */
+fn lex_keyword<'a>(
+    content: &'a str,
+    token: Token,
+) -> impl Fn(PositionedSource<'a>) -> IResult<PositionedSource<'a>, PositionedToken> {
+    move |input| {
+        /*
+         * We pull an entire "identifier-like" string instead of just matching on `content` so that
+         * substrings like "boolean" aren't falsly interpreted as a keyword ("bool") plus an
+         * identifier ("ean").
+         */
+        let (remaining, consumed) = lex_identifier_like(input)?;
+
+        if consumed.source == content {
+            Ok((remaining, consumed.to_positioned_token(token.clone())))
+        } else {
+            Err(nom::Err::Error(nom::error::Error::from_error_kind(
+                consumed,
+                ErrorKind::Tag,
+            )))
+        }
+    }
 }
 
 fn lex_number(input: PositionedSource) -> IResult<PositionedSource, PositionedToken> {
     map(
         consumed(nom::character::complete::i128::<PositionedSource, _>),
-        |(consumed, value)| PositionedToken {
-            token: Token::Number(value),
-            start: consumed.index,
-            end: consumed.index + consumed.source.len(),
-        },
+        |(consumed, value)| consumed.to_positioned_token(Token::Number(value)),
     )(input)
+}
+
+/*
+ * Both this function and `lex_keyword` match against a provided string.
+ *
+ * The difference between this function and `lex_keyword` is that this one only matches against
+ * `content` and doesn't pull any additional characters before validating that the characters
+ * consumed match `content`.
+ */
+fn lex_static_token<'a>(
+    content: &'a str,
+    token: Token,
+) -> impl FnMut(PositionedSource<'a>) -> IResult<PositionedSource<'a>, PositionedToken> {
+    map(
+        recognize(tag(content)),
+        move |consumed: PositionedSource| consumed.to_positioned_token(token.clone()),
+    )
 }
 
 fn lex_token(input: PositionedSource) -> IResult<PositionedSource, PositionedToken> {
     alt((
         alt((
-            lex_arrow,
-            lex_comma,
-            lex_definition,
-            lex_fn_keyword,
-            lex_i8_type,
-            lex_i16_type,
-            lex_i32_type,
-            lex_i64_type,
-            lex_u8_type,
-            lex_u16_type,
-            lex_u32_type,
-            lex_u64_type,
-            lex_bool_type,
-            lex_unit_type,
-            lex_if_keyword,
-            lex_else_keyword,
+            lex_static_token("=>", Token::Arrow),
+            lex_static_token(",", Token::Comma),
+            lex_static_token("=", Token::Definition),
+            lex_keyword("fn", Token::FnKeyword),
+            lex_keyword("i8", Token::I8Type),
+            lex_keyword("i16", Token::I16Type),
+            lex_keyword("i32", Token::I32Type),
+            lex_keyword("i64", Token::I64Type),
+            lex_keyword("u8", Token::U8Type),
+            lex_keyword("u16", Token::U16Type),
+            lex_keyword("u32", Token::U32Type),
+            lex_keyword("u64", Token::U64Type),
+            lex_keyword("bool", Token::BoolType),
+            lex_keyword("unit", Token::UnitType),
+            lex_keyword("if", Token::IfKeyword),
+            lex_keyword("else", Token::ElseKeyword),
             lex_identifier,
-            lex_left_curly_bracket,
-            lex_right_curly_bracket,
-            lex_left_parenthesis,
-            lex_right_parenthesis,
+            lex_static_token("{", Token::LeftCurlyBracket),
+            lex_static_token("}", Token::RightCurlyBracket),
+            lex_static_token("(", Token::LeftParenthesis),
+            lex_static_token(")", Token::RightParenthesis),
         )),
         alt((
-            lex_logical_and,
-            lex_logical_or,
-            lex_modulo,
-            lex_not,
+            lex_static_token("&&", Token::LogicalAnd),
+            lex_static_token("||", Token::LogicalOr),
+            lex_static_token("%", Token::Modulo),
+            lex_static_token("!", Token::Not),
             lex_number,
             // This needs to come after `lex_number` so signs aren't interpreted as operators
-            lex_minus,
-            lex_over,
-            lex_plus,
-            lex_times,
-            lex_semicolon,
-            lex_type_annotation,
+            lex_static_token("-", Token::Minus),
+            lex_static_token("/", Token::Over),
+            lex_static_token("+", Token::Plus),
+            lex_static_token("*", Token::Times),
+            lex_static_token(";", Token::Semicolon),
+            lex_static_token(":", Token::TypeAnnotation),
         )),
     ))(input)
 }
