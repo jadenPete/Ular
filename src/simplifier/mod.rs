@@ -1,16 +1,18 @@
 pub mod simple_program;
 
-use simple_program::SimplePrefixOperator;
-
 use crate::{
-    parser::program::{
-        Block, Call, Expression, If, InfixOperation, InfixOperator, Number, PrefixOperation,
-        PrefixOperator, Program, Statement, VariableDefinition,
+    parser::{
+        program::{
+            Block, Call, Expression, FunctionDefinition, If, InfixOperation, InfixOperator, Number,
+            PrefixOperation, PrefixOperator, Program, Statement, VariableDefinition,
+        },
+        type_::Type,
     },
     phase::Phase,
     simplifier::simple_program::{
-        SimpleBlock, SimpleCall, SimpleExpression, SimpleIf, SimpleInfixOperation,
-        SimplePrefixOperation, SimpleProgram, SimpleStatement, SimpleVariableDefinition,
+        SimpleBlock, SimpleCall, SimpleExpression, SimpleFunctionDefinition, SimpleIf,
+        SimpleInfixOperation, SimplePrefixOperation, SimplePrefixOperator, SimpleProgram,
+        SimpleStatement, SimpleVariableDefinition,
     },
 };
 
@@ -56,6 +58,16 @@ fn simplify_expression(expression: &Expression) -> SimpleExpression {
         Expression::PrefixOperation(prefix_operation) => {
             simplify_prefix_operation(prefix_operation)
         }
+    }
+}
+
+fn simplify_function_definition(definition: &FunctionDefinition) -> SimpleFunctionDefinition {
+    SimpleFunctionDefinition {
+        name: definition.name.clone(),
+        parameters: definition.parameters.clone(),
+        return_type: definition.return_type.clone().unwrap_or(Type::Unit),
+
+        body: simplify_block(&definition.body),
     }
 }
 
@@ -138,6 +150,10 @@ fn simplify_statement(statement: &Statement) -> SimpleStatement {
     match statement {
         Statement::Expression(expression) => {
             SimpleStatement::Expression(simplify_expression(expression))
+        }
+
+        Statement::FunctionDefinition(definition) => {
+            SimpleStatement::FunctionDefinition(simplify_function_definition(definition))
         }
 
         Statement::VariableDefinition(definition) => {

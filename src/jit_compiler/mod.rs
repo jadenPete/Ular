@@ -11,14 +11,14 @@ use crate::{
         scope::{JitCompilerScope, LocalName},
         value::{UlarFunction, UlarValue},
     },
-    parser::program::{InfixOperator, NumericType},
+    parser::{
+        program::InfixOperator,
+        type_::{NumericType, Type},
+    },
     simplifier::simple_program::SimplePrefixOperator,
-    typechecker::{
-        type_::Type,
-        typed_program::{
-            Typed, TypedBlock, TypedCall, TypedExpression, TypedIdentifier, TypedIf,
-            TypedInfixOperation, TypedPrefixOperation, TypedProgram, TypedStatement,
-        },
+    typechecker::typed_program::{
+        Typed, TypedBlock, TypedCall, TypedExpression, TypedFunctionDefinition, TypedIdentifier,
+        TypedIf, TypedInfixOperation, TypedPrefixOperation, TypedProgram, TypedStatement,
     },
 };
 
@@ -28,7 +28,7 @@ use inkwell::{
     builder::Builder,
     context::Context,
     execution_engine::{ExecutionEngine, JitFunction},
-    values::{BasicMetadataValueEnum, FunctionValue, IntValue},
+    values::{BasicMetadataValueEnum, BasicValueEnum, FunctionValue, IntValue},
     AddressSpace, OptimizationLevel,
 };
 
@@ -59,9 +59,7 @@ impl<'a, 'context> JitFunctionCompiler<'a, 'context> {
         block: &TypedBlock,
     ) -> Result<UlarValue<'context>, CompilationError> {
         scope.with_child(basic_block, |child_scope| {
-            for statement in &block.statements {
-                self.compile_statement(child_scope, statement)?;
-            }
+            self.compile_statements_with_functions_hoisted(child_scope, &block.statements)?;
 
             match &block.result {
                 Some(result) => self.compile_expression(child_scope, result),
@@ -84,18 +82,22 @@ impl<'a, 'context> JitFunctionCompiler<'a, 'context> {
             argument_values.push(argument_value.into());
         }
 
-        UlarValue::from_call_site_value(
-            &self.context,
-            &call.get_type(),
-            self.builder
-                .build_indirect_call(
-                    function.type_,
-                    function.pointer,
+        let name = scope.get_local_name();
+        let call_result =
+            match function {
+                UlarFunction::DirectReference(inkwell_function) => self.builder.build_direct_call(
+                    inkwell_function,
                     &argument_values,
-                    &scope.get_local_name().to_string(),
-                )
-                .unwrap(),
-        )
+                    &name.to_string(),
+                ),
+
+                UlarFunction::IndirectReference { pointer, type_ } => self
+                    .builder
+                    .build_indirect_call(type_, pointer, &argument_values, &name.to_string()),
+            }
+            .unwrap();
+
+        UlarValue::from_call_site_value(&self.context, &call.get_type(), call_result)
     }
 
     fn compile_expression(
@@ -121,6 +123,93 @@ impl<'a, 'context> JitFunctionCompiler<'a, 'context> {
             TypedExpression::PrefixOperation(prefix_operation) => {
                 self.compile_prefix_operation(scope, prefix_operation)
             }
+        }
+    }
+
+    fn compile_function_definition(
+        &mut self,
+        scope: &mut JitCompilerScope<'_, 'context>,
+        definition: &TypedFunctionDefinition,
+    ) -> Result<(), CompilationError> {
+        if scope.has_parent() {
+            Err(CompilationError::NestedFunctionsNotSupported)
+        } else {
+            let local_name = scope.get_local_name();
+            let function = match scope.get_variable_value(
+                &definition.name.0,
+                local_name,
+                self.context,
+                self.builder,
+                self.built_in_values,
+                self.execution_engine,
+                self.module,
+            ) {
+                Some(UlarValue::Function(UlarFunction::DirectReference(inkwell_function))) => {
+                    inkwell_function
+                }
+
+                _ => {
+                    return Err(CompilationError::InternalError(
+                        InternalError::JitCompilerFunctionNotHoisted,
+                    ))
+                }
+            };
+
+            let entry_block = self.context.append_basic_block(function, "entry");
+            let mut function_scope = JitCompilerScope::new(entry_block, Some(scope));
+
+            for (definition_parameter, function_parameter) in
+                definition.parameters.iter().zip(function.get_param_iter())
+            {
+                function_scope.declare_variable(
+                    definition_parameter.underlying.0.clone(),
+                    UlarValue::from_basic_value(
+                        self.context,
+                        &definition_parameter.get_type(),
+                        function_parameter,
+                    )?,
+                );
+            }
+
+            let mut function_compiler = JitFunctionCompiler {
+                context: self.context,
+
+                /*
+                 * Before we compile the function, the position of `self.builder` is unknown. We
+                 * need to compile it with its own builder so we don't have to reset
+                 * `self.builder`'s to its position before we began compiling the function, which is
+                 * impossible insofar as I'm aware.
+                 */
+                builder: &self.context.create_builder(),
+                built_in_values: self.built_in_values,
+                function,
+                execution_engine: self.execution_engine,
+                module: self.module,
+            };
+
+            function_compiler.builder.position_at_end(entry_block);
+            function_compiler.compile_statements_with_functions_hoisted(
+                &mut function_scope,
+                &definition.body.statements,
+            )?;
+
+            let result_value = match &definition.body.result {
+                Some(result_expression) => BasicValueEnum::try_from(
+                    function_compiler
+                        .compile_expression(&mut function_scope, &result_expression)?,
+                )
+                .ok(),
+
+                None => None,
+            };
+
+            match result_value {
+                Some(value) => function_compiler.builder.build_return(Some(&value)),
+                None => function_compiler.builder.build_return(None),
+            }
+            .unwrap();
+
+            Ok(())
         }
     }
 
@@ -317,6 +406,10 @@ impl<'a, 'context> JitFunctionCompiler<'a, 'context> {
                 self.compile_expression(scope, expression)?;
             }
 
+            TypedStatement::FunctionDefinition(definition) => {
+                self.compile_function_definition(scope, definition)?;
+            }
+
             TypedStatement::VariableDefinition(definition) => {
                 let value = self.compile_expression(scope, &definition.value)?;
 
@@ -332,11 +425,54 @@ impl<'a, 'context> JitFunctionCompiler<'a, 'context> {
 
         Ok(())
     }
+
+    fn compile_statements_with_functions_hoisted(
+        &mut self,
+        scope: &mut JitCompilerScope<'_, 'context>,
+        statements: &[TypedStatement],
+    ) -> Result<(), CompilationError> {
+        for statement in statements {
+            if let TypedStatement::FunctionDefinition(definition) = statement {
+                let function_type = definition.type_.inkwell_type(self.context)?;
+                let function =
+                    self.module
+                        .underlying
+                        .add_function(&definition.name.0, function_type, None);
+
+                if scope.declare_variable(
+                    definition.name.0.clone(),
+                    UlarValue::Function(UlarFunction::DirectReference(function)),
+                ) {
+                    return Err(CompilationError::VariableAlreadyDefined(
+                        definition.name.0.clone(),
+                    ));
+                }
+            }
+        }
+
+        /*
+         * Typecheck the functions first, so they don't yet have access to global variables.
+         * Functions capturing their environment (i.e. closures) aren't yet supported.
+         */
+        for statement in statements {
+            if let TypedStatement::FunctionDefinition(definition) = statement {
+                self.compile_function_definition(scope, definition)?;
+            }
+        }
+
+        for statement in statements {
+            if let TypedStatement::FunctionDefinition(_) = statement {
+            } else {
+                self.compile_statement(scope, statement)?;
+            }
+        }
+
+        Ok(())
+    }
 }
 
 fn compile_program<'a>(
     context: &'a Context,
-    builder: &Builder<'a>,
     built_in_values: &mut BuiltInValues<'a>,
     module: &mut UlarModule<'a>,
     execution_engine: &ExecutionEngine<'a>,
@@ -357,6 +493,7 @@ fn compile_program<'a>(
     let main_entry_block = context.append_basic_block(main_function, "entry");
     let main_then_block = context.append_basic_block(main_function, "then");
     let main_catch_block = context.append_basic_block(main_function, "catch");
+    let builder = context.create_builder();
 
     builder.position_at_end(main_entry_block);
     builder
@@ -467,9 +604,7 @@ fn compile_program<'a>(
         module,
     };
 
-    for statement in program.statements.iter() {
-        function_compiler.compile_statement(&mut scope, &statement)?;
-    }
+    function_compiler.compile_statements_with_functions_hoisted(&mut scope, &program.statements)?;
 
     builder.build_return(None).unwrap();
 
@@ -486,7 +621,6 @@ pub fn compile_and_execute_program(
     print_to_stderr: bool,
 ) -> Result<u8, CompilationError> {
     let context = Context::create();
-    let builder = context.create_builder();
     let mut built_in_values = BuiltInValues::new(&context);
     let mut module: UlarModule = context.create_module("main").into();
     let execution_engine = module
@@ -496,7 +630,6 @@ pub fn compile_and_execute_program(
 
     let main_function = compile_program(
         &context,
-        &builder,
         &mut built_in_values,
         &mut module,
         &execution_engine,

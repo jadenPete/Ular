@@ -1,11 +1,15 @@
 pub mod program;
+pub mod type_;
 
 use crate::{
     lexer::token::{Token, Tokens},
-    parser::program::{
-        Block, Call, ElseClause, ElseIfClause, Expression, Identifier, If, InfixOperation,
-        InfixOperator, Number, NumericType, PrefixOperation, PrefixOperator, Program, Statement,
-        VariableDefinition,
+    parser::{
+        program::{
+            Block, Call, ElseClause, ElseIfClause, Expression, FunctionDefinition, Identifier, If,
+            InfixOperation, InfixOperator, Number, Parameter, PrefixOperation, PrefixOperator,
+            Program, Statement, VariableDefinition,
+        },
+        type_::{FunctionType, NumericType, Type},
     },
     phase::Phase,
 };
@@ -14,7 +18,7 @@ use nom::{
     branch::alt,
     combinator::{eof, map, opt},
     error::{ErrorKind, ParseError},
-    multi::{many0, separated_list1},
+    multi::{many0, separated_list0},
     sequence::{delimited, tuple},
     IResult, InputIter, Parser, Slice,
 };
@@ -60,6 +64,9 @@ fn parse_statement(input: Tokens) -> IResult<Tokens, Statement> {
         map(parse_variable_definition, |definition| {
             Statement::VariableDefinition(definition)
         }),
+        map(parse_function_definition, |definition| {
+            Statement::FunctionDefinition(definition)
+        }),
         map(
             tuple((parse_expression, parse_token(Token::Semicolon))),
             |(expression, _)| Statement::Expression(expression),
@@ -77,6 +84,111 @@ fn parse_variable_definition(input: Tokens) -> IResult<Tokens, VariableDefinitio
             parse_token(Token::Semicolon),
         )),
         |(name, _, value, _)| VariableDefinition { name, value },
+    )(input)
+}
+
+fn parse_function_definition(input: Tokens) -> IResult<Tokens, FunctionDefinition> {
+    map(
+        tuple((
+            parse_token(Token::FnKeyword),
+            parse_identifier,
+            parse_token(Token::LeftParenthesis),
+            separated_list0(parse_token(Token::Comma), parse_parameter),
+            parse_token(Token::RightParenthesis),
+            opt(map(
+                tuple((parse_token(Token::TypeAnnotation), parse_type)),
+                |(_, return_type)| return_type,
+            )),
+            parse_block,
+        )),
+        |(_, name, _, parameters, _, return_type, body)| FunctionDefinition {
+            name,
+            parameters,
+            return_type,
+            body,
+        },
+    )(input)
+}
+
+fn parse_parameter(input: Tokens) -> IResult<Tokens, Parameter> {
+    map(
+        tuple((
+            parse_identifier,
+            parse_token(Token::TypeAnnotation),
+            parse_type,
+        )),
+        |(name, _, type_)| Parameter { name, type_ },
+    )(input)
+}
+
+fn parse_type(input: Tokens) -> IResult<Tokens, Type> {
+    parse_function_type(input)
+}
+
+fn parse_function_type(input: Tokens) -> IResult<Tokens, Type> {
+    alt((
+        map(
+            tuple((
+                alt((
+                    map(parse_primary_type, |parameter| vec![parameter]),
+                    map(
+                        tuple((
+                            parse_token(Token::LeftParenthesis),
+                            separated_list0(parse_token(Token::Comma), parse_type),
+                            parse_token(Token::RightParenthesis),
+                        )),
+                        |(_, parameters, _)| parameters,
+                    ),
+                )),
+                parse_token(Token::Arrow),
+                parse_type,
+            )),
+            |(parameters, _, return_type)| {
+                Type::Function(FunctionType {
+                    parameters,
+                    return_type: Box::new(return_type),
+                })
+            },
+        ),
+        parse_primary_type,
+    ))(input)
+}
+
+fn parse_primary_type(input: Tokens) -> IResult<Tokens, Type> {
+    alt((
+        map(parse_numeric_type, |numeric_type| {
+            Type::Numeric(numeric_type)
+        }),
+        map(parse_token(Token::BoolType), |_| Type::Bool),
+        map(parse_token(Token::UnitType), |_| Type::Unit),
+    ))(input)
+}
+
+fn parse_numeric_type(input: Tokens) -> IResult<Tokens, NumericType> {
+    alt((
+        map(parse_token(Token::I8Type), |_| NumericType::I8),
+        map(parse_token(Token::I16Type), |_| NumericType::I16),
+        map(parse_token(Token::I32Type), |_| NumericType::I32),
+        map(parse_token(Token::I64Type), |_| NumericType::I64),
+        map(parse_token(Token::U8Type), |_| NumericType::U8),
+        map(parse_token(Token::U16Type), |_| NumericType::U16),
+        map(parse_token(Token::U32Type), |_| NumericType::U32),
+        map(parse_token(Token::U64Type), |_| NumericType::U64),
+    ))(input)
+}
+
+fn parse_block(input: Tokens) -> IResult<Tokens, Block> {
+    map(
+        tuple((
+            parse_token(Token::LeftCurlyBracket),
+            many0(parse_statement),
+            opt(parse_expression),
+            parse_token(Token::RightCurlyBracket),
+        )),
+        |(_, statements, result, _)| Block {
+            statements,
+            result: result.map(Box::new),
+        },
     )(input)
 }
 
@@ -188,21 +300,6 @@ fn parse_prefix_operation(input: Tokens) -> IResult<Tokens, Expression> {
     ))(input)
 }
 
-fn parse_block(input: Tokens) -> IResult<Tokens, Block> {
-    map(
-        tuple((
-            parse_token(Token::LeftCurlyBracket),
-            many0(parse_statement),
-            opt(parse_expression),
-            parse_token(Token::RightCurlyBracket),
-        )),
-        |(_, statements, result, _)| Block {
-            statements,
-            result: result.map(Box::new),
-        },
-    )(input)
-}
-
 fn parse_else_if_clause(input: Tokens) -> IResult<Tokens, ElseIfClause> {
     map(
         tuple((
@@ -254,7 +351,7 @@ fn parse_call(input: Tokens) -> IResult<Tokens, Expression> {
             tuple((
                 parse_identifier,
                 parse_token(Token::LeftParenthesis),
-                separated_list1(parse_token(Token::Comma), parse_expression),
+                separated_list0(parse_token(Token::Comma), parse_expression),
                 parse_token(Token::RightParenthesis),
             )),
             |(function, _, arguments, _)| {
@@ -306,22 +403,9 @@ fn parse_raw_number(input: Tokens) -> IResult<Tokens, i128> {
     }
 }
 
-fn parse_number_type(input: Tokens) -> IResult<Tokens, NumericType> {
-    alt((
-        map(parse_token(Token::I8Type), |_| NumericType::I8),
-        map(parse_token(Token::I16Type), |_| NumericType::I16),
-        map(parse_token(Token::I32Type), |_| NumericType::I32),
-        map(parse_token(Token::I64Type), |_| NumericType::I64),
-        map(parse_token(Token::U8Type), |_| NumericType::U8),
-        map(parse_token(Token::U16Type), |_| NumericType::U16),
-        map(parse_token(Token::U32Type), |_| NumericType::U32),
-        map(parse_token(Token::U64Type), |_| NumericType::U64),
-    ))(input)
-}
-
 fn parse_number(input: Tokens) -> IResult<Tokens, Number> {
     map(
-        tuple((parse_raw_number, opt(parse_number_type))),
+        tuple((parse_raw_number, opt(parse_numeric_type))),
         |(value, suffix)| Number { value, suffix },
     )(input)
 }

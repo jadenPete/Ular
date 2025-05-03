@@ -10,6 +10,7 @@ pub enum CompilationError {
     UnitPassedAsValue,
     NumberOutOfRange { type_: String },
     ExpectedNumericType { actual_type: String },
+    NestedFunctionsNotSupported,
 }
 
 impl Display for CompilationError {
@@ -53,6 +54,10 @@ impl Display for CompilationError {
                 "Expected a numerically typed value (`i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, or `u64`), but got one of type `{}`.",
                 actual_type
             ),
+
+            Self::NestedFunctionsNotSupported => {
+                write!(formatter, "Nested functions aren't currently supported.")
+            },
         }
     }
 }
@@ -66,6 +71,8 @@ pub enum InternalError {
     JitCompilerExpectedNumericType {
         actual_type: String,
     },
+
+    JitCompilerFunctionNotHoisted,
 }
 
 impl Display for InternalError {
@@ -84,6 +91,11 @@ impl Display for InternalError {
                 formatter,
                 "The JIT compiler expected a numerically typed value, but got one of type `{}`.",
                 actual_type
+            ),
+
+            Self::JitCompilerFunctionNotHoisted => write!(
+                formatter,
+                "The JIT compiler attempted to compile a function that wasn't hoisted beforehand."
             ),
         }
     }

@@ -1,16 +1,10 @@
-use crate::{
-    parser::program::Identifier,
-    typechecker::{
-        built_in_values::BuiltInValues,
-        typed_program::{TypedExpression, TypedIdentifier},
-    },
-};
+use crate::{parser::type_::Type, typechecker::built_in_values::BuiltInValues};
 use std::collections::HashMap;
 
 pub struct TypecheckerScope<'a> {
-    built_in_values: &'a BuiltInValues,
+    pub built_in_values: &'a BuiltInValues,
     parent: Option<&'a TypecheckerScope<'a>>,
-    variable_values: HashMap<String, TypedExpression>,
+    variable_types: HashMap<String, Type>,
 }
 
 impl<'a> TypecheckerScope<'a> {
@@ -18,7 +12,7 @@ impl<'a> TypecheckerScope<'a> {
         Self {
             built_in_values: parent.built_in_values,
             parent: Some(parent),
-            variable_values: HashMap::new(),
+            variable_types: HashMap::new(),
         }
     }
 
@@ -26,35 +20,28 @@ impl<'a> TypecheckerScope<'a> {
         Self {
             built_in_values,
             parent: None,
-            variable_values: HashMap::new(),
+            variable_types: HashMap::new(),
         }
     }
 
-    pub fn declare_variable(&mut self, name: String, value: TypedExpression) -> bool {
-        let result = self.variable_values.contains_key(&name);
+    pub fn declare_variable(&mut self, name: String, type_: Type) -> bool {
+        let result = self.variable_types.contains_key(&name);
 
         if !result {
-            self.variable_values.insert(name, value);
+            self.variable_types.insert(name, type_);
         }
 
         result
     }
 
-    pub fn get_variable_value(&self, name: &str) -> Option<TypedExpression> {
-        self.variable_values
+    pub fn get_variable_type(&self, name: &str) -> Option<Type> {
+        self.variable_types
             .get(name)
-            .map(|value| value.clone())
+            .map(|type_| type_.clone())
             .or_else(|| {
                 self.parent
-                    .and_then(|parent| parent.get_variable_value(name))
+                    .and_then(|parent| parent.get_variable_type(name))
             })
-            .or_else(|| {
-                self.built_in_values.get_value_type(name).map(|type_| {
-                    TypedExpression::Identifier(TypedIdentifier {
-                        underlying: Identifier(String::from(name)),
-                        type_,
-                    })
-                })
-            })
+            .or_else(|| self.built_in_values.get_value_type(name))
     }
 }

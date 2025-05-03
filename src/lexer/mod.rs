@@ -244,8 +244,10 @@ macro_rules! lexer_function {
     };
 }
 
+lexer_function! { lex_arrow, "=>", Token::Arrow }
 lexer_function! { lex_comma, ",", Token::Comma }
 lexer_function! { lex_definition, "=", Token::Definition }
+lexer_function! { lex_fn_keyword, "fn", Token::FnKeyword}
 lexer_function! { lex_i8_type, "i8", Token::I8Type }
 lexer_function! { lex_i16_type, "i16", Token::I16Type }
 lexer_function! { lex_i32_type, "i32", Token::I32Type }
@@ -254,6 +256,8 @@ lexer_function! { lex_u8_type, "u8", Token::U8Type }
 lexer_function! { lex_u16_type, "u16", Token::U16Type }
 lexer_function! { lex_u32_type, "u32", Token::U32Type }
 lexer_function! { lex_u64_type, "u64", Token::U64Type }
+lexer_function! { lex_bool_type, "bool", Token::BoolType }
+lexer_function! { lex_unit_type, "unit", Token::UnitType }
 lexer_function! { lex_if_keyword, "if", Token::IfKeyword }
 lexer_function! { lex_else_keyword, "else", Token::ElseKeyword }
 lexer_function! { lex_left_curly_bracket, "{", Token::LeftCurlyBracket }
@@ -269,6 +273,7 @@ lexer_function! { lex_minus, "-", Token::Minus }
 lexer_function! { lex_modulo, "%", Token::Modulo }
 lexer_function! { lex_times, "*", Token::Times }
 lexer_function! { lex_semicolon, ";", Token::Semicolon }
+lexer_function! { lex_type_annotation, ":", Token::TypeAnnotation }
 
 fn lex_identifier(input: PositionedSource) -> IResult<PositionedSource, PositionedToken> {
     map(
@@ -300,8 +305,10 @@ fn lex_number(input: PositionedSource) -> IResult<PositionedSource, PositionedTo
 fn lex_token(input: PositionedSource) -> IResult<PositionedSource, PositionedToken> {
     alt((
         alt((
+            lex_arrow,
             lex_comma,
             lex_definition,
+            lex_fn_keyword,
             lex_i8_type,
             lex_i16_type,
             lex_i32_type,
@@ -310,6 +317,8 @@ fn lex_token(input: PositionedSource) -> IResult<PositionedSource, PositionedTok
             lex_u16_type,
             lex_u32_type,
             lex_u64_type,
+            lex_bool_type,
+            lex_unit_type,
             lex_if_keyword,
             lex_else_keyword,
             lex_identifier,
@@ -317,19 +326,20 @@ fn lex_token(input: PositionedSource) -> IResult<PositionedSource, PositionedTok
             lex_right_curly_bracket,
             lex_left_parenthesis,
             lex_right_parenthesis,
+        )),
+        alt((
             lex_logical_and,
             lex_logical_or,
             lex_modulo,
             lex_not,
-        )),
-        alt((
             lex_number,
             // This needs to come after `lex_number` so signs aren't interpreted as operators
             lex_minus,
             lex_over,
             lex_plus,
-            lex_semicolon,
             lex_times,
+            lex_semicolon,
+            lex_type_annotation,
         )),
     ))(input)
 }

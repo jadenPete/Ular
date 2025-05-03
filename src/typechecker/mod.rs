@@ -1,25 +1,26 @@
 mod built_in_values;
 mod scope;
-pub mod type_;
 pub mod typed_program;
 
 use crate::{
     error::CompilationError,
-    parser::program::{Identifier, Number, NumericType, OperatorType},
+    parser::{
+        program::{Identifier, Number, OperatorType},
+        type_::{FunctionType, NumericType, Type},
+    },
     phase::Phase,
     simplifier::simple_program::{
-        SimpleBlock, SimpleCall, SimpleExpression, SimpleIf, SimpleInfixOperation,
-        SimplePrefixOperation, SimplePrefixOperator, SimpleProgram, SimpleStatement,
-        SimpleVariableDefinition,
+        SimpleBlock, SimpleCall, SimpleExpression, SimpleFunctionDefinition, SimpleIf,
+        SimpleInfixOperation, SimplePrefixOperation, SimplePrefixOperator, SimpleProgram,
+        SimpleStatement, SimpleVariableDefinition,
     },
     typechecker::{
         built_in_values::BuiltInValues,
         scope::TypecheckerScope,
-        type_::Type,
         typed_program::{
-            Typed, TypedBlock, TypedCall, TypedExpression, TypedIdentifier, TypedIf,
-            TypedInfixOperation, TypedNumber, TypedPrefixOperation, TypedProgram, TypedStatement,
-            TypedVariableDefinition,
+            Typed, TypedBlock, TypedCall, TypedExpression, TypedFunctionDefinition,
+            TypedIdentifier, TypedIf, TypedInfixOperation, TypedNumber, TypedPrefixOperation,
+            TypedProgram, TypedStatement, TypedVariableDefinition,
         },
     },
 };
@@ -38,11 +39,8 @@ impl<'a> Typechecker<'a> {
             scope: TypecheckerScope::with_parent(&self.scope),
         };
 
-        let mut typechecked_statements = Vec::with_capacity(block.statements.len());
-
-        for statement in &block.statements {
-            typechecked_statements.push(typechecker.typecheck_statement(&statement)?);
-        }
+        let typechecked_statements =
+            typechecker.typecheck_statements_with_functions_hoisted(&block.statements)?;
 
         let typechecked_result = match &block.result {
             Some(result) => Some(Box::new(
@@ -87,7 +85,7 @@ impl<'a> Typechecker<'a> {
                 Ok(TypedCall {
                     function: typechecked_function,
                     arguments: typechecked_arguments,
-                    type_: *function_type.result,
+                    type_: *function_type.return_type,
                 })
             }
             _ => Err(CompilationError::ValueNotCallable(call.function.0.clone())),
@@ -127,15 +125,68 @@ impl<'a> Typechecker<'a> {
         }
     }
 
+    fn typecheck_function_definition(
+        &self,
+        definition: &SimpleFunctionDefinition,
+    ) -> Result<TypedFunctionDefinition, CompilationError> {
+        let mut typechecker = Typechecker {
+            scope: TypecheckerScope::with_parent(&self.scope),
+        };
+
+        for parameter in &definition.parameters {
+            typechecker
+                .scope
+                .declare_variable(parameter.name.0.clone(), parameter.type_.clone());
+        }
+
+        let typechecked_statements =
+            typechecker.typecheck_statements_with_functions_hoisted(&definition.body.statements)?;
+
+        let typechecked_result = match &definition.body.result {
+            Some(result) => Some(Box::new(
+                typechecker.typecheck_expression(&result, Some(&definition.return_type))?,
+            )),
+
+            None => None,
+        };
+
+        Ok(TypedFunctionDefinition {
+            name: definition.name.clone(),
+            parameters: definition
+                .parameters
+                .iter()
+                .map(|parameter| TypedIdentifier {
+                    underlying: parameter.name.clone(),
+                    type_: parameter.type_.clone(),
+                })
+                .collect(),
+
+            body: TypedBlock {
+                statements: typechecked_statements,
+                result: typechecked_result,
+            },
+
+            type_: FunctionType {
+                parameters: definition
+                    .parameters
+                    .iter()
+                    .map(|parameter| parameter.type_.clone())
+                    .collect(),
+
+                return_type: Box::new(definition.return_type.clone()),
+            },
+        })
+    }
+
     fn typecheck_identifier(
         &self,
         identifier: &Identifier,
     ) -> Result<TypedIdentifier, CompilationError> {
         self.scope
-            .get_variable_value(&identifier.0)
-            .map(|value| TypedIdentifier {
+            .get_variable_type(&identifier.0)
+            .map(|type_| TypedIdentifier {
                 underlying: identifier.clone(),
-                type_: value.get_type(),
+                type_,
             })
             .ok_or_else(|| CompilationError::UnknownValue(identifier.0.clone()))
     }
@@ -146,9 +197,9 @@ impl<'a> Typechecker<'a> {
         suggested_type: Option<&Type>,
     ) -> Result<TypedIf, CompilationError> {
         let typechecked_condition =
-            self.typecheck_expression(&if_expression.condition, Some(&Type::Boolean))?;
+            self.typecheck_expression(&if_expression.condition, Some(&Type::Bool))?;
 
-        assert_type(&typechecked_condition, &Type::Boolean)?;
+        assert_type(&typechecked_condition, &Type::Bool)?;
 
         let typechecked_then_block =
             self.typecheck_block(&if_expression.then_block, suggested_type)?;
@@ -192,10 +243,10 @@ impl<'a> Typechecker<'a> {
             }
 
             OperatorType::Logical => {
-                assert_type(&typechecked_left, &Type::Boolean)?;
-                assert_type(&typechecked_right, &Type::Boolean)?;
+                assert_type(&typechecked_left, &Type::Bool)?;
+                assert_type(&typechecked_right, &Type::Bool)?;
 
-                Type::Boolean
+                Type::Bool
             }
         };
 
@@ -248,9 +299,9 @@ impl<'a> Typechecker<'a> {
 
         let type_ = match prefix_operation.operator {
             SimplePrefixOperator::Not => {
-                assert_type(&typechecked_expression, &Type::Boolean)?;
+                assert_type(&typechecked_expression, &Type::Bool)?;
 
-                Type::Boolean
+                Type::Bool
             }
         };
 
@@ -270,12 +321,71 @@ impl<'a> Typechecker<'a> {
                 TypedStatement::VariableDefinition(self.typecheck_variable_definition(definition)?),
             ),
 
+            SimpleStatement::FunctionDefinition(definition) => Ok(
+                TypedStatement::FunctionDefinition(self.typecheck_function_definition(definition)?),
+            ),
+
             SimpleStatement::Expression(expression) => Ok(TypedStatement::Expression(
                 self.typecheck_expression(expression, Some(&Type::Unit))?,
             )),
 
             SimpleStatement::NoOp => Ok(TypedStatement::NoOp),
         }
+    }
+
+    fn typecheck_statements_with_functions_hoisted(
+        &mut self,
+        statements: &[SimpleStatement],
+    ) -> Result<Vec<TypedStatement>, CompilationError> {
+        for statement in statements {
+            if let SimpleStatement::FunctionDefinition(definition) = statement {
+                let type_ = Type::Function(FunctionType {
+                    parameters: definition
+                        .parameters
+                        .iter()
+                        .map(|parameter| parameter.type_.clone())
+                        .collect(),
+
+                    return_type: Box::new(definition.return_type.clone()),
+                });
+
+                if self
+                    .scope
+                    .declare_variable(definition.name.0.clone(), type_)
+                {
+                    return Err(CompilationError::VariableAlreadyDefined(
+                        definition.name.0.clone(),
+                    ));
+                }
+            }
+        }
+
+        let mut result: Vec<TypedStatement> = vec![TypedStatement::NoOp; statements.len()];
+
+        /*
+         * Typecheck the functions first, so they don't yet have access to global variables.
+         * Functions capturing their environment (i.e. closures) aren't yet supported.
+         *
+         * This won't prevent nested functions from acessing the parameters of the functions within
+         * which they're nested, but the JIT compiler phase will take care of detecting nested
+         * functions and erroring when one is detected.
+         */
+        for (i, statement) in statements.iter().enumerate() {
+            if let SimpleStatement::FunctionDefinition(definition) = statement {
+                result[i] = TypedStatement::FunctionDefinition(
+                    self.typecheck_function_definition(definition)?,
+                );
+            }
+        }
+
+        for (i, statement) in statements.iter().enumerate() {
+            if let SimpleStatement::FunctionDefinition(_) = statement {
+            } else {
+                result[i] = self.typecheck_statement(statement)?;
+            }
+        }
+
+        Ok(result)
     }
 
     fn typecheck_variable_definition(
@@ -286,7 +396,7 @@ impl<'a> Typechecker<'a> {
 
         if self
             .scope
-            .declare_variable(definition.name.0.clone(), result.clone())
+            .declare_variable(definition.name.0.clone(), result.get_type())
         {
             Err(CompilationError::VariableAlreadyDefined(
                 definition.name.0.clone(),
@@ -313,13 +423,10 @@ impl Phase<&SimpleProgram, TypedProgram, CompilationError> for TypecheckerPhase 
             scope: TypecheckerScope::without_parent(&built_in_values),
         };
 
-        let mut statements = Vec::new();
-
-        for statement in program.statements.iter() {
-            statements.push(typechecker.typecheck_statement(statement)?);
-        }
-
-        Ok(TypedProgram { statements })
+        Ok(TypedProgram {
+            statements: typechecker
+                .typecheck_statements_with_functions_hoisted(&program.statements)?,
+        })
     }
 }
 

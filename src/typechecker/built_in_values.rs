@@ -1,7 +1,4 @@
-use crate::{
-    parser::program::NumericType,
-    typechecker::type_::{FunctionType, Type},
-};
+use crate::parser::type_::{FunctionType, NumericType, Type};
 use std::collections::HashMap;
 
 pub struct BuiltInValues {
@@ -19,8 +16,8 @@ impl BuiltInValues {
         value_types.insert(
             String::from("println_bool"),
             Type::Function(FunctionType {
-                parameters: vec![Type::Boolean],
-                result: Box::new(Type::Unit),
+                parameters: vec![Type::Bool],
+                return_type: Box::new(Type::Unit),
             }),
         );
 
@@ -29,13 +26,13 @@ impl BuiltInValues {
                 String::from(format!("println_{}", numeric_type)),
                 Type::Function(FunctionType {
                     parameters: vec![Type::Numeric(numeric_type)],
-                    result: Box::new(Type::Unit),
+                    return_type: Box::new(Type::Unit),
                 }),
             );
         }
 
-        value_types.insert(String::from("true"), Type::Boolean);
-        value_types.insert(String::from("false"), Type::Boolean);
+        value_types.insert(String::from("true"), Type::Bool);
+        value_types.insert(String::from("false"), Type::Bool);
 
         Self { value_types }
     }

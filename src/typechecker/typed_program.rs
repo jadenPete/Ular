@@ -1,7 +1,9 @@
 use crate::{
-    parser::program::{Identifier, InfixOperator, NumericType},
+    parser::{
+        program::{Identifier, InfixOperator},
+        type_::{FunctionType, NumericType, Type},
+    },
     simplifier::simple_program::SimplePrefixOperator,
-    typechecker::type_::Type,
 };
 
 pub trait Typed {
@@ -16,6 +18,7 @@ pub struct TypedProgram {
 #[derive(Clone, Debug)]
 pub enum TypedStatement {
     VariableDefinition(TypedVariableDefinition),
+    FunctionDefinition(TypedFunctionDefinition),
     Expression(TypedExpression),
     NoOp,
 }
@@ -24,6 +27,20 @@ pub enum TypedStatement {
 pub struct TypedVariableDefinition {
     pub name: Identifier,
     pub value: TypedExpression,
+}
+
+#[derive(Clone, Debug)]
+pub struct TypedFunctionDefinition {
+    pub name: Identifier,
+    pub parameters: Vec<TypedIdentifier>,
+    pub body: TypedBlock,
+    pub type_: FunctionType,
+}
+
+impl Typed for TypedFunctionDefinition {
+    fn get_type(&self) -> Type {
+        Type::Function(self.type_.clone())
+    }
 }
 
 #[derive(Clone, Debug)]

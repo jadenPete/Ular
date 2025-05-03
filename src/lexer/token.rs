@@ -8,8 +8,10 @@ use std::{
 
 /// Grammer:
 /// ```ebnf
+/// ARROW = "=>";
 /// COMMA = ",";
 /// DEFINITION = "=";
+/// FN_KEYWORD = "fn";
 /// I8_TYPE = "i8";
 /// I16_TYPE = "i16";
 /// I32_TYPE = "i32";
@@ -18,6 +20,8 @@ use std::{
 /// U16_TYPE = "u8";
 /// U32_TYPE = "u16";
 /// U64_TYPE = "u64";
+/// BOOL_TYPE = 'bool';
+/// UNIT_TYPE = 'unit';
 /// IF_KEYWORD = "if";
 /// ELSE_KEYWORD = "else";
 /// IDENTIFIER = ?[a-zA-Z_][a-zA-Z0-9_]*?;
@@ -35,11 +39,11 @@ use std::{
 /// NUMBER = ?[+-]?[0-9]+?;
 /// TIMES = "*";
 /// SEMICOLON = ";";
+/// TYPE_ANNOTATION = ":";
 /// ```
 #[derive(Clone, Debug, PartialEq)]
 pub enum Token {
-    Comma,
-    Definition,
+    Arrow,
     I8Type,
     I16Type,
     I32Type,
@@ -48,6 +52,11 @@ pub enum Token {
     U16Type,
     U32Type,
     U64Type,
+    BoolType,
+    UnitType,
+    Comma,
+    Definition,
+    FnKeyword,
     IfKeyword,
     ElseKeyword,
     Identifier(String),
@@ -65,6 +74,7 @@ pub enum Token {
     Number(i128),
     Times,
     Semicolon,
+    TypeAnnotation,
 }
 
 #[derive(Debug)]

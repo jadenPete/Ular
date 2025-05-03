@@ -87,6 +87,10 @@ impl<'a, 'context> JitCompilerScope<'a, 'context> {
             })
     }
 
+    pub fn has_parent(&self) -> bool {
+        self.parent.is_some()
+    }
+
     pub fn with_child<A: FnOnce(&mut JitCompilerScope<'_, 'context>) -> B, B>(
         &mut self,
         basic_block: BasicBlock<'context>,

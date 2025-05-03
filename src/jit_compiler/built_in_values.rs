@@ -4,7 +4,7 @@ use crate::{
         scope::LocalName,
         value::{UlarFunction, UlarValue},
     },
-    parser::program::NumericType,
+    parser::type_::NumericType,
 };
 
 use inkwell::{
@@ -46,12 +46,12 @@ pub trait BuiltInValue<'a> {
     ) -> UlarValue<'a>;
 }
 
-pub struct BuiltInBoolean<'a> {
+pub struct BuiltInBool<'a> {
     value: u64,
     computed_value: Option<UlarValue<'a>>,
 }
 
-impl<'a> BuiltInBoolean<'a> {
+impl<'a> BuiltInBool<'a> {
     fn new(value: u64) -> Self {
         Self {
             value,
@@ -60,7 +60,7 @@ impl<'a> BuiltInBoolean<'a> {
     }
 }
 
-impl<'a> BuiltInValue<'a> for BuiltInBoolean<'a> {
+impl<'a> BuiltInValue<'a> for BuiltInBool<'a> {
     fn get_value(
         &mut self,
         local_name: LocalName,
@@ -109,29 +109,6 @@ pub trait BuiltInFunction<'a> {
     fn get_stored_function(&self) -> Option<FunctionValue<'a>>;
     fn set_stored_function(&mut self, function: FunctionValue<'a>);
 
-    fn get_function(
-        &mut self,
-        local_name: LocalName,
-        context: &'a Context,
-        builder: &Builder<'a>,
-        execution_engine: &ExecutionEngine<'a>,
-        module: &mut UlarModule<'a>,
-    ) -> UlarFunction<'a> {
-        let inkwell_function = self.get_inkwell_function(context, execution_engine, module);
-
-        UlarFunction {
-            pointer: builder
-                .build_bit_cast(
-                    inkwell_function.as_global_value().as_pointer_value(),
-                    context.ptr_type(AddressSpace::default()),
-                    &local_name.to_string(),
-                )
-                .unwrap()
-                .into_pointer_value(),
-            type_: inkwell_function.get_type(),
-        }
-    }
-
     fn get_inkwell_function(
         &mut self,
         context: &'a Context,
@@ -151,19 +128,17 @@ pub trait BuiltInFunction<'a> {
 impl<'a, A: BuiltInFunction<'a>> BuiltInValue<'a> for A {
     fn get_value(
         &mut self,
-        local_name: LocalName,
+        _local_name: LocalName,
         context: &'a Context,
-        builder: &Builder<'a>,
+        _builder: &Builder<'a>,
         execution_engine: &ExecutionEngine<'a>,
         module: &mut UlarModule<'a>,
     ) -> UlarValue<'a> {
-        UlarValue::Function(self.get_function(
-            local_name,
+        UlarValue::Function(UlarFunction::DirectReference(self.get_inkwell_function(
             context,
-            builder,
             execution_engine,
             module,
-        ))
+        )))
     }
 }
 
@@ -303,8 +278,8 @@ impl<'a> BuiltInValues<'a> {
     pub fn new(context: &'a Context) -> Self {
         let mut referencable_values = HashMap::<String, Box<dyn BuiltInValue>>::new();
 
-        referencable_values.insert(String::from("true"), Box::new(BuiltInBoolean::new(1)));
-        referencable_values.insert(String::from("false"), Box::new(BuiltInBoolean::new(0)));
+        referencable_values.insert(String::from("true"), Box::new(BuiltInBool::new(1)));
+        referencable_values.insert(String::from("false"), Box::new(BuiltInBool::new(0)));
         referencable_values.insert(
             String::from("println_bool"),
             Box::new(BuiltInMappedFunction::new(

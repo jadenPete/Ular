@@ -1,12 +1,25 @@
-use enum_iterator::Sequence;
-use inkwell::{context::Context, types::IntType};
-use std::fmt::{Debug, Display, Formatter};
+use crate::parser::type_::{NumericType, Type};
+use std::fmt::Debug;
 
 /// Grammar:
 /// ```ebnf
 /// program = statement*;
-/// statement = variable_definition | expression ';' | ';';
+/// statement = variable_definition | function_definition | expression ';' | ';';
 /// variable_definition = identifier ':=' expression ';';
+/// function_definition = 'fn' identifier '(' (parameter (',' parameter)*)? ')' (':' type)? block;
+/// parameter = identifier ':' type;
+/// type = function_type;
+/// function_type =
+///     | (primary_type | ('(' (type (',' type)*)? ')')) '=>' type
+///     | primary_type;
+///
+/// primary_type =
+///     | numeric_type
+///     | 'bool'
+///     | 'unit';
+///
+/// numeric_type = 'i8' | 'i16' | 'i32' | 'i64' | 'u8' | 'u16' | 'u32' | 'u64';
+/// block = '{' statement* expression? '}';
 /// expression =  logical_or;
 /// logical_or = logical_and ('||' logical_and)*;
 /// logical_and = sum ('&&' sum)*;
@@ -29,9 +42,8 @@ use std::fmt::{Debug, Display, Formatter};
 ///
 /// else_if_clause = 'else' 'if' expression block;
 /// else_clause = 'else' block;
-/// block = '{' statement* expression? '}';
 /// call =
-/// 	| identifier '(' (expression ',')* expression ')'
+/// 	| identifier '(' ((expression ',')* expression)? ')'
 /// 	| primary
 ///
 /// primary =
@@ -40,8 +52,7 @@ use std::fmt::{Debug, Display, Formatter};
 ///     | '(' expression ')';
 ///
 /// identifier = IDENTIFIER;
-/// number = NUMBER number_type?;
-/// number_type = 'i8' | 'i16' | 'i32' | 'i64' | 'u8' | 'u16' | 'u32' | 'u64';
+/// number = NUMBER numeric_type?;
 /// ```
 #[derive(Debug)]
 pub struct Program {
@@ -51,6 +62,7 @@ pub struct Program {
 #[derive(Debug)]
 pub enum Statement {
     VariableDefinition(VariableDefinition),
+    FunctionDefinition(FunctionDefinition),
     Expression(Expression),
     NoOp,
 }
@@ -59,6 +71,26 @@ pub enum Statement {
 pub struct VariableDefinition {
     pub name: Identifier,
     pub value: Expression,
+}
+
+#[derive(Debug)]
+pub struct FunctionDefinition {
+    pub name: Identifier,
+    pub parameters: Vec<Parameter>,
+    pub return_type: Option<Type>,
+    pub body: Block,
+}
+
+#[derive(Clone, Debug)]
+pub struct Parameter {
+    pub name: Identifier,
+    pub type_: Type,
+}
+
+#[derive(Debug)]
+pub struct Block {
+    pub statements: Vec<Statement>,
+    pub result: Option<Box<Expression>>,
 }
 
 #[derive(Debug)]
@@ -88,12 +120,6 @@ pub struct ElseIfClause {
 #[derive(Debug)]
 pub struct ElseClause {
     pub body: Block,
-}
-
-#[derive(Debug)]
-pub struct Block {
-    pub statements: Vec<Statement>,
-    pub result: Option<Box<Expression>>,
 }
 
 #[derive(Debug)]
@@ -159,74 +185,4 @@ pub struct Identifier(pub String);
 pub struct Number {
     pub value: i128,
     pub suffix: Option<NumericType>,
-}
-
-#[derive(Clone, Copy, PartialEq, Sequence)]
-pub enum NumericType {
-    I8,
-    I16,
-    I32,
-    I64,
-    U8,
-    U16,
-    U32,
-    U64,
-}
-
-impl NumericType {
-    pub fn is_signed(self) -> bool {
-        match self {
-            Self::I8 => true,
-            Self::I16 => true,
-            Self::I32 => true,
-            Self::I64 => true,
-            Self::U8 => false,
-            Self::U16 => false,
-            Self::U32 => false,
-            Self::U64 => false,
-        }
-    }
-
-    pub fn is_valid(self, value: i128) -> bool {
-        match self {
-            Self::I8 => i8::try_from(value).is_ok(),
-            Self::I16 => i16::try_from(value).is_ok(),
-            Self::I32 => i32::try_from(value).is_ok(),
-            Self::I64 => i64::try_from(value).is_ok(),
-            Self::U8 => u8::try_from(value).is_ok(),
-            Self::U16 => u16::try_from(value).is_ok(),
-            Self::U32 => u32::try_from(value).is_ok(),
-            Self::U64 => u64::try_from(value).is_ok(),
-        }
-    }
-
-    pub fn inkwell_type<'a>(self, context: &'a Context) -> IntType<'a> {
-        match self {
-            Self::I8 | Self::U8 => context.i8_type(),
-            Self::I16 | Self::U16 => context.i16_type(),
-            Self::I32 | Self::U32 => context.i32_type(),
-            Self::I64 | Self::U64 => context.i64_type(),
-        }
-    }
-}
-
-impl Debug for NumericType {
-    fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::I8 => write!(formatter, "i8"),
-            Self::I16 => write!(formatter, "i16"),
-            Self::I32 => write!(formatter, "i32"),
-            Self::I64 => write!(formatter, "i64"),
-            Self::U8 => write!(formatter, "u8"),
-            Self::U16 => write!(formatter, "u16"),
-            Self::U32 => write!(formatter, "u32"),
-            Self::U64 => write!(formatter, "u64"),
-        }
-    }
-}
-
-impl Display for NumericType {
-    fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(formatter, "{:?}", self)
-    }
 }

@@ -1,7 +1,7 @@
 use crate::{
     error::{CompilationError, InternalError},
     jit_compiler::scope::LocalName,
-    typechecker::type_::Type,
+    parser::type_::Type,
 };
 
 use either::Either::{Left, Right};
@@ -10,13 +10,25 @@ use inkwell::{
     builder::Builder,
     context::Context,
     types::FunctionType,
-    values::{BasicValue, BasicValueEnum, CallSiteValue, IntValue, PointerValue},
+    values::{BasicValue, BasicValueEnum, CallSiteValue, FunctionValue, IntValue, PointerValue},
 };
 
 #[derive(Clone, Copy, Debug)]
-pub struct UlarFunction<'a> {
-    pub pointer: PointerValue<'a>,
-    pub type_: FunctionType<'a>,
+pub enum UlarFunction<'a> {
+    DirectReference(FunctionValue<'a>),
+    IndirectReference {
+        pointer: PointerValue<'a>,
+        type_: FunctionType<'a>,
+    },
+}
+
+impl<'a> UlarFunction<'a> {
+    pub fn get_pointer_value(&self) -> PointerValue<'a> {
+        match self {
+            Self::DirectReference(function) => function.as_global_value().as_pointer_value(),
+            Self::IndirectReference { pointer, .. } => *pointer,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -51,21 +63,22 @@ impl<'a> UlarValue<'a> {
         }
     }
 
-    fn from_basic_value<A: BasicValue<'a>>(
+    pub fn from_basic_value<A: BasicValue<'a>>(
         context: &'a Context,
         type_: &Type,
         value: A,
     ) -> Result<Self, CompilationError> {
         let basic_value_enum = value.as_basic_value_enum();
 
-        Ok(match type_ {
-            Type::Function(function_type) => Self::Function(UlarFunction {
+        match type_ {
+            Type::Bool | Type::Numeric(_) => Ok(UlarValue::Int(basic_value_enum.into_int_value())),
+            Type::Function(function_type) => Ok(Self::Function(UlarFunction::IndirectReference {
                 pointer: basic_value_enum.into_pointer_value(),
                 type_: function_type.inkwell_type(context)?,
-            }),
+            })),
 
-            _ => UlarValue::Int(basic_value_enum.into_int_value()),
-        })
+            Type::Unit => Err(CompilationError::UnitPassedAsValue),
+        }
     }
 
     pub fn from_call_site_value(
@@ -91,7 +104,10 @@ impl<'a> TryFrom<UlarValue<'a>> for BasicValueEnum<'a> {
 
     fn try_from(value: UlarValue<'a>) -> Result<Self, Self::Error> {
         match value {
-            UlarValue::Function(function) => Ok(BasicValueEnum::PointerValue(function.pointer)),
+            UlarValue::Function(function) => {
+                Ok(BasicValueEnum::PointerValue(function.get_pointer_value()))
+            }
+
             UlarValue::Int(int_value) => Ok(BasicValueEnum::IntValue(int_value)),
             UlarValue::Unit => Err(CompilationError::InternalError(
                 InternalError::JitCompilerTypeMismatch {
