@@ -88,33 +88,18 @@ impl<'a> InputTake for PositionedSource<'a> {
     }
 
     fn take_split(&self, count: usize) -> (Self, Self) {
-        let (left, right) = self.source.take_split(count);
+        let (remaining, consumed) = self.source.take_split(count);
 
         (
             Self {
-                source: left,
-                index: self.index,
-            },
-            Self {
-                source: right,
+                source: remaining,
                 index: self.index + count,
             },
+            Self {
+                source: consumed,
+                index: self.index,
+            },
         )
-    }
-}
-
-pub struct LexerPhase;
-
-impl<'a> Phase<&'a str, Vec<PositionedToken>, nom::Err<nom::error::Error<&'a str>>> for LexerPhase {
-    fn name() -> String {
-        String::from("lexer")
-    }
-
-    fn execute(
-        &self,
-        input: &'a str,
-    ) -> Result<Vec<PositionedToken>, nom::Err<nom::error::Error<&'a str>>> {
-        lex_tokens(input).map(move |(_, tokens)| tokens)
     }
 }
 
@@ -235,6 +220,21 @@ impl<'a> InputTakeAtPosition for PositionedSource<'a> {
                 *self,
             )),
         }
+    }
+}
+
+pub struct LexerPhase;
+
+impl<'a> Phase<&'a str, Vec<PositionedToken>, nom::Err<nom::error::Error<&'a str>>> for LexerPhase {
+    fn name() -> String {
+        String::from("lexer")
+    }
+
+    fn execute(
+        &self,
+        input: &'a str,
+    ) -> Result<Vec<PositionedToken>, nom::Err<nom::error::Error<&'a str>>> {
+        lex_tokens(input).map(move |(_, tokens)| tokens)
     }
 }
 
