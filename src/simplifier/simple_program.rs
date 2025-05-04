@@ -73,6 +73,6 @@ pub enum SimplePrefixOperator {
 
 #[derive(Debug)]
 pub struct SimpleCall {
-    pub function: Identifier,
+    pub function: Box<SimpleExpression>,
     pub arguments: Vec<SimpleExpression>,
 }

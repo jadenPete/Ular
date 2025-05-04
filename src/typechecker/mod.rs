@@ -56,7 +56,7 @@ impl<'a> Typechecker<'a> {
     }
 
     fn typecheck_call(&self, call: &SimpleCall) -> Result<TypedCall, CompilationError> {
-        let typechecked_function = self.typecheck_identifier(&call.function)?;
+        let typechecked_function = self.typecheck_expression(&call.function, None)?;
 
         match typechecked_function.get_type() {
             Type::Function(function_type) => {
@@ -83,12 +83,12 @@ impl<'a> Typechecker<'a> {
                 }
 
                 Ok(TypedCall {
-                    function: typechecked_function,
+                    function: Box::new(typechecked_function),
                     arguments: typechecked_arguments,
                     type_: *function_type.return_type,
                 })
             }
-            _ => Err(CompilationError::ValueNotCallable(call.function.0.clone())),
+            _ => Err(CompilationError::ValueNotCallable),
         }
     }
 

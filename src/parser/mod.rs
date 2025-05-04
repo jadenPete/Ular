@@ -18,7 +18,7 @@ use nom::{
     branch::alt,
     combinator::{eof, map, opt},
     error::{ErrorKind, ParseError},
-    multi::{many0, separated_list0},
+    multi::{many0, many1, separated_list0},
     sequence::{delimited, tuple},
     IResult, InputIter, Parser, Slice,
 };
@@ -296,6 +296,37 @@ fn parse_prefix_operation(input: Tokens) -> IResult<Tokens, Expression> {
                 })
             },
         ),
+        parse_call,
+    ))(input)
+}
+
+fn parse_call(input: Tokens) -> IResult<Tokens, Expression> {
+    alt((
+        map(
+            tuple((
+                parse_if,
+                many1(map(
+                    tuple((
+                        parse_token(Token::LeftParenthesis),
+                        separated_list0(parse_token(Token::Comma), parse_expression),
+                        parse_token(Token::RightParenthesis),
+                    )),
+                    |(_, arguments, _)| arguments,
+                )),
+            )),
+            |(function, argument_lists)| {
+                let mut result = function;
+
+                for argument_list in argument_lists {
+                    result = Expression::Call(Call {
+                        function: Box::new(result),
+                        arguments: argument_list,
+                    });
+                }
+
+                result
+            },
+        ),
         parse_if,
     ))(input)
 }
@@ -338,26 +369,6 @@ fn parse_if(input: Tokens) -> IResult<Tokens, Expression> {
                     body,
                     else_if_clauses,
                     else_clause,
-                })
-            },
-        ),
-        parse_call,
-    ))(input)
-}
-
-fn parse_call(input: Tokens) -> IResult<Tokens, Expression> {
-    alt((
-        map(
-            tuple((
-                parse_identifier,
-                parse_token(Token::LeftParenthesis),
-                separated_list0(parse_token(Token::Comma), parse_expression),
-                parse_token(Token::RightParenthesis),
-            )),
-            |(function, _, arguments, _)| {
-                Expression::Call(Call {
-                    function,
-                    arguments,
                 })
             },
         ),

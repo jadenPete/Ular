@@ -5,7 +5,7 @@ pub enum CompilationError {
     TypeMismatch { expected: String, actual: String },
     VariableAlreadyDefined(String),
     UnknownValue(String),
-    ValueNotCallable(String),
+    ValueNotCallable,
     IncorrectNumberOfArguments { expected: usize, actual: usize },
     UnitPassedAsValue,
     NumberOutOfRange { type_: String },
@@ -33,7 +33,7 @@ impl Display for CompilationError {
             ),
 
             Self::UnknownValue(name) => write!(formatter, "Unknown value: `{}`.", name),
-            Self::ValueNotCallable(name) => write!(formatter, "`{}` isn't callable.", name),
+            Self::ValueNotCallable => write!(formatter, "You're attempting to call a value that isn't callable."),
             Self::IncorrectNumberOfArguments { expected, actual } => write!(
                 formatter,
                 "Expected {} arguments, but got {}.",

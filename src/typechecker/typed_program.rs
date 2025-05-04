@@ -124,7 +124,7 @@ impl Typed for TypedPrefixOperation {
 
 #[derive(Clone, Debug)]
 pub struct TypedCall {
-    pub function: TypedIdentifier,
+    pub function: Box<TypedExpression>,
     pub arguments: Vec<TypedExpression>,
     pub type_: Type,
 }

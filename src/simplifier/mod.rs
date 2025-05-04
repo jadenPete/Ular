@@ -40,7 +40,7 @@ fn simplify_block(block: &Block) -> SimpleBlock {
 
 fn simplify_call(call: &Call) -> SimpleCall {
     SimpleCall {
-        function: call.function.clone(),
+        function: Box::new(simplify_expression(&call.function)),
         arguments: call.arguments.iter().map(simplify_expression).collect(),
     }
 }

@@ -73,7 +73,7 @@ impl<'a, 'context> JitFunctionCompiler<'a, 'context> {
         scope: &mut JitCompilerScope<'_, 'context>,
         call: &TypedCall,
     ) -> Result<UlarValue<'context>, CompilationError> {
-        let function: UlarFunction = self.compile_identifier(scope, &call.function)?.try_into()?;
+        let function: UlarFunction = self.compile_expression(scope, &call.function)?.try_into()?;
         let mut argument_values = Vec::<BasicMetadataValueEnum>::new();
 
         for argument in &call.arguments {

@@ -32,20 +32,20 @@ use std::fmt::Debug;
 /// 	| prefix_operation ('/' prefix_operation)*;
 ///
 /// prefix_operation =
-///     | '!' if
-///     | '-' if
-///     | if;
+///     | '!' prefix_operation
+///     | '-' prefix_operation
+///     | call;
+///
+/// call =
+/// 	| if ('(' ((expression ',')* expression)? ')')+
+/// 	| if;
 ///
 /// if =
 ///     | 'if' expression block else_if_clause* else_clause?
-///     | call;
+///     | primary;
 ///
 /// else_if_clause = 'else' 'if' expression block;
 /// else_clause = 'else' block;
-/// call =
-/// 	| identifier '(' ((expression ',')* expression)? ')'
-/// 	| primary
-///
 /// primary =
 /// 	| identifier
 /// 	| number;
@@ -174,7 +174,7 @@ pub enum PrefixOperator {
 
 #[derive(Debug)]
 pub struct Call {
-    pub function: Identifier,
+    pub function: Box<Expression>,
     pub arguments: Vec<Expression>,
 }
 
