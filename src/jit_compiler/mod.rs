@@ -38,7 +38,6 @@ type MainFunction = unsafe extern "C" fn() -> u8;
 
 struct JitFunctionCompiler<'a, 'context> {
     context: &'context Context,
-    builder: &'a Builder<'context>,
     built_in_values: &'a mut BuiltInValues<'context>,
     function: FunctionValue<'context>,
     execution_engine: &'a ExecutionEngine<'context>,
@@ -46,23 +45,29 @@ struct JitFunctionCompiler<'a, 'context> {
 }
 
 impl<'a, 'context> JitFunctionCompiler<'a, 'context> {
-    fn append_basic_block(&self) -> BasicBlock<'context> {
-        let name = format!("{}", self.function.count_basic_blocks());
-
-        self.context.append_basic_block(self.function, &name)
+    fn append_basic_block(
+        &self,
+        scope: &mut JitCompilerScope<'_, 'context>,
+    ) -> BasicBlock<'context> {
+        self.context
+            .append_basic_block(self.function, &scope.get_local_name().to_string())
     }
 
     fn compile_block(
         &mut self,
+        builder: &Builder<'context>,
         scope: &mut JitCompilerScope<'_, 'context>,
-        basic_block: BasicBlock<'context>,
         block: &TypedBlock,
     ) -> Result<UlarValue<'context>, CompilationError> {
-        scope.with_child(basic_block, |child_scope| {
-            self.compile_statements_with_functions_hoisted(child_scope, &block.statements)?;
+        scope.with_child(|child_scope| {
+            self.compile_statements_with_functions_hoisted(
+                builder,
+                child_scope,
+                &block.statements,
+            )?;
 
             match &block.result {
-                Some(result) => self.compile_expression(child_scope, result),
+                Some(result) => self.compile_expression(builder, child_scope, result),
                 None => Ok(UlarValue::Unit),
             }
         })
@@ -70,47 +75,57 @@ impl<'a, 'context> JitFunctionCompiler<'a, 'context> {
 
     fn compile_call(
         &mut self,
+        builder: &Builder<'context>,
         scope: &mut JitCompilerScope<'_, 'context>,
         call: &TypedCall,
     ) -> Result<UlarValue<'context>, CompilationError> {
-        let function: UlarFunction = self.compile_expression(scope, &call.function)?.try_into()?;
+        let function: UlarFunction = self
+            .compile_expression(builder, scope, &call.function)?
+            .try_into()?;
+
         let mut argument_values = Vec::<BasicMetadataValueEnum>::new();
 
         for argument in &call.arguments {
-            let argument_value: IntValue = self.compile_expression(scope, argument)?.try_into()?;
+            let argument_value: IntValue = self
+                .compile_expression(builder, scope, argument)?
+                .try_into()?;
 
             argument_values.push(argument_value.into());
         }
 
         let name = scope.get_local_name();
-        let call_result =
-            match function {
-                UlarFunction::DirectReference(inkwell_function) => self.builder.build_direct_call(
-                    inkwell_function,
-                    &argument_values,
-                    &name.to_string(),
-                ),
-
-                UlarFunction::IndirectReference { pointer, type_ } => self
-                    .builder
-                    .build_indirect_call(type_, pointer, &argument_values, &name.to_string()),
+        let call_result = match function {
+            UlarFunction::DirectReference(inkwell_function) => {
+                builder.build_direct_call(inkwell_function, &argument_values, &name.to_string())
             }
-            .unwrap();
+
+            UlarFunction::IndirectReference { pointer, type_ } => {
+                builder.build_indirect_call(type_, pointer, &argument_values, &name.to_string())
+            }
+        }
+        .unwrap();
 
         UlarValue::from_call_site_value(&self.context, &call.get_type(), call_result)
     }
 
     fn compile_expression(
         &mut self,
+        builder: &Builder<'context>,
         scope: &mut JitCompilerScope<'_, 'context>,
         expression: &TypedExpression,
     ) -> Result<UlarValue<'context>, CompilationError> {
         match expression {
-            TypedExpression::Call(call) => self.compile_call(scope, call),
-            TypedExpression::Identifier(identifier) => self.compile_identifier(scope, identifier),
-            TypedExpression::If(if_expression) => self.compile_if_expression(scope, if_expression),
+            TypedExpression::Call(call) => self.compile_call(builder, scope, call),
+            TypedExpression::Identifier(identifier) => {
+                self.compile_identifier(builder, scope, identifier)
+            }
+
+            TypedExpression::If(if_expression) => {
+                self.compile_if_expression(builder, scope, if_expression)
+            }
+
             TypedExpression::InfixOperation(infix_operation) => {
-                self.compile_infix_operation(scope, infix_operation)
+                self.compile_infix_operation(builder, scope, infix_operation)
             }
 
             TypedExpression::Number(number) => Ok(UlarValue::Int(
@@ -121,13 +136,14 @@ impl<'a, 'context> JitFunctionCompiler<'a, 'context> {
             )),
 
             TypedExpression::PrefixOperation(prefix_operation) => {
-                self.compile_prefix_operation(scope, prefix_operation)
+                self.compile_prefix_operation(builder, scope, prefix_operation)
             }
         }
     }
 
     fn compile_function_definition(
         &mut self,
+        builder: &Builder<'context>,
         scope: &mut JitCompilerScope<'_, 'context>,
         definition: &TypedFunctionDefinition,
     ) -> Result<(), CompilationError> {
@@ -139,7 +155,7 @@ impl<'a, 'context> JitFunctionCompiler<'a, 'context> {
                 &definition.name.0,
                 local_name,
                 self.context,
-                self.builder,
+                builder,
                 self.built_in_values,
                 self.execution_engine,
                 self.module,
@@ -156,7 +172,7 @@ impl<'a, 'context> JitFunctionCompiler<'a, 'context> {
             };
 
             let entry_block = self.context.append_basic_block(function, "entry");
-            let mut function_scope = JitCompilerScope::new(entry_block, Some(scope));
+            let mut function_scope = JitCompilerScope::new(Some(scope));
 
             for (definition_parameter, function_parameter) in
                 definition.parameters.iter().zip(function.get_param_iter())
@@ -173,39 +189,42 @@ impl<'a, 'context> JitFunctionCompiler<'a, 'context> {
 
             let mut function_compiler = JitFunctionCompiler {
                 context: self.context,
-
-                /*
-                 * Before we compile the function, the position of `self.builder` is unknown. We
-                 * need to compile it with its own builder so we don't have to reset
-                 * `self.builder`'s to its position before we began compiling the function, which is
-                 * impossible insofar as I'm aware.
-                 */
-                builder: &self.context.create_builder(),
                 built_in_values: self.built_in_values,
                 function,
                 execution_engine: self.execution_engine,
                 module: self.module,
             };
 
-            function_compiler.builder.position_at_end(entry_block);
+            /*
+             * Before we compile the function, the position of `builder` is unknown. We need to
+             * compile it with its own builder so we don't have to reset `builder`'s to its position
+             * before we began compiling the function, which is impossible insofar as I'm aware.
+             */
+            let function_builder = self.context.create_builder();
+
+            function_builder.position_at_end(entry_block);
             function_compiler.compile_statements_with_functions_hoisted(
+                &function_builder,
                 &mut function_scope,
                 &definition.body.statements,
             )?;
 
             let result_value = match &definition.body.result {
-                Some(result_expression) => BasicValueEnum::try_from(
-                    function_compiler
-                        .compile_expression(&mut function_scope, &result_expression)?,
-                )
-                .ok(),
+                Some(result_expression) => {
+                    BasicValueEnum::try_from(function_compiler.compile_expression(
+                        &function_builder,
+                        &mut function_scope,
+                        &result_expression,
+                    )?)
+                    .ok()
+                }
 
                 None => None,
             };
 
             match result_value {
-                Some(value) => function_compiler.builder.build_return(Some(&value)),
-                None => function_compiler.builder.build_return(None),
+                Some(value) => function_builder.build_return(Some(&value)),
+                None => function_builder.build_return(None),
             }
             .unwrap();
 
@@ -215,6 +234,7 @@ impl<'a, 'context> JitFunctionCompiler<'a, 'context> {
 
     fn compile_identifier(
         &mut self,
+        builder: &Builder<'context>,
         scope: &mut JitCompilerScope<'_, 'context>,
         identifier: &TypedIdentifier,
     ) -> Result<UlarValue<'context>, CompilationError> {
@@ -225,7 +245,7 @@ impl<'a, 'context> JitFunctionCompiler<'a, 'context> {
                 &identifier.underlying.0,
                 name,
                 self.context,
-                self.builder,
+                builder,
                 self.built_in_values,
                 self.execution_engine,
                 self.module,
@@ -235,81 +255,93 @@ impl<'a, 'context> JitFunctionCompiler<'a, 'context> {
 
     fn compile_if_expression(
         &mut self,
+        builder: &Builder<'context>,
         scope: &mut JitCompilerScope<'_, 'context>,
         if_expression: &TypedIf,
     ) -> Result<UlarValue<'context>, CompilationError> {
-        let condition = self.compile_expression(scope, &if_expression.condition)?;
-        let then_block = self.append_basic_block();
-        let else_block = self.append_basic_block();
+        let condition = self.compile_expression(builder, scope, &if_expression.condition)?;
+        let then_block = self.append_basic_block(scope);
+        let else_block = self.append_basic_block(scope);
 
-        self.builder
+        builder
             .build_conditional_branch(condition.try_into()?, then_block, else_block)
             .unwrap();
 
-        let end_block = self.append_basic_block();
+        /*
+         * Apparently order matters to LLVM, and basic blocks we reference in the phi instruction
+         * need to be defined before that instruction is built. If the "then" and/or "else" clauses
+         * of this if expression branch and the "end" basic block depends on the result of those
+         * nested branches, then the basic blocks to which those nested branches correspond need to
+         * be defined before the "end" basic block.
+         */
+        let then_builder = self.context.create_builder();
 
-        self.builder.position_at_end(then_block);
+        then_builder.position_at_end(then_block);
 
-        let then_value = self.compile_block(scope, then_block, &if_expression.then_block)?;
+        let then_value = self.compile_block(&then_builder, scope, &if_expression.then_block)?;
+        let else_builder = self.context.create_builder();
 
-        self.builder.build_unconditional_branch(end_block).unwrap();
-        self.builder.position_at_end(else_block);
+        else_builder.position_at_end(else_block);
 
-        let else_value = self.compile_block(scope, else_block, &if_expression.else_block)?;
+        let else_value = self.compile_block(&else_builder, scope, &if_expression.else_block)?;
+        let end_block = self.append_basic_block(scope);
 
-        self.builder.build_unconditional_branch(end_block).unwrap();
-
-        scope.basic_block = end_block;
-
-        self.builder.position_at_end(end_block);
+        then_builder.build_unconditional_branch(end_block).unwrap();
+        else_builder.build_unconditional_branch(end_block).unwrap();
+        builder.position_at_end(end_block);
 
         UlarValue::build_phi(
             &self.context,
-            self.builder,
+            builder,
             &if_expression.type_,
-            &[(then_value, then_block), (else_value, else_block)],
+            &[
+                (then_value, then_builder.get_insert_block().unwrap()),
+                (else_value, else_builder.get_insert_block().unwrap()),
+            ],
             scope.get_local_name(),
         )
     }
 
     fn compile_infix_operation(
         &mut self,
+        builder: &Builder<'context>,
         scope: &mut JitCompilerScope<'_, 'context>,
         infix_operation: &TypedInfixOperation,
     ) -> Result<UlarValue<'context>, CompilationError> {
         let left_value: IntValue = self
-            .compile_expression(scope, &infix_operation.left)?
+            .compile_expression(builder, scope, &infix_operation.left)?
             .try_into()?;
 
         let right_value: IntValue = self
-            .compile_expression(scope, &infix_operation.right)?
+            .compile_expression(builder, scope, &infix_operation.right)?
             .try_into()?;
 
         let name = scope.get_local_name();
 
         match infix_operation.operator {
-            InfixOperator::Addition => Ok(self
-                .builder
+            InfixOperator::Addition => Ok(builder
                 .build_int_add(left_value, right_value, &name.to_string())
                 .unwrap()
                 .into()),
 
-            InfixOperator::Subtraction => Ok(self
-                .builder
+            InfixOperator::Subtraction => Ok(builder
                 .build_int_sub(left_value, right_value, &name.to_string())
                 .unwrap()
                 .into()),
 
-            InfixOperator::Multiplication => Ok(self
-                .builder
+            InfixOperator::Multiplication => Ok(builder
                 .build_int_mul(left_value, right_value, &name.to_string())
                 .unwrap()
                 .into()),
 
             InfixOperator::Division => match infix_operation.get_type() {
-                Type::Numeric(numeric_type) => {
-                    self.compile_infix_division(name, numeric_type, left_value, right_value)
-                }
+                Type::Numeric(numeric_type) => self.compile_infix_division(
+                    builder,
+                    name,
+                    numeric_type,
+                    left_value,
+                    right_value,
+                ),
 
                 type_ => Err(CompilationError::InternalError(
                     InternalError::JitCompilerExpectedNumericType {
@@ -320,11 +352,9 @@ impl<'a, 'context> JitFunctionCompiler<'a, 'context> {
 
             InfixOperator::Modulo => match infix_operation.get_type() {
                 Type::Numeric(numeric_type) => Ok(if numeric_type.is_signed() {
-                    self.builder
-                        .build_int_signed_rem(left_value, right_value, &name.to_string())
+                    builder.build_int_signed_rem(left_value, right_value, &name.to_string())
                 } else {
-                    self.builder
-                        .build_int_signed_rem(left_value, right_value, &name.to_string())
+                    builder.build_int_signed_rem(left_value, right_value, &name.to_string())
                 }
                 .unwrap()
                 .into()),
@@ -336,14 +366,12 @@ impl<'a, 'context> JitFunctionCompiler<'a, 'context> {
                 )),
             },
 
-            InfixOperator::LogicalAnd => Ok(self
-                .builder
+            InfixOperator::LogicalAnd => Ok(builder
                 .build_and(left_value, right_value, &name.to_string())
                 .unwrap()
                 .into()),
 
-            InfixOperator::LogicalOr => Ok(self
-                .builder
+            InfixOperator::LogicalOr => Ok(builder
                 .build_or(left_value, right_value, &name.to_string())
                 .unwrap()
                 .into()),
@@ -352,6 +380,7 @@ impl<'a, 'context> JitFunctionCompiler<'a, 'context> {
 
     fn compile_infix_division(
         &mut self,
+        builder: &Builder<'context>,
         name: LocalName,
         numeric_type: NumericType,
         left_value: IntValue<'context>,
@@ -365,7 +394,7 @@ impl<'a, 'context> JitFunctionCompiler<'a, 'context> {
         UlarValue::from_call_site_value(
             &self.context,
             &Type::Numeric(numeric_type),
-            self.builder
+            builder
                 .build_call(
                     division_function,
                     &[left_value.into(), right_value.into()],
@@ -377,15 +406,15 @@ impl<'a, 'context> JitFunctionCompiler<'a, 'context> {
 
     fn compile_prefix_operation(
         &mut self,
+        builder: &Builder<'context>,
         scope: &mut JitCompilerScope<'_, 'context>,
         prefix_operation: &TypedPrefixOperation,
     ) -> Result<UlarValue<'context>, CompilationError> {
-        let expression = self.compile_expression(scope, &prefix_operation.expression)?;
+        let expression = self.compile_expression(builder, scope, &prefix_operation.expression)?;
         let name = scope.get_local_name();
 
         match prefix_operation.operator {
-            SimplePrefixOperator::Not => Ok(self
-                .builder
+            SimplePrefixOperator::Not => Ok(builder
                 .build_xor(
                     TryInto::<IntValue>::try_into(expression)?,
                     self.context.i8_type().const_int(1, false),
@@ -398,20 +427,21 @@ impl<'a, 'context> JitFunctionCompiler<'a, 'context> {
 
     fn compile_statement(
         &mut self,
+        builder: &Builder<'context>,
         scope: &mut JitCompilerScope<'_, 'context>,
         statement: &TypedStatement,
     ) -> Result<(), CompilationError> {
         match statement {
             TypedStatement::Expression(expression) => {
-                self.compile_expression(scope, expression)?;
+                self.compile_expression(builder, scope, expression)?;
             }
 
             TypedStatement::FunctionDefinition(definition) => {
-                self.compile_function_definition(scope, definition)?;
+                self.compile_function_definition(builder, scope, definition)?;
             }
 
             TypedStatement::VariableDefinition(definition) => {
-                let value = self.compile_expression(scope, &definition.value)?;
+                let value = self.compile_expression(builder, scope, &definition.value)?;
 
                 if scope.declare_variable(definition.name.0.clone(), value) {
                     return Err(CompilationError::VariableAlreadyDefined(
@@ -428,6 +458,7 @@ impl<'a, 'context> JitFunctionCompiler<'a, 'context> {
 
     fn compile_statements_with_functions_hoisted(
         &mut self,
+        builder: &Builder<'context>,
         scope: &mut JitCompilerScope<'_, 'context>,
         statements: &[TypedStatement],
     ) -> Result<(), CompilationError> {
@@ -456,14 +487,14 @@ impl<'a, 'context> JitFunctionCompiler<'a, 'context> {
          */
         for statement in statements {
             if let TypedStatement::FunctionDefinition(definition) = statement {
-                self.compile_function_definition(scope, definition)?;
+                self.compile_function_definition(builder, scope, definition)?;
             }
         }
 
         for statement in statements {
             if let TypedStatement::FunctionDefinition(_) = statement {
             } else {
-                self.compile_statement(scope, statement)?;
+                self.compile_statement(builder, scope, statement)?;
             }
         }
 
@@ -594,17 +625,20 @@ fn compile_program<'a>(
 
     builder.position_at_end(main_may_throw_entry_block);
 
-    let mut scope = JitCompilerScope::new(main_may_throw_entry_block, None);
+    let mut scope = JitCompilerScope::new(None);
     let mut function_compiler = JitFunctionCompiler {
         context: &context,
-        builder: &builder,
         built_in_values: built_in_values,
         execution_engine: &execution_engine,
         function: main_may_throw_function,
         module,
     };
 
-    function_compiler.compile_statements_with_functions_hoisted(&mut scope, &program.statements)?;
+    function_compiler.compile_statements_with_functions_hoisted(
+        &builder,
+        &mut scope,
+        &program.statements,
+    )?;
 
     builder.build_return(None).unwrap();
 

@@ -1,23 +1,15 @@
 use crate::jit_compiler::{built_in_values::BuiltInValues, module::UlarModule, value::UlarValue};
-use inkwell::{
-    basic_block::BasicBlock, builder::Builder, context::Context, execution_engine::ExecutionEngine,
-};
-
-use std::cmp::Eq;
-use std::collections::HashMap;
+use inkwell::{builder::Builder, context::Context, execution_engine::ExecutionEngine};
+use std::{cmp::Eq, collections::HashMap};
 
 pub struct JitCompilerScope<'a, 'context> {
     parent: Option<&'a JitCompilerScope<'a, 'context>>,
-    pub basic_block: BasicBlock<'context>,
     next_local_name: LocalName,
     variable_values: HashMap<String, UlarValue<'context>>,
 }
 
 impl<'a, 'context> JitCompilerScope<'a, 'context> {
-    pub fn new(
-        basic_block: BasicBlock<'context>,
-        parent: Option<&'a JitCompilerScope<'a, 'context>>,
-    ) -> Self {
+    pub fn new(parent: Option<&'a JitCompilerScope<'a, 'context>>) -> Self {
         let next_local_name = match parent {
             Some(parent) => parent.next_local_name,
             None => LocalName(0),
@@ -25,7 +17,6 @@ impl<'a, 'context> JitCompilerScope<'a, 'context> {
 
         Self {
             parent,
-            basic_block,
             next_local_name,
             variable_values: HashMap::new(),
         }
@@ -93,10 +84,9 @@ impl<'a, 'context> JitCompilerScope<'a, 'context> {
 
     pub fn with_child<A: FnOnce(&mut JitCompilerScope<'_, 'context>) -> B, B>(
         &mut self,
-        basic_block: BasicBlock<'context>,
         callback: A,
     ) -> B {
-        let mut child = JitCompilerScope::new(basic_block, Some(self));
+        let mut child = JitCompilerScope::new(Some(self));
         let result = callback(&mut child);
 
         self.next_local_name = child.next_local_name;

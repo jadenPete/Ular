@@ -82,15 +82,15 @@ fn simplify_if(if_expression: &If) -> SimpleIf {
         },
     };
 
-    match if_expression.else_if_clauses.as_slice() {
-        [head, tail @ ..] => {
+    let else_block = match if_expression.else_if_clauses.as_slice() {
+        [init @ .., last] => {
             let mut result = SimpleIf {
-                condition: Box::new(simplify_expression(&head.condition)),
-                then_block: simplify_block(&head.body),
+                condition: Box::new(simplify_expression(&last.condition)),
+                then_block: simplify_block(&last.body),
                 else_block: simple_else,
             };
 
-            for else_if in tail.iter().rev() {
+            for else_if in init.iter().rev() {
                 result = SimpleIf {
                     condition: Box::new(simplify_expression(&else_if.condition)),
                     then_block: simplify_block(&else_if.body),
@@ -101,14 +101,19 @@ fn simplify_if(if_expression: &If) -> SimpleIf {
                 };
             }
 
-            result
+            SimpleBlock {
+                statements: Vec::new(),
+                result: Some(Box::new(SimpleExpression::If(result))),
+            }
         }
 
-        [] => SimpleIf {
-            condition: Box::new(simple_condition),
-            then_block: simple_then,
-            else_block: simple_else,
-        },
+        [] => simple_else,
+    };
+
+    SimpleIf {
+        condition: Box::new(simple_condition),
+        then_block: simple_then,
+        else_block,
     }
 }
 
