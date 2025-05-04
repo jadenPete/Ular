@@ -1,10 +1,11 @@
 pub mod simple_program;
 
 use crate::{
+    error_reporting::Position,
     parser::{
         program::{
-            Block, Call, Expression, FunctionDefinition, If, InfixOperation, InfixOperator, Number,
-            PrefixOperation, PrefixOperator, Program, Statement, VariableDefinition,
+            Block, Call, Expression, FunctionDefinition, If, InfixOperation, InfixOperator, Node,
+            Number, PrefixOperation, PrefixOperator, Program, Statement, VariableDefinition,
         },
         type_::Type,
     },
@@ -42,6 +43,7 @@ fn simplify_call(call: &Call) -> SimpleCall {
     SimpleCall {
         function: Box::new(simplify_expression(&call.function)),
         arguments: call.arguments.iter().map(simplify_expression).collect(),
+        position: call.get_position(),
     }
 }
 
@@ -66,8 +68,8 @@ fn simplify_function_definition(definition: &FunctionDefinition) -> SimpleFuncti
         name: definition.name.clone(),
         parameters: definition.parameters.clone(),
         return_type: definition.return_type.clone().unwrap_or(Type::Unit),
-
         body: simplify_block(&definition.body),
+        position: definition.get_position(),
     }
 }
 
@@ -88,6 +90,7 @@ fn simplify_if(if_expression: &If) -> SimpleIf {
                 condition: Box::new(simplify_expression(&last.condition)),
                 then_block: simplify_block(&last.body),
                 else_block: simple_else,
+                position: Position(last.position.0.start..if_expression.position.0.end),
             };
 
             for else_if in init.iter().rev() {
@@ -98,6 +101,8 @@ fn simplify_if(if_expression: &If) -> SimpleIf {
                         statements: Vec::new(),
                         result: Some(Box::new(SimpleExpression::If(result))),
                     },
+
+                    position: Position(else_if.position.0.start..if_expression.position.0.end),
                 };
             }
 
@@ -114,6 +119,7 @@ fn simplify_if(if_expression: &If) -> SimpleIf {
         condition: Box::new(simple_condition),
         then_block: simple_then,
         else_block,
+        position: if_expression.get_position(),
     }
 }
 
@@ -122,6 +128,7 @@ fn simplify_infix_operation(infix_operation: &InfixOperation) -> SimpleInfixOper
         left: Box::new(simplify_expression(&infix_operation.left)),
         operator: infix_operation.operator,
         right: Box::new(simplify_expression(&infix_operation.right)),
+        position: infix_operation.get_position(),
     }
 }
 
@@ -135,12 +142,24 @@ fn simplify_prefix_operation(prefix_operation: &PrefixOperation) -> SimpleExpres
             right: Box::new(SimpleExpression::Number(Number {
                 value: -1,
                 suffix: None,
+
+                /*
+                 * This `-1` is generated, so it doesn't exist in the source. But if it did, it'd be
+                 * to the right of `prefix_operation`, separated by a `*` token. For that reason, we
+                 * set its position to a zero-byte range to the right of `prefix_operation`.
+                 */
+                position: Position(
+                    prefix_operation.position.0.start..prefix_operation.position.0.start,
+                ),
             })),
+
+            position: prefix_operation.get_position(),
         }),
 
         PrefixOperator::Not => SimpleExpression::PrefixOperation(SimplePrefixOperation {
             operator: SimplePrefixOperator::Not,
             expression: simple_expression,
+            position: prefix_operation.get_position(),
         }),
     }
 }
@@ -148,6 +167,7 @@ fn simplify_prefix_operation(prefix_operation: &PrefixOperation) -> SimpleExpres
 fn simplify_program(program: &Program) -> SimpleProgram {
     SimpleProgram {
         statements: program.statements.iter().map(simplify_statement).collect(),
+        position: program.get_position(),
     }
 }
 
@@ -165,7 +185,9 @@ fn simplify_statement(statement: &Statement) -> SimpleStatement {
             SimpleStatement::VariableDefinition(simplify_variable_definition(definition))
         }
 
-        Statement::NoOp => SimpleStatement::NoOp,
+        Statement::NoOp { position } => SimpleStatement::NoOp {
+            position: position.clone(),
+        },
     }
 }
 
@@ -173,5 +195,6 @@ fn simplify_variable_definition(definition: &VariableDefinition) -> SimpleVariab
     SimpleVariableDefinition {
         name: definition.name.clone(),
         value: simplify_expression(&definition.value),
+        position: definition.get_position(),
     }
 }

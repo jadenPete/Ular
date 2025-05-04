@@ -152,7 +152,7 @@ impl<'a, 'context> JitFunctionCompiler<'a, 'context> {
         } else {
             let local_name = scope.get_local_name();
             let function = match scope.get_variable_value(
-                &definition.name.0,
+                &definition.name.value,
                 local_name,
                 self.context,
                 builder,
@@ -178,7 +178,7 @@ impl<'a, 'context> JitFunctionCompiler<'a, 'context> {
                 definition.parameters.iter().zip(function.get_param_iter())
             {
                 function_scope.declare_variable(
-                    definition_parameter.underlying.0.clone(),
+                    definition_parameter.underlying.value.clone(),
                     UlarValue::from_basic_value(
                         self.context,
                         &definition_parameter.get_type(),
@@ -242,7 +242,7 @@ impl<'a, 'context> JitFunctionCompiler<'a, 'context> {
 
         Ok(scope
             .get_variable_value(
-                &identifier.underlying.0,
+                &identifier.underlying.value,
                 name,
                 self.context,
                 builder,
@@ -250,7 +250,7 @@ impl<'a, 'context> JitFunctionCompiler<'a, 'context> {
                 self.execution_engine,
                 self.module,
             )
-            .ok_or_else(|| CompilationError::UnknownValue(identifier.underlying.0.clone()))?)
+            .ok_or_else(|| CompilationError::UnknownValue(identifier.underlying.value.clone()))?)
     }
 
     fn compile_if_expression(
@@ -443,14 +443,14 @@ impl<'a, 'context> JitFunctionCompiler<'a, 'context> {
             TypedStatement::VariableDefinition(definition) => {
                 let value = self.compile_expression(builder, scope, &definition.value)?;
 
-                if scope.declare_variable(definition.name.0.clone(), value) {
+                if scope.declare_variable(definition.name.value.clone(), value) {
                     return Err(CompilationError::VariableAlreadyDefined(
-                        definition.name.0.clone(),
+                        definition.name.value.clone(),
                     ));
                 }
             }
 
-            TypedStatement::NoOp => {}
+            TypedStatement::NoOp { .. } => {}
         }
 
         Ok(())
@@ -465,17 +465,18 @@ impl<'a, 'context> JitFunctionCompiler<'a, 'context> {
         for statement in statements {
             if let TypedStatement::FunctionDefinition(definition) = statement {
                 let function_type = definition.type_.inkwell_type(self.context)?;
-                let function =
-                    self.module
-                        .underlying
-                        .add_function(&definition.name.0, function_type, None);
+                let function = self.module.underlying.add_function(
+                    &definition.name.value,
+                    function_type,
+                    None,
+                );
 
                 if scope.declare_variable(
-                    definition.name.0.clone(),
+                    definition.name.value.clone(),
                     UlarValue::Function(UlarFunction::DirectReference(function)),
                 ) {
                     return Err(CompilationError::VariableAlreadyDefined(
-                        definition.name.0.clone(),
+                        definition.name.value.clone(),
                     ));
                 }
             }

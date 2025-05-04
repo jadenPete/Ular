@@ -1,5 +1,12 @@
-use crate::parser::type_::{NumericType, Type};
+use crate::{
+    error_reporting::Position,
+    parser::type_::{NumericType, Type},
+};
 use std::fmt::Debug;
+
+pub trait Node {
+    fn get_position(&self) -> Position;
+}
 
 /// Grammar:
 /// ```ebnf
@@ -57,6 +64,13 @@ use std::fmt::Debug;
 #[derive(Debug)]
 pub struct Program {
     pub statements: Vec<Statement>,
+    pub position: Position,
+}
+
+impl Node for Program {
+    fn get_position(&self) -> Position {
+        self.position.clone()
+    }
 }
 
 #[derive(Debug)]
@@ -64,13 +78,31 @@ pub enum Statement {
     VariableDefinition(VariableDefinition),
     FunctionDefinition(FunctionDefinition),
     Expression(Expression),
-    NoOp,
+    NoOp { position: Position },
+}
+
+impl Node for Statement {
+    fn get_position(&self) -> Position {
+        match self {
+            Self::VariableDefinition(definition) => definition.get_position(),
+            Self::FunctionDefinition(definition) => definition.get_position(),
+            Self::Expression(expression) => expression.get_position(),
+            Self::NoOp { position } => position.clone(),
+        }
+    }
 }
 
 #[derive(Debug)]
 pub struct VariableDefinition {
     pub name: Identifier,
     pub value: Expression,
+    pub position: Position,
+}
+
+impl Node for VariableDefinition {
+    fn get_position(&self) -> Position {
+        self.position.clone()
+    }
 }
 
 #[derive(Debug)]
@@ -79,12 +111,26 @@ pub struct FunctionDefinition {
     pub parameters: Vec<Parameter>,
     pub return_type: Option<Type>,
     pub body: Block,
+    pub position: Position,
+}
+
+impl Node for FunctionDefinition {
+    fn get_position(&self) -> Position {
+        self.position.clone()
+    }
 }
 
 #[derive(Clone, Debug)]
 pub struct Parameter {
     pub name: Identifier,
     pub type_: Type,
+    pub position: Position,
+}
+
+impl Node for Parameter {
+    fn get_position(&self) -> Position {
+        self.position.clone()
+    }
 }
 
 #[derive(Debug)]
@@ -103,18 +149,39 @@ pub enum Expression {
     PrefixOperation(PrefixOperation),
 }
 
+impl Node for Expression {
+    fn get_position(&self) -> Position {
+        match self {
+            Expression::If(if_expression) => if_expression.get_position(),
+            Expression::InfixOperation(infix_operation) => infix_operation.get_position(),
+            Expression::Call(call) => call.get_position(),
+            Expression::Identifier(identifier) => identifier.get_position(),
+            Expression::Number(number) => number.get_position(),
+            Expression::PrefixOperation(prefix_operation) => prefix_operation.get_position(),
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct If {
     pub condition: Box<Expression>,
     pub body: Block,
     pub else_if_clauses: Vec<ElseIfClause>,
     pub else_clause: Option<ElseClause>,
+    pub position: Position,
+}
+
+impl Node for If {
+    fn get_position(&self) -> Position {
+        self.position.clone()
+    }
 }
 
 #[derive(Debug)]
 pub struct ElseIfClause {
     pub condition: Box<Expression>,
     pub body: Block,
+    pub position: Position,
 }
 
 #[derive(Debug)]
@@ -127,6 +194,13 @@ pub struct InfixOperation {
     pub left: Box<Expression>,
     pub operator: InfixOperator,
     pub right: Box<Expression>,
+    pub position: Position,
+}
+
+impl Node for InfixOperation {
+    fn get_position(&self) -> Position {
+        self.position.clone()
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -164,6 +238,13 @@ pub enum OperatorType {
 pub struct PrefixOperation {
     pub operator: PrefixOperator,
     pub expression: Box<Expression>,
+    pub position: Position,
+}
+
+impl Node for PrefixOperation {
+    fn get_position(&self) -> Position {
+        self.position.clone()
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -176,13 +257,36 @@ pub enum PrefixOperator {
 pub struct Call {
     pub function: Box<Expression>,
     pub arguments: Vec<Expression>,
+    pub position: Position,
+}
+
+impl Node for Call {
+    fn get_position(&self) -> Position {
+        self.position.clone()
+    }
 }
 
 #[derive(Clone, Debug)]
-pub struct Identifier(pub String);
+pub struct Identifier {
+    pub value: String,
+    pub position: Position,
+}
 
-#[derive(Clone, Copy, Debug)]
+impl Node for Identifier {
+    fn get_position(&self) -> Position {
+        self.position.clone()
+    }
+}
+
+#[derive(Clone, Debug)]
 pub struct Number {
     pub value: i128,
     pub suffix: Option<NumericType>,
+    pub position: Position,
+}
+
+impl Node for Number {
+    fn get_position(&self) -> Position {
+        self.position.clone()
+    }
 }

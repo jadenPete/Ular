@@ -1,6 +1,7 @@
 pub mod token;
 
 use crate::{
+    error_reporting::Position,
     lexer::token::{PositionedToken, Token},
     phase::Phase,
 };
@@ -32,8 +33,7 @@ impl<'a> PositionedSource<'a> {
     fn to_positioned_token(&self, token: Token) -> PositionedToken {
         PositionedToken {
             token,
-            start: self.index,
-            end: self.index + self.source.len(),
+            position: Position(self.index..self.index + self.source.len()),
         }
     }
 }

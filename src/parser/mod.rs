@@ -2,7 +2,8 @@ pub mod program;
 pub mod type_;
 
 use crate::{
-    lexer::token::{Token, Tokens},
+    error_reporting::Position,
+    lexer::token::{PositionedToken, Token, Tokens},
     parser::{
         program::{
             Block, Call, ElseClause, ElseIfClause, Expression, FunctionDefinition, Identifier, If,
@@ -16,12 +17,13 @@ use crate::{
 
 use nom::{
     branch::alt,
-    combinator::{eof, map, opt},
+    combinator::{consumed, eof, map, opt},
     error::{ErrorKind, ParseError},
     multi::{many0, many1, separated_list0},
     sequence::{delimited, tuple},
     IResult, InputIter, Parser, Slice,
 };
+use program::Node;
 
 pub struct ParserPhase;
 
@@ -41,8 +43,8 @@ impl<'a> Phase<Tokens<'a>, Program, nom::Err<nom::error::Error<Tokens<'a>>>> for
 fn parse_token(token: Token) -> impl Fn(Tokens) -> IResult<Tokens, Token> {
     move |input| {
         take_token(input).and_then(|(consumed, actual)| {
-            if actual == token {
-                Ok((consumed, actual))
+            if actual.token == token {
+                Ok((consumed, actual.token))
             } else {
                 Err(nom::Err::Error(nom::error::Error::new(
                     input,
@@ -53,10 +55,22 @@ fn parse_token(token: Token) -> impl Fn(Tokens) -> IResult<Tokens, Token> {
     }
 }
 
+fn positioned<'a, O, F: Parser<Tokens<'a>, O, nom::error::Error<Tokens<'a>>>>(
+    parser: F,
+) -> impl FnMut(Tokens<'a>) -> IResult<Tokens<'a>, (Position, O)> {
+    map(consumed(parser), |(consumed, output)| {
+        (consumed.get_position(), output)
+    })
+}
+
 fn parse_program(input: Tokens) -> IResult<Tokens, Program> {
-    map(tuple((many0(parse_statement), eof)), |(statements, _)| {
-        Program { statements }
-    })(input)
+    map(
+        positioned(tuple((many0(parse_statement), eof))),
+        |(position, (statements, _))| Program {
+            statements,
+            position,
+        },
+    )(input)
 }
 
 fn parse_statement(input: Tokens) -> IResult<Tokens, Statement> {
@@ -71,25 +85,32 @@ fn parse_statement(input: Tokens) -> IResult<Tokens, Statement> {
             tuple((parse_expression, parse_token(Token::Semicolon))),
             |(expression, _)| Statement::Expression(expression),
         ),
-        map(parse_token(Token::Semicolon), |_| Statement::NoOp),
+        map(
+            positioned(parse_token(Token::Semicolon)),
+            |(position, _)| Statement::NoOp { position },
+        ),
     ))(input)
 }
 
 fn parse_variable_definition(input: Tokens) -> IResult<Tokens, VariableDefinition> {
     map(
-        tuple((
+        positioned(tuple((
             parse_identifier,
             parse_token(Token::Definition),
             parse_expression,
             parse_token(Token::Semicolon),
-        )),
-        |(name, _, value, _)| VariableDefinition { name, value },
+        ))),
+        |(position, (name, _, value, _))| VariableDefinition {
+            name,
+            value,
+            position,
+        },
     )(input)
 }
 
 fn parse_function_definition(input: Tokens) -> IResult<Tokens, FunctionDefinition> {
     map(
-        tuple((
+        positioned(tuple((
             parse_token(Token::FnKeyword),
             parse_identifier,
             parse_token(Token::LeftParenthesis),
@@ -100,24 +121,29 @@ fn parse_function_definition(input: Tokens) -> IResult<Tokens, FunctionDefinitio
                 |(_, return_type)| return_type,
             )),
             parse_block,
-        )),
-        |(_, name, _, parameters, _, return_type, body)| FunctionDefinition {
+        ))),
+        |(position, (_, name, _, parameters, _, return_type, body))| FunctionDefinition {
             name,
             parameters,
             return_type,
             body,
+            position,
         },
     )(input)
 }
 
 fn parse_parameter(input: Tokens) -> IResult<Tokens, Parameter> {
     map(
-        tuple((
+        positioned(tuple((
             parse_identifier,
             parse_token(Token::TypeAnnotation),
             parse_type,
-        )),
-        |(name, _, type_)| Parameter { name, type_ },
+        ))),
+        |(position, (name, _, type_))| Parameter {
+            name,
+            type_,
+            position,
+        },
     )(input)
 }
 
@@ -233,10 +259,14 @@ fn parse_infix_operation<
                 let mut result = left;
 
                 for (operator, right) in operations {
+                    let position =
+                        Position(result.get_position().0.start..right.get_position().0.end);
+
                     result = Expression::InfixOperation(InfixOperation {
                         left: Box::new(result),
                         operator,
                         right: Box::new(right),
+                        position,
                     });
                 }
 
@@ -282,17 +312,18 @@ fn parse_product(input: Tokens) -> IResult<Tokens, Expression> {
 fn parse_prefix_operation(input: Tokens) -> IResult<Tokens, Expression> {
     alt((
         map(
-            tuple((
+            positioned(tuple((
                 alt((
                     map(parse_token(Token::Minus), |_| PrefixOperator::Negate),
                     map(parse_token(Token::Not), |_| PrefixOperator::Not),
                 )),
                 parse_prefix_operation,
-            )),
-            |(operator, expression)| {
+            ))),
+            |(position, (operator, expression))| {
                 Expression::PrefixOperation(PrefixOperation {
                     operator,
                     expression: Box::new(expression),
+                    position,
                 })
             },
         ),
@@ -305,22 +336,26 @@ fn parse_call(input: Tokens) -> IResult<Tokens, Expression> {
         map(
             tuple((
                 parse_if,
-                many1(map(
+                many1(positioned(map(
                     tuple((
                         parse_token(Token::LeftParenthesis),
                         separated_list0(parse_token(Token::Comma), parse_expression),
                         parse_token(Token::RightParenthesis),
                     )),
                     |(_, arguments, _)| arguments,
-                )),
+                ))),
             )),
             |(function, argument_lists)| {
                 let mut result = function;
 
-                for argument_list in argument_lists {
+                for (argument_list_position, argument_list) in argument_lists {
+                    let position =
+                        Position(result.get_position().0.start..argument_list_position.0.end);
+
                     result = Expression::Call(Call {
                         function: Box::new(result),
                         arguments: argument_list,
+                        position,
                     });
                 }
 
@@ -335,13 +370,16 @@ fn parse_else_if_clause(input: Tokens) -> IResult<Tokens, ElseIfClause> {
     map(
         tuple((
             parse_token(Token::ElseKeyword),
-            parse_token(Token::IfKeyword),
-            parse_expression,
-            parse_block,
+            positioned(tuple((
+                parse_token(Token::IfKeyword),
+                parse_expression,
+                parse_block,
+            ))),
         )),
-        |(_, _, condition, body)| ElseIfClause {
+        |(_, (position, (_, condition, body)))| ElseIfClause {
             condition: Box::new(condition),
             body,
+            position,
         },
     )(input)
 }
@@ -356,19 +394,20 @@ fn parse_else_clause(input: Tokens) -> IResult<Tokens, ElseClause> {
 fn parse_if(input: Tokens) -> IResult<Tokens, Expression> {
     alt((
         map(
-            tuple((
+            positioned(tuple((
                 parse_token(Token::IfKeyword),
                 parse_expression,
                 parse_block,
                 many0(parse_else_if_clause),
                 opt(parse_else_clause),
-            )),
-            |(_, condition, body, else_if_clauses, else_clause)| {
+            ))),
+            |(position, (_, condition, body, else_if_clauses, else_clause))| {
                 Expression::If(If {
                     condition: Box::new(condition),
                     body,
                     else_if_clauses,
                     else_clause,
+                    position,
                 })
             },
         ),
@@ -393,8 +432,15 @@ fn parse_primary(input: Tokens) -> IResult<Tokens, Expression> {
 fn parse_identifier(input: Tokens) -> IResult<Tokens, Identifier> {
     let (remaining, token) = take_token(input)?;
 
-    match token {
-        Token::Identifier(value) => Ok((remaining, Identifier(value))),
+    match token.token {
+        Token::Identifier(value) => Ok((
+            remaining,
+            Identifier {
+                value,
+                position: token.position,
+            },
+        )),
+
         _ => Err(nom::Err::Error(nom::error::Error::new(
             input,
             ErrorKind::IsNot,
@@ -405,7 +451,7 @@ fn parse_identifier(input: Tokens) -> IResult<Tokens, Identifier> {
 fn parse_raw_number(input: Tokens) -> IResult<Tokens, i128> {
     let (remaining, token) = take_token(input)?;
 
-    match token {
+    match token.token {
         Token::Number(value) => Ok((remaining, value)),
         _ => Err(nom::Err::Error(nom::error::Error::new(
             input,
@@ -416,14 +462,18 @@ fn parse_raw_number(input: Tokens) -> IResult<Tokens, i128> {
 
 fn parse_number(input: Tokens) -> IResult<Tokens, Number> {
     map(
-        tuple((parse_raw_number, opt(parse_numeric_type))),
-        |(value, suffix)| Number { value, suffix },
+        positioned(tuple((parse_raw_number, opt(parse_numeric_type)))),
+        |(position, (value, suffix))| Number {
+            value,
+            suffix,
+            position,
+        },
     )(input)
 }
 
-fn take_token(input: Tokens) -> IResult<Tokens, Token> {
+fn take_token(input: Tokens) -> IResult<Tokens, PositionedToken> {
     match input.iter_elements().next() {
-        Some(token) => Ok((input.slice(1..), token.token.clone())),
+        Some(token) => Ok((input.slice(1..), token.clone())),
         None => Err(nom::Err::Error(nom::error::Error::from_error_kind(
             input,
             ErrorKind::Eof,

@@ -5,7 +5,7 @@ pub mod typed_program;
 use crate::{
     error::CompilationError,
     parser::{
-        program::{Identifier, Number, OperatorType},
+        program::{Identifier, Node, Number, OperatorType},
         type_::{FunctionType, NumericType, Type},
     },
     phase::Phase,
@@ -86,6 +86,7 @@ impl<'a> Typechecker<'a> {
                     function: Box::new(typechecked_function),
                     arguments: typechecked_arguments,
                     type_: *function_type.return_type,
+                    position: call.get_position(),
                 })
             }
             _ => Err(CompilationError::ValueNotCallable),
@@ -136,7 +137,7 @@ impl<'a> Typechecker<'a> {
         for parameter in &definition.parameters {
             typechecker
                 .scope
-                .declare_variable(parameter.name.0.clone(), parameter.type_.clone());
+                .declare_variable(parameter.name.value.clone(), parameter.type_.clone());
         }
 
         let typechecked_statements =
@@ -158,6 +159,7 @@ impl<'a> Typechecker<'a> {
                 .map(|parameter| TypedIdentifier {
                     underlying: parameter.name.clone(),
                     type_: parameter.type_.clone(),
+                    position: parameter.get_position(),
                 })
                 .collect(),
 
@@ -175,6 +177,8 @@ impl<'a> Typechecker<'a> {
 
                 return_type: Box::new(definition.return_type.clone()),
             },
+
+            position: definition.get_position(),
         })
     }
 
@@ -183,12 +187,13 @@ impl<'a> Typechecker<'a> {
         identifier: &Identifier,
     ) -> Result<TypedIdentifier, CompilationError> {
         self.scope
-            .get_variable_type(&identifier.0)
+            .get_variable_type(&identifier.value)
             .map(|type_| TypedIdentifier {
                 underlying: identifier.clone(),
                 type_,
+                position: identifier.get_position(),
             })
-            .ok_or_else(|| CompilationError::UnknownValue(identifier.0.clone()))
+            .ok_or_else(|| CompilationError::UnknownValue(identifier.value.clone()))
     }
 
     fn typecheck_if(
@@ -222,6 +227,7 @@ impl<'a> Typechecker<'a> {
             then_block: typechecked_then_block,
             else_block: typechecked_else_block,
             type_,
+            position: if_expression.get_position(),
         })
     }
 
@@ -255,6 +261,7 @@ impl<'a> Typechecker<'a> {
             operator: infix_operation.operator,
             right: Box::new(typechecked_right),
             type_,
+            position: infix_operation.get_position(),
         })
     }
 
@@ -263,20 +270,24 @@ impl<'a> Typechecker<'a> {
         number: &Number,
         suggested_type: Option<&Type>,
     ) -> Result<TypedNumber, CompilationError> {
+        let position = number.get_position();
         let result = match (number.suffix, suggested_type) {
             (Some(suffix), _) => TypedNumber {
                 value: number.value,
                 type_: suffix,
+                position,
             },
 
             (None, Some(Type::Numeric(suggested))) => TypedNumber {
                 value: number.value,
                 type_: suggested.clone(),
+                position,
             },
 
             (None, _) => TypedNumber {
                 value: number.value,
                 type_: NumericType::I32,
+                position,
             },
         };
 
@@ -309,6 +320,7 @@ impl<'a> Typechecker<'a> {
             operator: prefix_operation.operator,
             expression: Box::new(typechecked_expression),
             type_,
+            position: prefix_operation.get_position(),
         })
     }
 
@@ -329,7 +341,9 @@ impl<'a> Typechecker<'a> {
                 self.typecheck_expression(expression, Some(&Type::Unit))?,
             )),
 
-            SimpleStatement::NoOp => Ok(TypedStatement::NoOp),
+            SimpleStatement::NoOp { position } => Ok(TypedStatement::NoOp {
+                position: position.clone(),
+            }),
         }
     }
 
@@ -351,16 +365,16 @@ impl<'a> Typechecker<'a> {
 
                 if self
                     .scope
-                    .declare_variable(definition.name.0.clone(), type_)
+                    .declare_variable(definition.name.value.clone(), type_)
                 {
                     return Err(CompilationError::VariableAlreadyDefined(
-                        definition.name.0.clone(),
+                        definition.name.value.clone(),
                     ));
                 }
             }
         }
 
-        let mut result: Vec<TypedStatement> = vec![TypedStatement::NoOp; statements.len()];
+        let mut result: Vec<Option<TypedStatement>> = vec![None; statements.len()];
 
         /*
          * Typecheck the functions first, so they don't yet have access to global variables.
@@ -372,20 +386,23 @@ impl<'a> Typechecker<'a> {
          */
         for (i, statement) in statements.iter().enumerate() {
             if let SimpleStatement::FunctionDefinition(definition) = statement {
-                result[i] = TypedStatement::FunctionDefinition(
+                result[i] = Some(TypedStatement::FunctionDefinition(
                     self.typecheck_function_definition(definition)?,
-                );
+                ));
             }
         }
 
         for (i, statement) in statements.iter().enumerate() {
             if let SimpleStatement::FunctionDefinition(_) = statement {
             } else {
-                result[i] = self.typecheck_statement(statement)?;
+                result[i] = Some(self.typecheck_statement(statement)?);
             }
         }
 
-        Ok(result)
+        Ok(result
+            .into_iter()
+            .map(|statement| statement.unwrap())
+            .collect())
     }
 
     fn typecheck_variable_definition(
@@ -396,15 +413,16 @@ impl<'a> Typechecker<'a> {
 
         if self
             .scope
-            .declare_variable(definition.name.0.clone(), result.get_type())
+            .declare_variable(definition.name.value.clone(), result.get_type())
         {
             Err(CompilationError::VariableAlreadyDefined(
-                definition.name.0.clone(),
+                definition.name.value.clone(),
             ))
         } else {
             Ok(TypedVariableDefinition {
                 name: definition.name.clone(),
                 value: result,
+                position: definition.get_position(),
             })
         }
     }
@@ -426,6 +444,8 @@ impl Phase<&SimpleProgram, TypedProgram, CompilationError> for TypecheckerPhase 
         Ok(TypedProgram {
             statements: typechecker
                 .typecheck_statements_with_functions_hoisted(&program.statements)?,
+
+            position: program.get_position(),
         })
     }
 }

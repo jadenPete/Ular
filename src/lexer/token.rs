@@ -1,8 +1,9 @@
-use nom::{InputIter, InputLength, Needed, Slice};
+use crate::error_reporting::Position;
+use nom::{InputIter, InputLength, Needed, Offset, Slice};
 use std::{
     fmt::{Debug, Formatter},
     iter::Enumerate,
-    ops::{Index, RangeFrom},
+    ops::{Index, RangeFrom, RangeTo},
     slice::SliceIndex,
 };
 
@@ -77,11 +78,10 @@ pub enum Token {
     TypeAnnotation,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct PositionedToken {
     pub token: Token,
-    pub start: usize,
-    pub end: usize,
+    pub position: Position,
 }
 
 #[derive(Copy, Clone)]
@@ -90,16 +90,25 @@ pub struct Tokens<'a> {
     pub source: &'a str,
 }
 
+impl<'a> Tokens<'a> {
+    pub fn get_position(&self) -> Position {
+        Position(match (self.tokens.first(), self.tokens.last()) {
+            (Some(first_token), Some(last_token)) => {
+                first_token.position.0.start..last_token.position.0.end
+            }
+
+            /*
+             * Technically, this isn't correct because `self.tokens` being empty doesn't imply that
+             * `self.source` is empty, but empty token slices should be rare.
+             */
+            _ => 0..self.source.len(),
+        })
+    }
+}
+
 impl<'a> Debug for Tokens<'a> {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
-        let source_slice = match (self.tokens.first(), self.tokens.last()) {
-            (Some(first_token), Some(last_token)) => {
-                &self.source[first_token.start..last_token.end]
-            }
-            _ => self.source,
-        };
-
-        source_slice.fmt(formatter)
+        write!(formatter, "{}", &self.source[self.get_position().0])
     }
 }
 
@@ -143,8 +152,24 @@ impl<'a> InputLength for Tokens<'a> {
     }
 }
 
+impl<'a> Offset for Tokens<'a> {
+    fn offset(&self, second: &Self) -> usize {
+        (second.tokens.as_ptr() as usize - self.tokens.as_ptr() as usize)
+            / std::mem::size_of::<PositionedToken>()
+    }
+}
+
 impl<'a> Slice<RangeFrom<usize>> for Tokens<'a> {
     fn slice(&self, range: RangeFrom<usize>) -> Self {
+        Self {
+            tokens: self.tokens.slice(range),
+            source: self.source,
+        }
+    }
+}
+
+impl<'a> Slice<RangeTo<usize>> for Tokens<'a> {
+    fn slice(&self, range: RangeTo<usize>) -> Self {
         Self {
             tokens: self.tokens.slice(range),
             source: self.source,

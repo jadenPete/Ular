@@ -1,4 +1,5 @@
 mod error;
+mod error_reporting;
 mod jit_compiler;
 mod lexer;
 mod parser;
