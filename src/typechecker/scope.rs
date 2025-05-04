@@ -1,4 +1,11 @@
-use crate::{parser::type_::Type, typechecker::built_in_values::BuiltInValues};
+use crate::{
+    error_reporting::{CompilationError, CompilationErrorMessage},
+    parser::{
+        program::{Identifier, Node},
+        type_::Type,
+    },
+    typechecker::built_in_values::BuiltInValues,
+};
 use std::collections::HashMap;
 
 pub struct TypecheckerScope<'a> {
@@ -24,14 +31,22 @@ impl<'a> TypecheckerScope<'a> {
         }
     }
 
-    pub fn declare_variable(&mut self, name: String, type_: Type) -> bool {
-        let result = self.variable_types.contains_key(&name);
+    pub fn declare_variable(
+        &mut self,
+        name: &Identifier,
+        type_: Type,
+    ) -> Result<(), CompilationError> {
+        match self.variable_types.insert(name.value.clone(), type_) {
+            Some(_) => Err(CompilationError {
+                message: CompilationErrorMessage::VariableAlreadyDefined {
+                    name: name.value.clone(),
+                },
 
-        if !result {
-            self.variable_types.insert(name, type_);
+                position: Some(name.get_position()),
+            }),
+
+            None => Ok(()),
         }
-
-        result
     }
 
     pub fn get_variable_type(&self, name: &str) -> Option<Type> {

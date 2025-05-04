@@ -69,6 +69,13 @@ impl Node for SimpleFunctionDefinition {
 pub struct SimpleBlock {
     pub statements: Vec<SimpleStatement>,
     pub result: Option<Box<SimpleExpression>>,
+    pub position: Position,
+}
+
+impl Node for SimpleBlock {
+    fn get_position(&self) -> Position {
+        self.position.clone()
+    }
 }
 
 #[derive(Debug)]

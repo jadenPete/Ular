@@ -205,15 +205,16 @@ fn parse_numeric_type(input: Tokens) -> IResult<Tokens, NumericType> {
 
 fn parse_block(input: Tokens) -> IResult<Tokens, Block> {
     map(
-        tuple((
+        positioned(tuple((
             parse_token(Token::LeftCurlyBracket),
             many0(parse_statement),
             opt(parse_expression),
             parse_token(Token::RightCurlyBracket),
-        )),
-        |(_, statements, result, _)| Block {
+        ))),
+        |(position, (_, statements, result, _))| Block {
             statements,
             result: result.map(Box::new),
+            position,
         },
     )(input)
 }

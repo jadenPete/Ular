@@ -36,6 +36,8 @@ fn simplify_block(block: &Block) -> SimpleBlock {
             .result
             .as_ref()
             .map(|result| Box::new(simplify_expression(result))),
+
+        position: block.get_position(),
     }
 }
 
@@ -81,6 +83,7 @@ fn simplify_if(if_expression: &If) -> SimpleIf {
         None => SimpleBlock {
             statements: Vec::new(),
             result: None,
+            position: if_expression.get_position(),
         },
     };
 
@@ -94,21 +97,27 @@ fn simplify_if(if_expression: &If) -> SimpleIf {
             };
 
             for else_if in init.iter().rev() {
+                let result_position = result.get_position();
+
                 result = SimpleIf {
                     condition: Box::new(simplify_expression(&else_if.condition)),
                     then_block: simplify_block(&else_if.body),
                     else_block: SimpleBlock {
                         statements: Vec::new(),
                         result: Some(Box::new(SimpleExpression::If(result))),
+                        position: result_position,
                     },
 
                     position: Position(else_if.position.0.start..if_expression.position.0.end),
                 };
             }
 
+            let result_position = result.get_position();
+
             SimpleBlock {
                 statements: Vec::new(),
                 result: Some(Box::new(SimpleExpression::If(result))),
+                position: result_position,
             }
         }
 

@@ -3,7 +3,7 @@ mod scope;
 pub mod typed_program;
 
 use crate::{
-    error::CompilationError,
+    error_reporting::{CompilationError, CompilationErrorMessage},
     parser::{
         program::{Identifier, Node, Number, OperatorType},
         type_::{FunctionType, NumericType, Type},
@@ -52,6 +52,7 @@ impl<'a> Typechecker<'a> {
         Ok(TypedBlock {
             statements: typechecked_statements,
             result: typechecked_result,
+            position: block.get_position(),
         })
     }
 
@@ -64,9 +65,13 @@ impl<'a> Typechecker<'a> {
                 let actual_arguments = function_type.parameters.len();
 
                 if actual_arguments != expected_arguments {
-                    return Err(CompilationError::IncorrectNumberOfArguments {
-                        expected: expected_arguments,
-                        actual: actual_arguments,
+                    return Err(CompilationError {
+                        message: CompilationErrorMessage::IncorrectNumberOfArguments {
+                            expected: expected_arguments,
+                            actual: actual_arguments,
+                        },
+
+                        position: Some(call.get_position()),
                     });
                 }
 
@@ -89,7 +94,11 @@ impl<'a> Typechecker<'a> {
                     position: call.get_position(),
                 })
             }
-            _ => Err(CompilationError::ValueNotCallable),
+
+            _ => Err(CompilationError {
+                message: CompilationErrorMessage::ValueNotCallable,
+                position: Some(typechecked_function.get_position()),
+            }),
         }
     }
 
@@ -137,7 +146,7 @@ impl<'a> Typechecker<'a> {
         for parameter in &definition.parameters {
             typechecker
                 .scope
-                .declare_variable(parameter.name.value.clone(), parameter.type_.clone());
+                .declare_variable(&parameter.name, parameter.type_.clone())?;
         }
 
         let typechecked_statements =
@@ -166,6 +175,7 @@ impl<'a> Typechecker<'a> {
             body: TypedBlock {
                 statements: typechecked_statements,
                 result: typechecked_result,
+                position: definition.body.get_position(),
             },
 
             type_: FunctionType {
@@ -193,7 +203,13 @@ impl<'a> Typechecker<'a> {
                 type_,
                 position: identifier.get_position(),
             })
-            .ok_or_else(|| CompilationError::UnknownValue(identifier.value.clone()))
+            .ok_or_else(|| CompilationError {
+                message: CompilationErrorMessage::UnknownValue {
+                    name: identifier.value.clone(),
+                },
+
+                position: Some(identifier.get_position()),
+            })
     }
 
     fn typecheck_if(
@@ -271,31 +287,47 @@ impl<'a> Typechecker<'a> {
         suggested_type: Option<&Type>,
     ) -> Result<TypedNumber, CompilationError> {
         let position = number.get_position();
-        let result = match (number.suffix, suggested_type) {
-            (Some(suffix), _) => TypedNumber {
-                value: number.value,
-                type_: suffix,
-                position,
-            },
+        let (result, expected_type) = match (number.suffix, suggested_type) {
+            (Some(suffix), _) => (
+                TypedNumber {
+                    value: number.value,
+                    type_: suffix,
+                    position,
+                },
+                Some(suffix),
+            ),
 
-            (None, Some(Type::Numeric(suggested))) => TypedNumber {
-                value: number.value,
-                type_: suggested.clone(),
-                position,
-            },
+            (None, Some(Type::Numeric(suggested))) => (
+                TypedNumber {
+                    value: number.value,
+                    type_: suggested.clone(),
+                    position,
+                },
+                Some(*suggested),
+            ),
 
-            (None, _) => TypedNumber {
-                value: number.value,
-                type_: NumericType::I32,
-                position,
-            },
+            (None, _) => (
+                TypedNumber {
+                    value: number.value,
+                    type_: NumericType::I32,
+                    position,
+                },
+                None,
+            ),
         };
 
         if result.type_.is_valid(result.value) {
             Ok(result)
         } else {
-            Err(CompilationError::NumberOutOfRange {
-                type_: format!("{}", result.type_),
+            Err(CompilationError {
+                message: CompilationErrorMessage::NumberOutOfRange {
+                    expected_type: expected_type.map(|type_| format!("{}", type_)),
+                    value: number.value,
+                    minimum: result.type_.minimum(),
+                    maximum: result.type_.maximum(),
+                },
+
+                position: Some(number.get_position()),
             })
         }
     }
@@ -363,14 +395,7 @@ impl<'a> Typechecker<'a> {
                     return_type: Box::new(definition.return_type.clone()),
                 });
 
-                if self
-                    .scope
-                    .declare_variable(definition.name.value.clone(), type_)
-                {
-                    return Err(CompilationError::VariableAlreadyDefined(
-                        definition.name.value.clone(),
-                    ));
-                }
+                self.scope.declare_variable(&definition.name, type_)?;
             }
         }
 
@@ -411,20 +436,14 @@ impl<'a> Typechecker<'a> {
     ) -> Result<TypedVariableDefinition, CompilationError> {
         let result = self.typecheck_expression(&definition.value, None)?;
 
-        if self
-            .scope
-            .declare_variable(definition.name.value.clone(), result.get_type())
-        {
-            Err(CompilationError::VariableAlreadyDefined(
-                definition.name.value.clone(),
-            ))
-        } else {
-            Ok(TypedVariableDefinition {
-                name: definition.name.clone(),
-                value: result,
-                position: definition.get_position(),
-            })
-        }
+        self.scope
+            .declare_variable(&definition.name, result.get_type())?;
+
+        Ok(TypedVariableDefinition {
+            name: definition.name.clone(),
+            value: result,
+            position: definition.get_position(),
+        })
     }
 }
 
@@ -450,24 +469,32 @@ impl Phase<&SimpleProgram, TypedProgram, CompilationError> for TypecheckerPhase 
     }
 }
 
-fn assert_numeric<A: Typed>(value: &A) -> Result<(), CompilationError> {
+fn assert_numeric<A: Node + Typed>(value: &A) -> Result<(), CompilationError> {
     match value.get_type() {
         Type::Numeric(_) => Ok(()),
-        type_ => Err(CompilationError::ExpectedNumericType {
-            actual_type: format!("{}", type_),
+        type_ => Err(CompilationError {
+            message: CompilationErrorMessage::ExpectedNumericType {
+                actual_type: format!("{}", type_),
+            },
+
+            position: Some(value.get_position()),
         }),
     }
 }
 
-fn assert_type<A: Typed>(value: &A, expected_type: &Type) -> Result<(), CompilationError> {
+fn assert_type<A: Node + Typed>(value: &A, expected_type: &Type) -> Result<(), CompilationError> {
     let value_type = value.get_type();
 
     if value_type == *expected_type {
         Ok(())
     } else {
-        Err(CompilationError::TypeMismatch {
-            expected: format!("{}", expected_type),
-            actual: format!("{}", value_type),
+        Err(CompilationError {
+            message: CompilationErrorMessage::TypeMismatch {
+                expected_type: format!("{}", expected_type),
+                actual_type: format!("{}", value_type),
+            },
+
+            position: Some(value.get_position()),
         })
     }
 }

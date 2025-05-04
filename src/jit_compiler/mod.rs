@@ -4,7 +4,7 @@ mod scope;
 mod value;
 
 use crate::{
-    error::{CompilationError, InternalError},
+    error_reporting::{CompilationError, CompilationErrorMessage, InternalError, Position},
     jit_compiler::{
         built_in_values::BuiltInValues,
         module::UlarModule,
@@ -12,7 +12,7 @@ use crate::{
         value::{UlarFunction, UlarValue},
     },
     parser::{
-        program::InfixOperator,
+        program::{InfixOperator, Node},
         type_::{NumericType, Type},
     },
     simplifier::simple_program::SimplePrefixOperator,
@@ -105,7 +105,12 @@ impl<'a, 'context> JitFunctionCompiler<'a, 'context> {
         }
         .unwrap();
 
-        UlarValue::from_call_site_value(&self.context, &call.get_type(), call_result)
+        UlarValue::from_call_site_value(
+            &self.context,
+            &call.get_type(),
+            call_result,
+            call.get_position(),
+        )
     }
 
     fn compile_expression(
@@ -148,7 +153,10 @@ impl<'a, 'context> JitFunctionCompiler<'a, 'context> {
         definition: &TypedFunctionDefinition,
     ) -> Result<(), CompilationError> {
         if scope.has_parent() {
-            Err(CompilationError::NestedFunctionsNotSupported)
+            Err(CompilationError {
+                message: CompilationErrorMessage::NestedFunctionsNotSupported,
+                position: Some(definition.get_position()),
+            })
         } else {
             let local_name = scope.get_local_name();
             let function = match scope.get_variable_value(
@@ -165,9 +173,13 @@ impl<'a, 'context> JitFunctionCompiler<'a, 'context> {
                 }
 
                 _ => {
-                    return Err(CompilationError::InternalError(
-                        InternalError::JitCompilerFunctionNotHoisted,
-                    ))
+                    return Err(CompilationError {
+                        message: CompilationErrorMessage::InternalError(
+                            InternalError::JitCompilerFunctionNotHoisted,
+                        ),
+
+                        position: Some(definition.get_position()),
+                    });
                 }
             };
 
@@ -178,13 +190,14 @@ impl<'a, 'context> JitFunctionCompiler<'a, 'context> {
                 definition.parameters.iter().zip(function.get_param_iter())
             {
                 function_scope.declare_variable(
-                    definition_parameter.underlying.value.clone(),
+                    &definition_parameter.underlying,
                     UlarValue::from_basic_value(
                         self.context,
                         &definition_parameter.get_type(),
                         function_parameter,
+                        definition_parameter.get_position(),
                     )?,
-                );
+                )?;
             }
 
             let mut function_compiler = JitFunctionCompiler {
@@ -250,7 +263,15 @@ impl<'a, 'context> JitFunctionCompiler<'a, 'context> {
                 self.execution_engine,
                 self.module,
             )
-            .ok_or_else(|| CompilationError::UnknownValue(identifier.underlying.value.clone()))?)
+            .ok_or_else(|| CompilationError {
+                message: CompilationErrorMessage::InternalError(
+                    InternalError::JitCompilerUnknownValue {
+                        name: identifier.underlying.value.clone(),
+                    },
+                ),
+
+                position: Some(identifier.get_position()),
+            })?)
     }
 
     fn compile_if_expression(
@@ -299,6 +320,7 @@ impl<'a, 'context> JitFunctionCompiler<'a, 'context> {
                 (else_value, else_builder.get_insert_block().unwrap()),
             ],
             scope.get_local_name(),
+            if_expression.get_position(),
         )
     }
 
@@ -341,13 +363,18 @@ impl<'a, 'context> JitFunctionCompiler<'a, 'context> {
                     numeric_type,
                     left_value,
                     right_value,
+                    infix_operation.get_position(),
                 ),
 
-                type_ => Err(CompilationError::InternalError(
-                    InternalError::JitCompilerExpectedNumericType {
-                        actual_type: format!("{}", type_),
-                    },
-                )),
+                type_ => Err(CompilationError {
+                    message: CompilationErrorMessage::InternalError(
+                        InternalError::JitCompilerExpectedNumericType {
+                            actual_type: format!("{}", type_),
+                        },
+                    ),
+
+                    position: Some(infix_operation.get_position()),
+                }),
             },
 
             InfixOperator::Modulo => match infix_operation.get_type() {
@@ -359,11 +386,15 @@ impl<'a, 'context> JitFunctionCompiler<'a, 'context> {
                 .unwrap()
                 .into()),
 
-                type_ => Err(CompilationError::InternalError(
-                    InternalError::JitCompilerExpectedNumericType {
-                        actual_type: format!("{}", type_),
-                    },
-                )),
+                type_ => Err(CompilationError {
+                    message: CompilationErrorMessage::InternalError(
+                        InternalError::JitCompilerExpectedNumericType {
+                            actual_type: format!("{}", type_),
+                        },
+                    ),
+
+                    position: Some(infix_operation.get_position()),
+                }),
             },
 
             InfixOperator::LogicalAnd => Ok(builder
@@ -385,6 +416,7 @@ impl<'a, 'context> JitFunctionCompiler<'a, 'context> {
         numeric_type: NumericType,
         left_value: IntValue<'context>,
         right_value: IntValue<'context>,
+        position: Position,
     ) -> Result<UlarValue<'context>, CompilationError> {
         let division_function = self
             .built_in_values
@@ -401,6 +433,7 @@ impl<'a, 'context> JitFunctionCompiler<'a, 'context> {
                     &name.to_string(),
                 )
                 .unwrap(),
+            position,
         )
     }
 
@@ -443,11 +476,7 @@ impl<'a, 'context> JitFunctionCompiler<'a, 'context> {
             TypedStatement::VariableDefinition(definition) => {
                 let value = self.compile_expression(builder, scope, &definition.value)?;
 
-                if scope.declare_variable(definition.name.value.clone(), value) {
-                    return Err(CompilationError::VariableAlreadyDefined(
-                        definition.name.value.clone(),
-                    ));
-                }
+                scope.declare_variable(&definition.name, value)?;
             }
 
             TypedStatement::NoOp { .. } => {}
@@ -464,21 +493,24 @@ impl<'a, 'context> JitFunctionCompiler<'a, 'context> {
     ) -> Result<(), CompilationError> {
         for statement in statements {
             if let TypedStatement::FunctionDefinition(definition) = statement {
-                let function_type = definition.type_.inkwell_type(self.context)?;
+                let function_type =
+                    definition.type_.inkwell_type(self.context).ok_or_else(|| {
+                        CompilationError {
+                            message: CompilationErrorMessage::UnitPassedAsValue,
+                            position: Some(definition.get_position()),
+                        }
+                    })?;
+
                 let function = self.module.underlying.add_function(
                     &definition.name.value,
                     function_type,
                     None,
                 );
 
-                if scope.declare_variable(
-                    definition.name.value.clone(),
+                scope.declare_variable(
+                    &definition.name,
                     UlarValue::Function(UlarFunction::DirectReference(function)),
-                ) {
-                    return Err(CompilationError::VariableAlreadyDefined(
-                        definition.name.value.clone(),
-                    ));
-                }
+                )?;
             }
         }
 

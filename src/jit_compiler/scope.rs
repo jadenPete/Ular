@@ -1,4 +1,8 @@
-use crate::jit_compiler::{built_in_values::BuiltInValues, module::UlarModule, value::UlarValue};
+use crate::{
+    error_reporting::{CompilationError, CompilationErrorMessage, InternalError},
+    jit_compiler::{built_in_values::BuiltInValues, module::UlarModule, value::UlarValue},
+    parser::program::{Identifier, Node},
+};
 use inkwell::{builder::Builder, context::Context, execution_engine::ExecutionEngine};
 use std::{cmp::Eq, collections::HashMap};
 
@@ -22,14 +26,24 @@ impl<'a, 'context> JitCompilerScope<'a, 'context> {
         }
     }
 
-    pub fn declare_variable(&mut self, name: String, value: UlarValue<'context>) -> bool {
-        let result = self.variable_values.contains_key(&name);
+    pub fn declare_variable(
+        &mut self,
+        name: &Identifier,
+        value: UlarValue<'context>,
+    ) -> Result<(), CompilationError> {
+        match self.variable_values.insert(name.value.clone(), value) {
+            Some(_) => Err(CompilationError {
+                message: CompilationErrorMessage::InternalError(
+                    InternalError::JitCompilerVariableAlreadyDefined {
+                        name: name.value.clone(),
+                    },
+                ),
 
-        if !result {
-            self.variable_values.insert(name, value);
+                position: Some(name.get_position()),
+            }),
+
+            None => Ok(()),
         }
-
-        result
     }
 
     pub fn get_local_name(&mut self) -> LocalName {

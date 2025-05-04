@@ -137,6 +137,13 @@ impl Node for Parameter {
 pub struct Block {
     pub statements: Vec<Statement>,
     pub result: Option<Box<Expression>>,
+    pub position: Position,
+}
+
+impl Node for Block {
+    fn get_position(&self) -> Position {
+        self.position.clone()
+    }
 }
 
 #[derive(Debug)]

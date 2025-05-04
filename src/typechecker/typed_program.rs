@@ -136,7 +136,14 @@ impl Typed for TypedIf {
 #[derive(Clone, Debug)]
 pub struct TypedBlock {
     pub statements: Vec<TypedStatement>,
+    pub position: Position,
     pub result: Option<Box<TypedExpression>>,
+}
+
+impl Node for TypedBlock {
+    fn get_position(&self) -> Position {
+        self.position.clone()
+    }
 }
 
 impl Typed for TypedBlock {

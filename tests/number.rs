@@ -164,9 +164,31 @@ fn divide_by_zero() -> anyhow::Result<()> {
 
 #[test]
 fn out_of_range_checking() -> anyhow::Result<()> {
-    let output = evaluate_program("256u8;", false)?;
+    let output1 = evaluate_program("256u8;", false)?;
 
-    assert_eq!(output, "Literal out of range for type `u8`.\n");
+    assert_eq!(
+        output1,
+        "\
+Error: Expected a `u8`, but 256 isn't between 0 and 255.
+
+ 1 │ 256u8;
+   │ ^^^^^
+
+"
+    );
+
+    let output2 = evaluate_program("2147483648;", false)?;
+
+    assert_eq!(
+        output2,
+        "\
+Error: The default numeric type is i32, but 2147483648 isn't between -2147483648 and 2147483647. Consider using a different type.
+
+ 1 │ 2147483648;
+   │ ^^^^^^^^^^
+
+"
+    );
 
     Ok(())
 }
@@ -177,7 +199,13 @@ fn heterogenous_arithmetic_prohibited() -> anyhow::Result<()> {
 
     assert_eq!(
         output,
-        "Expected a value of type `u16`, but got one of type `u8`.\n"
+        "\
+Error: Expected a value of type `u16`, but got one of type `u8`.
+
+ 1 │ 4u16 / 2u8;
+   │        ^^^
+
+"
     );
 
     Ok(())

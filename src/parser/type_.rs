@@ -1,4 +1,3 @@
-use crate::error::CompilationError;
 use enum_iterator::Sequence;
 use inkwell::{
     context::Context,
@@ -68,19 +67,14 @@ impl FunctionType {
     pub fn inkwell_type<'a>(
         &self,
         context: &'a Context,
-    ) -> Result<inkwell::types::FunctionType<'a>, CompilationError> {
+    ) -> Option<inkwell::types::FunctionType<'a>> {
         let mut parameter_types = Vec::with_capacity(self.parameters.len());
 
         for parameter in &self.parameters {
-            parameter_types.push(
-                parameter
-                    .inkwell_type(context)
-                    .ok_or(CompilationError::UnitPassedAsValue)?
-                    .into(),
-            );
+            parameter_types.push(parameter.inkwell_type(context)?.into());
         }
 
-        Ok(match self.return_type.inkwell_type(context) {
+        Some(match self.return_type.inkwell_type(context) {
             Some(return_type) => return_type.fn_type(parameter_types.as_slice(), false),
             None => context
                 .void_type()
@@ -102,6 +96,32 @@ pub enum NumericType {
 }
 
 impl NumericType {
+    pub fn maximum(self) -> i128 {
+        match self {
+            Self::I8 => i8::MAX.into(),
+            Self::I16 => i16::MAX.into(),
+            Self::I32 => i32::MAX.into(),
+            Self::I64 => i32::MAX.into(),
+            Self::U8 => u8::MAX.into(),
+            Self::U16 => u16::MAX.into(),
+            Self::U32 => u32::MAX.into(),
+            Self::U64 => u64::MAX.into(),
+        }
+    }
+
+    pub fn minimum(self) -> i128 {
+        match self {
+            Self::I8 => i8::MIN.into(),
+            Self::I16 => i16::MIN.into(),
+            Self::I32 => i32::MIN.into(),
+            Self::I64 => i32::MIN.into(),
+            Self::U8 => u8::MIN.into(),
+            Self::U16 => u16::MIN.into(),
+            Self::U32 => u32::MIN.into(),
+            Self::U64 => u64::MIN.into(),
+        }
+    }
+
     pub fn is_signed(self) -> bool {
         match self {
             Self::I8 => true,

@@ -201,7 +201,20 @@ print_42();
         false,
     )?;
 
-    assert_eq!(output, "Unknown value: `forty_two`.\n");
+    assert_eq!(
+        output,
+        "\
+Error: Unknown value `forty_two`.
+
+ 2 │ 
+ 3 │ fn print_42() {
+ 4 │     println_i32(forty_two);
+   │                 ^^^^^^^^^
+ 5 │ }
+ 6 │ 
+
+"
+    );
 
     Ok(())
 }
@@ -223,7 +236,21 @@ outer();
         false,
     )?;
 
-    assert_eq!(output, "Nested functions aren't currently supported.\n");
+    assert_eq!(
+        output,
+        "\
+Error: Nested functions aren't currently supported.
+
+ 1 │ fn outer() {
+ 2 │     fn inner() {
+   │     ^^^^^^^^^^^^
+ 3 │         println_i32(42);
+ 4 │     }
+ 5 │ 
+ 6 │     inner();
+
+"
+    );
 
     Ok(())
 }
