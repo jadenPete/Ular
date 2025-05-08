@@ -34,6 +34,9 @@ use inkwell::{
 
 use log::debug;
 
+const MAIN_HARNESS_FUNCTION_NAME: &str = "main_harness";
+const MAIN_FUNCTION_NAME: &str = "main";
+
 type MainFunction = unsafe extern "C" fn() -> u8;
 
 struct JitFunctionCompiler<'a, 'context> {
@@ -535,47 +538,79 @@ impl<'a, 'context> JitFunctionCompiler<'a, 'context> {
     }
 }
 
-fn compile_program<'a>(
+fn compile_main_function<'a>(
     context: &'a Context,
+    builder: &Builder<'a>,
     built_in_values: &mut BuiltInValues<'a>,
     module: &mut UlarModule<'a>,
     execution_engine: &ExecutionEngine<'a>,
     program: &TypedProgram,
-    print_to_stderr: bool,
-) -> Result<JitFunction<'a, MainFunction>, CompilationError> {
-    let main_function =
-        module
-            .underlying
-            .add_function("main", context.i8_type().fn_type(&[], false), None);
-
-    let main_may_throw_function = module.underlying.add_function(
-        "main_may_throw",
+) -> Result<FunctionValue<'a>, CompilationError> {
+    let main_function = module.underlying.add_function(
+        MAIN_FUNCTION_NAME,
         context.void_type().fn_type(&[], false),
         None,
     );
 
     let main_entry_block = context.append_basic_block(main_function, "entry");
-    let main_then_block = context.append_basic_block(main_function, "then");
-    let main_catch_block = context.append_basic_block(main_function, "catch");
-    let builder = context.create_builder();
 
     builder.position_at_end(main_entry_block);
+
+    let mut scope = JitCompilerScope::new(None);
+    let mut function_compiler = JitFunctionCompiler {
+        context: &context,
+        built_in_values: built_in_values,
+        execution_engine: &execution_engine,
+        function: main_function,
+        module,
+    };
+
+    function_compiler.compile_statements_with_functions_hoisted(
+        &builder,
+        &mut scope,
+        &program.statements,
+    )?;
+
+    builder.build_return(None).unwrap();
+
+    Ok(main_function)
+}
+
+fn compile_main_harness_function<'a>(
+    context: &'a Context,
+    builder: &Builder<'a>,
+    built_in_values: &mut BuiltInValues<'a>,
+    module: &mut UlarModule<'a>,
+    execution_engine: &ExecutionEngine<'a>,
+    main_function: FunctionValue<'a>,
+) {
+    let main_harness_function = module.underlying.add_function(
+        MAIN_HARNESS_FUNCTION_NAME,
+        context.i8_type().fn_type(&[], false),
+        None,
+    );
+
+    let main_harness_entry_block = context.append_basic_block(main_harness_function, "entry");
+    let main_harness_then_block = context.append_basic_block(main_harness_function, "then");
+    let main_harness_catch_block = context.append_basic_block(main_harness_function, "catch");
+
+    builder.position_at_end(main_harness_entry_block);
     builder
         .build_invoke(
-            main_may_throw_function,
+            main_function,
             &[],
-            main_then_block,
-            main_catch_block,
+            main_harness_then_block,
+            main_harness_catch_block,
             "",
         )
         .unwrap();
 
-    builder.position_at_end(main_then_block);
+    builder.position_at_end(main_harness_then_block);
 
     let then_return_value = context.i8_type().const_int(0, false);
 
     builder.build_return(Some(&then_return_value)).unwrap();
-    builder.position_at_end(main_catch_block);
+    builder.position_at_end(main_harness_catch_block);
 
     let landing_pad_result_type = context.struct_type(
         &[
@@ -653,34 +688,45 @@ fn compile_program<'a>(
     let catch_return_value = context.i8_type().const_int(1, false);
 
     builder.build_return(Some(&catch_return_value)).unwrap();
+}
 
-    let main_may_throw_entry_block = context.append_basic_block(main_may_throw_function, "entry");
-
-    builder.position_at_end(main_may_throw_entry_block);
-
-    let mut scope = JitCompilerScope::new(None);
-    let mut function_compiler = JitFunctionCompiler {
-        context: &context,
-        built_in_values: built_in_values,
-        execution_engine: &execution_engine,
-        function: main_may_throw_function,
-        module,
-    };
-
-    function_compiler.compile_statements_with_functions_hoisted(
+fn compile_program<'a>(
+    context: &'a Context,
+    built_in_values: &mut BuiltInValues<'a>,
+    module: &mut UlarModule<'a>,
+    execution_engine: &ExecutionEngine<'a>,
+    program: &TypedProgram,
+    print_to_stderr: bool,
+) -> Result<JitFunction<'a, MainFunction>, CompilationError> {
+    let builder = context.create_builder();
+    let main_function = compile_main_function(
+        context,
         &builder,
-        &mut scope,
-        &program.statements,
+        built_in_values,
+        module,
+        execution_engine,
+        program,
     )?;
 
-    builder.build_return(None).unwrap();
+    compile_main_harness_function(
+        context,
+        &builder,
+        built_in_values,
+        module,
+        execution_engine,
+        main_function,
+    );
 
     if print_to_stderr {
         debug!("Output of the jit_compiler phase:");
         debug!("{}", module.underlying.print_to_string().to_string());
     }
 
-    Ok(unsafe { execution_engine.get_function("main").unwrap() })
+    Ok(unsafe {
+        execution_engine
+            .get_function(MAIN_HARNESS_FUNCTION_NAME)
+            .unwrap()
+    })
 }
 
 pub fn compile_and_execute_program(
