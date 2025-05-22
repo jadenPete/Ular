@@ -1,3 +1,4 @@
 [workspace]
 edition = "2021"
-members = ["ular"]
+members = ["ular", "ular-derive"]
+resolver = "2"

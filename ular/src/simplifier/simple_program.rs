@@ -5,20 +5,15 @@ use crate::{
         type_::Type,
     },
 };
+use ular_derive::Node;
 
-#[derive(Debug)]
+#[derive(Debug, Node)]
 pub struct SimpleProgram {
     pub statements: Vec<SimpleStatement>,
     pub position: Position,
 }
 
-impl Node for SimpleProgram {
-    fn get_position(&self) -> Position {
-        self.position.clone()
-    }
-}
-
-#[derive(Debug)]
+#[derive(Debug, Node)]
 pub enum SimpleStatement {
     VariableDefinition(SimpleVariableDefinition),
     FunctionDefinition(SimpleFunctionDefinition),
@@ -26,31 +21,14 @@ pub enum SimpleStatement {
     NoOp { position: Position },
 }
 
-impl Node for SimpleStatement {
-    fn get_position(&self) -> Position {
-        match self {
-            Self::VariableDefinition(definition) => definition.get_position(),
-            Self::FunctionDefinition(definition) => definition.get_position(),
-            Self::Expression(expression) => expression.get_position(),
-            Self::NoOp { position } => position.clone(),
-        }
-    }
-}
-
-#[derive(Debug)]
+#[derive(Debug, Node)]
 pub struct SimpleVariableDefinition {
     pub name: Identifier,
     pub value: SimpleExpression,
     pub position: Position,
 }
 
-impl Node for SimpleVariableDefinition {
-    fn get_position(&self) -> Position {
-        self.position.clone()
-    }
-}
-
-#[derive(Debug)]
+#[derive(Debug, Node)]
 pub struct SimpleFunctionDefinition {
     pub name: Identifier,
     pub parameters: Vec<Parameter>,
@@ -59,26 +37,14 @@ pub struct SimpleFunctionDefinition {
     pub position: Position,
 }
 
-impl Node for SimpleFunctionDefinition {
-    fn get_position(&self) -> Position {
-        self.position.clone()
-    }
-}
-
-#[derive(Debug)]
+#[derive(Debug, Node)]
 pub struct SimpleBlock {
     pub statements: Vec<SimpleStatement>,
     pub result: Option<Box<SimpleExpression>>,
     pub position: Position,
 }
 
-impl Node for SimpleBlock {
-    fn get_position(&self) -> Position {
-        self.position.clone()
-    }
-}
-
-#[derive(Debug)]
+#[derive(Debug, Node)]
 pub enum SimpleExpression {
     If(SimpleIf),
     InfixOperation(SimpleInfixOperation),
@@ -88,20 +54,7 @@ pub enum SimpleExpression {
     PrefixOperation(SimplePrefixOperation),
 }
 
-impl Node for SimpleExpression {
-    fn get_position(&self) -> Position {
-        match self {
-            Self::If(if_expression) => if_expression.get_position(),
-            Self::InfixOperation(infix_operation) => infix_operation.get_position(),
-            Self::Call(call) => call.get_position(),
-            Self::Identifier(identifier) => identifier.get_position(),
-            Self::Number(number) => number.get_position(),
-            Self::PrefixOperation(prefix_operation) => prefix_operation.get_position(),
-        }
-    }
-}
-
-#[derive(Debug)]
+#[derive(Debug, Node)]
 pub struct SimpleIf {
     pub condition: Box<SimpleExpression>,
     pub then_block: SimpleBlock,
@@ -109,13 +62,7 @@ pub struct SimpleIf {
     pub position: Position,
 }
 
-impl Node for SimpleIf {
-    fn get_position(&self) -> Position {
-        self.position.clone()
-    }
-}
-
-#[derive(Debug)]
+#[derive(Debug, Node)]
 pub struct SimpleInfixOperation {
     pub left: Box<SimpleExpression>,
     pub operator: InfixOperator,
@@ -123,23 +70,11 @@ pub struct SimpleInfixOperation {
     pub position: Position,
 }
 
-impl Node for SimpleInfixOperation {
-    fn get_position(&self) -> Position {
-        self.position.clone()
-    }
-}
-
-#[derive(Debug)]
+#[derive(Debug, Node)]
 pub struct SimplePrefixOperation {
     pub operator: SimplePrefixOperator,
     pub expression: Box<SimpleExpression>,
     pub position: Position,
-}
-
-impl Node for SimplePrefixOperation {
-    fn get_position(&self) -> Position {
-        self.position.clone()
-    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -147,15 +82,9 @@ pub enum SimplePrefixOperator {
     Not,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Node)]
 pub struct SimpleCall {
     pub function: Box<SimpleExpression>,
     pub arguments: Vec<SimpleExpression>,
     pub position: Position,
-}
-
-impl Node for SimpleCall {
-    fn get_position(&self) -> Position {
-        self.position.clone()
-    }
 }
