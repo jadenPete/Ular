@@ -68,7 +68,10 @@ impl FunctionType {
         &self,
         context: &'a Context,
     ) -> Option<inkwell::types::FunctionType<'a>> {
-        let mut parameter_types = Vec::with_capacity(self.parameters.len());
+        let mut parameter_types = Vec::with_capacity(self.parameters.len() + 1);
+
+        // Add an extra parameter for the worker pointer
+        parameter_types.push(context.ptr_type(AddressSpace::default()).into());
 
         for parameter in &self.parameters {
             parameter_types.push(parameter.inkwell_type(context)?.into());

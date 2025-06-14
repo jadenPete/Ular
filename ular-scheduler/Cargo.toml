@@ -1,0 +1,18 @@
+[package]
+name = "ular-scheduler"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+inkwell = { version = "0.5.0", features = ["llvm18-0"] }
+intrusive-collections = "0.9.7"
+nonzero_ext = "0.3.0"
+num_cpus = "1.16.0"
+
+[dev-dependencies]
+chili = "0.2.1"
+divan = "0.1.21"
+
+[[bench]]
+name = "main"
+harness = false

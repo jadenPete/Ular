@@ -1,3 +1,5 @@
+mod data_structures;
+mod dependency_analyzer;
 mod error_reporting;
 mod jit_compiler;
 mod lexer;
@@ -7,6 +9,7 @@ mod simplifier;
 mod typechecker;
 
 use crate::{
+    dependency_analyzer::AnalyzerPhase,
     jit_compiler::compile_and_execute_program,
     lexer::{token::Tokens, LexerPhase},
     parser::ParserPhase,
@@ -14,7 +17,6 @@ use crate::{
     simplifier::SimplifierPhase,
     typechecker::TypecheckerPhase,
 };
-
 use clap::Parser;
 use error_reporting::{report_error, CompilationError};
 use log::LevelFilter;
@@ -66,9 +68,14 @@ fn main() -> std::io::Result<ExitCode> {
         &buffer,
     );
 
+    let analyzed_ast = unwrap_phase_result(
+        AnalyzerPhase.execute_and_debug(&typed_ast, debug_phases),
+        &buffer,
+    );
+
     let return_code = unwrap_phase_result(
         compile_and_execute_program(
-            &typed_ast,
+            &analyzed_ast,
             arguments
                 .debug_phase
                 .iter()

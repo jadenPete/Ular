@@ -121,21 +121,36 @@ impl Display for CompilationErrorMessage {
 }
 
 pub enum InternalError {
+    AnalyzerFunctionNotDefined {
+        index: usize,
+    },
+
     JitCompilerExpectedNumericType {
         actual_type: String,
     },
 
-    JitCompilerFunctionNotHoisted,
     JitCompilerTypeMismatch {
         expected_type: String,
         actual_value: String,
     },
 
-    JitCompilerUnknownValue {
+    JitCompilerUnknownExpression {
+        index: usize,
+    },
+
+    JitCompilerUnknownFunction {
+        index: usize,
+    },
+
+    JitCompilerUnknownParameter {
+        index: usize,
+    },
+
+    UnknownValue {
         name: String,
     },
 
-    JitCompilerVariableAlreadyDefined {
+    VariableAlreadyDefined {
         name: String,
     },
 }
@@ -143,15 +158,18 @@ pub enum InternalError {
 impl Display for InternalError {
     fn fmt(&self, formatter: &mut Formatter) -> std::fmt::Result {
         match self {
+            Self::AnalyzerFunctionNotDefined { index } => {
+                write!(
+                    formatter,
+                    "The analyzer phase reserved function {}, but didn't define it.",
+                    index,
+                )
+            },
+
             Self::JitCompilerExpectedNumericType { actual_type } => write!(
                 formatter,
                 "Expected a numerically typed value, but got one of type `{}`. This should've been caught by the typechecker.",
                 actual_type
-            ),
-
-            Self::JitCompilerFunctionNotHoisted => write!(
-                formatter,
-                "This function wasn't hoisted by the JIT compiler."
             ),
 
             Self::JitCompilerTypeMismatch { expected_type, actual_value } => write!(
@@ -161,13 +179,37 @@ impl Display for InternalError {
                 expected_type
             ),
 
-            Self::JitCompilerUnknownValue { name } => write!(
+            Self::JitCompilerUnknownExpression { index } => {
+                write!(
+                    formatter,
+                    "JIT compiler has no value for the expression with index {}.",
+                    index,
+                )
+            }
+
+            Self::JitCompilerUnknownFunction { index } => {
+                write!(
+                    formatter,
+                    "JIT compiler has no value for the function with index {}.",
+                    index,
+                )
+            }
+
+            Self::JitCompilerUnknownParameter { index } => {
+                write!(
+                    formatter,
+                    "JIT compiler has no value for the function parameter with index {}.",
+                    index,
+                )
+            }
+
+            Self::UnknownValue { name } => write!(
                 formatter,
                 "Unknown value `{}`. This should've been caught by the typechecker.",
                 name
             ),
 
-            Self::JitCompilerVariableAlreadyDefined { name } => write!(
+            Self::VariableAlreadyDefined { name } => write!(
                 formatter,
                 "A variable with name `{}` is already defined. This should've been caught by the typechecker.",
                 name

@@ -1,22 +1,21 @@
 use crate::{
     jit_compiler::{
+        get_value_buffer_type,
         module::UlarModule,
         scope::LocalName,
         value::{UlarFunction, UlarValue},
     },
     parser::type_::NumericType,
 };
-
 use inkwell::{
     builder::Builder,
     context::Context,
     execution_engine::ExecutionEngine,
     module::Linkage,
-    types::FunctionType,
+    types::{ArrayType, FunctionType, StructType},
     values::{BasicValue, FunctionValue},
     AddressSpace, GlobalVisibility,
 };
-
 use num::Zero;
 use std::{
     collections::HashMap,
@@ -25,6 +24,7 @@ use std::{
     ops::Div,
     ptr::null,
 };
+use ular_scheduler::{Job, Worker, WorkerPool, VALUE_BUFFER_WORD_SIZE};
 
 extern "C" {
     fn __cxa_allocate_exception(size: usize) -> *mut *mut c_char;
@@ -237,7 +237,18 @@ pub struct BuiltInValues<'a> {
     pub _divide_u16: BuiltInMappedFunction<'a>,
     pub _divide_u32: BuiltInMappedFunction<'a>,
     pub _divide_u64: BuiltInMappedFunction<'a>,
+    pub _job_new: BuiltInMappedFunction<'a>,
+    pub _job_type: StructType<'a>,
     pub _print_c_string: BuiltInMappedFunction<'a>,
+    pub _value_buffer_option_type: StructType<'a>,
+    pub _value_buffer_type: ArrayType<'a>,
+    pub _workerpool_join: BuiltInMappedFunction<'a>,
+    pub _workerpool_new: BuiltInMappedFunction<'a>,
+    pub _workerpool_worker: BuiltInMappedFunction<'a>,
+    pub _worker_fork: BuiltInMappedFunction<'a>,
+    pub _worker_free: BuiltInMappedFunction<'a>,
+    pub _worker_tick: BuiltInMappedFunction<'a>,
+    pub _worker_try_join: BuiltInMappedFunction<'a>,
 }
 
 impl<'a> BuiltInValues<'a> {
@@ -284,9 +295,13 @@ impl<'a> BuiltInValues<'a> {
             String::from("println_bool"),
             Box::new(BuiltInMappedFunction::new(
                 String::from("println_bool"),
-                context
-                    .void_type()
-                    .fn_type(&[context.i8_type().into()], false),
+                context.void_type().fn_type(
+                    &[
+                        context.ptr_type(AddressSpace::default()).into(),
+                        context.i8_type().into(),
+                    ],
+                    false,
+                ),
                 println_bool as usize,
             )),
         );
@@ -295,9 +310,13 @@ impl<'a> BuiltInValues<'a> {
             String::from("println_i8"),
             Box::new(BuiltInMappedFunction::new(
                 String::from("println_i8"),
-                context
-                    .void_type()
-                    .fn_type(&[context.i8_type().into()], false),
+                context.void_type().fn_type(
+                    &[
+                        context.ptr_type(AddressSpace::default()).into(),
+                        context.i8_type().into(),
+                    ],
+                    false,
+                ),
                 println_display::<i8> as usize,
             )),
         );
@@ -306,9 +325,13 @@ impl<'a> BuiltInValues<'a> {
             String::from("println_i16"),
             Box::new(BuiltInMappedFunction::new(
                 String::from("println_i16"),
-                context
-                    .void_type()
-                    .fn_type(&[context.i16_type().into()], false),
+                context.void_type().fn_type(
+                    &[
+                        context.ptr_type(AddressSpace::default()).into(),
+                        context.i16_type().into(),
+                    ],
+                    false,
+                ),
                 println_display::<i16> as usize,
             )),
         );
@@ -317,9 +340,13 @@ impl<'a> BuiltInValues<'a> {
             String::from("println_i32"),
             Box::new(BuiltInMappedFunction::new(
                 String::from("println_i32"),
-                context
-                    .void_type()
-                    .fn_type(&[context.i32_type().into()], false),
+                context.void_type().fn_type(
+                    &[
+                        context.ptr_type(AddressSpace::default()).into(),
+                        context.i32_type().into(),
+                    ],
+                    false,
+                ),
                 println_display::<i32> as usize,
             )),
         );
@@ -328,9 +355,13 @@ impl<'a> BuiltInValues<'a> {
             String::from("println_i64"),
             Box::new(BuiltInMappedFunction::new(
                 String::from("println_i64"),
-                context
-                    .void_type()
-                    .fn_type(&[context.i64_type().into()], false),
+                context.void_type().fn_type(
+                    &[
+                        context.ptr_type(AddressSpace::default()).into(),
+                        context.i64_type().into(),
+                    ],
+                    false,
+                ),
                 println_display::<i64> as usize,
             )),
         );
@@ -339,9 +370,13 @@ impl<'a> BuiltInValues<'a> {
             String::from("println_u8"),
             Box::new(BuiltInMappedFunction::new(
                 String::from("println_u8"),
-                context
-                    .void_type()
-                    .fn_type(&[context.i8_type().into()], false),
+                context.void_type().fn_type(
+                    &[
+                        context.ptr_type(AddressSpace::default()).into(),
+                        context.i8_type().into(),
+                    ],
+                    false,
+                ),
                 println_display::<u8> as usize,
             )),
         );
@@ -350,9 +385,13 @@ impl<'a> BuiltInValues<'a> {
             String::from("println_u16"),
             Box::new(BuiltInMappedFunction::new(
                 String::from("println_u16"),
-                context
-                    .void_type()
-                    .fn_type(&[context.i16_type().into()], false),
+                context.void_type().fn_type(
+                    &[
+                        context.ptr_type(AddressSpace::default()).into(),
+                        context.i16_type().into(),
+                    ],
+                    false,
+                ),
                 println_display::<u16> as usize,
             )),
         );
@@ -361,9 +400,13 @@ impl<'a> BuiltInValues<'a> {
             String::from("println_u32"),
             Box::new(BuiltInMappedFunction::new(
                 String::from("println_u32"),
-                context
-                    .void_type()
-                    .fn_type(&[context.i32_type().into()], false),
+                context.void_type().fn_type(
+                    &[
+                        context.ptr_type(AddressSpace::default()).into(),
+                        context.i32_type().into(),
+                    ],
+                    false,
+                ),
                 println_display::<u32> as usize,
             )),
         );
@@ -372,9 +415,13 @@ impl<'a> BuiltInValues<'a> {
             String::from("println_u64"),
             Box::new(BuiltInMappedFunction::new(
                 String::from("println_u64"),
-                context
-                    .void_type()
-                    .fn_type(&[context.i64_type().into()], false),
+                context.void_type().fn_type(
+                    &[
+                        context.ptr_type(AddressSpace::default()).into(),
+                        context.i64_type().into(),
+                    ],
+                    false,
+                ),
                 println_display::<u64> as usize,
             )),
         );
@@ -423,6 +470,34 @@ impl<'a> BuiltInValues<'a> {
         let _divide_u16 = divide_built_in_function::<u16>(context, NumericType::U16);
         let _divide_u32 = divide_built_in_function::<u32>(context, NumericType::U32);
         let _divide_u64 = divide_built_in_function::<u64>(context, NumericType::U64);
+        let job_link_type = context.opaque_struct_type("job_link_type");
+
+        job_link_type.set_body(
+            &[
+                context.ptr_type(AddressSpace::default()).into(), // `prev`
+                context.ptr_type(AddressSpace::default()).into(), // `next`
+            ],
+            false,
+        );
+
+        let _job_type = context.opaque_struct_type("job_type");
+
+        _job_type.set_body(
+            &[
+                context.i8_type().into(),                         // `done`
+                job_link_type.into(),                             // `link`
+                context.ptr_type(AddressSpace::default()).into(), // `function`
+                context.ptr_type(AddressSpace::default()).into(), // `context`
+                get_value_buffer_type(context).into(),            // `result`
+            ],
+            false,
+        );
+
+        let _job_new = BuiltInMappedFunction::new(
+            String::from("_job_new"),
+            _job_type.fn_type(&[], false),
+            Job::<(), ()>::new as usize,
+        );
 
         let _print_c_string = BuiltInMappedFunction::new(
             String::from("_print_c_string"),
@@ -430,6 +505,83 @@ impl<'a> BuiltInValues<'a> {
                 .void_type()
                 .fn_type(&[context.ptr_type(AddressSpace::default()).into()], false),
             _print_c_string as usize,
+        );
+
+        let _workerpool_new = BuiltInMappedFunction::new(
+            String::from("_workerpool_new"),
+            context
+                .ptr_type(AddressSpace::default())
+                .fn_type(&[], false),
+            _workerpool_new as usize,
+        );
+
+        let _workerpool_join = BuiltInMappedFunction::new(
+            String::from("_workerpool_join"),
+            context
+                .void_type()
+                .fn_type(&[context.ptr_type(AddressSpace::default()).into()], false),
+            _workerpool_join as usize,
+        );
+
+        let _workerpool_worker = BuiltInMappedFunction::new(
+            String::from("_workerpool_worker"),
+            context
+                .ptr_type(AddressSpace::default())
+                .fn_type(&[context.ptr_type(AddressSpace::default()).into()], false),
+            _workerpool_worker as usize,
+        );
+
+        let _worker_fork = BuiltInMappedFunction::new(
+            String::from("_worker_fork"),
+            context.void_type().fn_type(
+                &[
+                    context.ptr_type(AddressSpace::default()).into(),
+                    context.ptr_type(AddressSpace::default()).into(),
+                    context.ptr_type(AddressSpace::default()).into(),
+                    context.ptr_type(AddressSpace::default()).into(),
+                ],
+                false,
+            ),
+            Worker::fork::<(), ()> as usize,
+        );
+
+        let _worker_free = BuiltInMappedFunction::new(
+            String::from("_worker_free"),
+            context
+                .void_type()
+                .fn_type(&[context.ptr_type(AddressSpace::default()).into()], false),
+            _worker_free as usize,
+        );
+
+        let _worker_tick = BuiltInMappedFunction::new(
+            String::from("_worker_tick"),
+            context
+                .void_type()
+                .fn_type(&[context.ptr_type(AddressSpace::default()).into()], false),
+            Worker::tick as usize,
+        );
+
+        let _value_buffer_type = context.i64_type().array_type(VALUE_BUFFER_WORD_SIZE as u32);
+        let _value_buffer_option_type = context.opaque_struct_type("option_value_buffer_type");
+
+        _value_buffer_option_type.set_body(
+            &[
+                context.i8_type().into(),  // The discriminator
+                _value_buffer_type.into(), // The value buffer
+            ],
+            false,
+        );
+
+        let _worker_try_join = BuiltInMappedFunction::new(
+            String::from("_worker_try_join"),
+            _value_buffer_option_type.fn_type(
+                &[
+                    context.ptr_type(AddressSpace::default()).into(),
+                    context.ptr_type(AddressSpace::default()).into(),
+                ],
+                false,
+            ),
+            Worker::try_join::<(), ()> as usize,
         );
 
         Self {
@@ -447,36 +599,72 @@ impl<'a> BuiltInValues<'a> {
             _divide_u16,
             _divide_u32,
             _divide_u64,
+            _job_new,
+            _job_type,
             _print_c_string,
+            _value_buffer_option_type,
+            _value_buffer_type,
+            _workerpool_new,
+            _workerpool_join,
+            _workerpool_worker,
+            _worker_fork,
+            _worker_free,
+            _worker_tick,
+            _worker_try_join,
         }
     }
 }
 
-pub extern "C" fn println_bool(value: u8) {
+pub extern "C" fn println_bool(_worker: &Worker, value: u8) {
     println!("{}", value == 1);
 }
 
-pub extern "C" fn println_display<A: Display>(value: A) {
+pub extern "C" fn println_display<A: Display>(_worker: &Worker, value: A) {
     println!("{}", value);
 }
 
 pub extern "C" fn _divide_number<A: Display + Div<Output = A> + Zero>(x: A, y: A) -> A {
     if y.is_zero() {
-        unsafe {
-            let exception_object = __cxa_allocate_exception(std::mem::size_of::<*const str>());
-            let exception = CString::new(format!("Attempted to divide {} by zero.", x)).unwrap();
-
-            std::ptr::write(exception_object, exception.into_raw());
-
-            __cxa_throw(exception_object, null(), None)
-        }
+        throw_exception(CString::new(format!("Attempted to divide {} by zero.", x)).unwrap())
     } else {
         x / y
     }
 }
 
-pub extern "C" fn _print_c_string(string: *mut c_char) {
-    println!("{}", unsafe { CString::from_raw(string) }.to_str().unwrap());
+/// # Safety
+///
+/// This function should only be called with a pointer that's safe to pass to [CString::from_raw].
+pub unsafe extern "C" fn _print_c_string(string: *mut c_char) {
+    println!("{}", CString::from_raw(string).to_str().unwrap());
+}
+
+pub extern "C" fn _workerpool_new() -> *mut WorkerPool {
+    Box::into_raw(Box::new(WorkerPool::new(
+        ular_scheduler::Configuration::default(),
+    )))
+}
+
+/// # Safety
+///
+/// This function should only be called with a pointer that's safe to pass to [Box::from_raw].
+pub unsafe extern "C" fn _workerpool_join(worker_pool: *mut WorkerPool) {
+    if let Err(error) = Box::from_raw(worker_pool).join() {
+        throw_exception(CString::new(format!("Failed to join worker pool: {:?}", error)).unwrap())
+    }
+}
+
+/// # Safety
+///
+/// This function should only be called with a pointer that's safe to pass to [Box::from_raw].
+pub unsafe extern "C" fn _worker_free(worker: *mut Worker) {
+    drop(Box::from_raw(worker));
+}
+
+/// # Safety
+///
+/// This function should only be called with a pointer that's confertable to a `&WorkerPool`.
+pub unsafe extern "C" fn _workerpool_worker(worker_pool: *const WorkerPool) -> *mut Worker {
+    Box::into_raw(Box::new(worker_pool.as_ref().unwrap().worker()))
 }
 
 fn divide_built_in_function<A: Display + Div<Output = A> + Zero>(
@@ -494,4 +682,17 @@ fn divide_built_in_function<A: Display + Div<Output = A> + Zero>(
         ),
         _divide_number::<A> as usize,
     )
+}
+
+/// It's important that this function is inlined. If it's not, [__cxa_throw] may have trouble
+/// unwinding the call stack because [throw_exception] isn't an `extern "C"` function.
+#[inline(always)]
+fn throw_exception(message: CString) -> ! {
+    unsafe {
+        let exception_object = __cxa_allocate_exception(std::mem::size_of::<*const str>());
+
+        std::ptr::write(exception_object, message.into_raw());
+
+        __cxa_throw(exception_object, null(), None)
+    }
 }

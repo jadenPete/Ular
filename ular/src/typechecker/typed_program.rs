@@ -70,8 +70,8 @@ pub struct TypedIf {
 #[derive(Clone, Debug, Node)]
 pub struct TypedBlock {
     pub statements: Vec<TypedStatement>,
-    pub position: Position,
     pub result: Option<Box<TypedExpression>>,
+    pub position: Position,
 }
 
 impl Typed for TypedBlock {

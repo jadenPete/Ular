@@ -1,4 +1,4 @@
-mod built_in_values;
+pub mod built_in_values;
 mod scope;
 pub mod typed_program;
 
@@ -406,8 +406,8 @@ impl<'a> Typechecker<'a> {
          * Functions capturing their environment (i.e. closures) aren't yet supported.
          *
          * This won't prevent nested functions from acessing the parameters of the functions within
-         * which they're nested, but the JIT compiler phase will take care of detecting nested
-         * functions and erroring when one is detected.
+         * which they're nested, but the analyzer phase will take care of detecting nested functions
+         * and erroring when one is detected.
          */
         for (i, statement) in statements.iter().enumerate() {
             if let SimpleStatement::FunctionDefinition(definition) = statement {
@@ -455,9 +455,8 @@ impl Phase<&SimpleProgram, TypedProgram, CompilationError> for TypecheckerPhase 
     }
 
     fn execute(&self, program: &SimpleProgram) -> Result<TypedProgram, CompilationError> {
-        let built_in_values = BuiltInValues::new();
         let mut typechecker = Typechecker {
-            scope: TypecheckerScope::without_parent(&built_in_values),
+            scope: TypecheckerScope::without_parent(BuiltInValues::global()),
         };
 
         Ok(TypedProgram {

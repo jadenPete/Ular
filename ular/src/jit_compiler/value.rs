@@ -23,10 +23,64 @@ pub enum UlarFunction<'a> {
 }
 
 impl<'a> UlarFunction<'a> {
+    pub fn build_call(
+        &self,
+        context: &'a Context,
+        builder: &Builder<'a>,
+        arguments: &[UlarValue<'a>],
+        name: LocalName,
+        type_: &Type,
+        position: Position,
+    ) -> Result<UlarValue<'a>, CompilationError> {
+        let mut non_unit_arguments = Vec::with_capacity(arguments.len());
+
+        for argument in arguments {
+            non_unit_arguments.push(BasicValueEnum::try_from(*argument)?.into());
+        }
+
+        let result = match self {
+            Self::DirectReference(function) => builder
+                .build_call(*function, &non_unit_arguments, &name.to_string())
+                .unwrap(),
+
+            Self::IndirectReference { pointer, type_ } => builder
+                .build_indirect_call(*type_, *pointer, &non_unit_arguments, &name.to_string())
+                .unwrap(),
+        };
+
+        UlarValue::from_call_site_value(context, type_, result, position)
+    }
+
     pub fn get_pointer_value(&self) -> PointerValue<'a> {
         match self {
             Self::DirectReference(function) => function.as_global_value().as_pointer_value(),
             Self::IndirectReference { pointer, .. } => *pointer,
+        }
+    }
+
+    pub fn get_type(&self) -> FunctionType<'a> {
+        match self {
+            Self::DirectReference(function) => function.get_type(),
+            Self::IndirectReference { type_, .. } => *type_,
+        }
+    }
+}
+
+impl<'a> TryFrom<UlarFunction<'a>> for FunctionValue<'a> {
+    type Error = CompilationError;
+
+    fn try_from(function: UlarFunction<'a>) -> Result<Self, Self::Error> {
+        match function {
+            UlarFunction::DirectReference(result) => Ok(result),
+            UlarFunction::IndirectReference { .. } => Err(CompilationError {
+                message: CompilationErrorMessage::InternalError(
+                    InternalError::JitCompilerTypeMismatch {
+                        expected_type: String::from("FunctionValue"),
+                        actual_value: format!("{:?}", function),
+                    },
+                ),
+                position: None,
+            }),
         }
     }
 }

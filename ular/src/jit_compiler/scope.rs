@@ -1,111 +1,130 @@
 use crate::{
+    data_structures::number_map::NumberMap,
+    dependency_analyzer::analyzed_program::AnalyzedExpressionRef,
     error_reporting::{CompilationError, CompilationErrorMessage, InternalError},
     jit_compiler::{built_in_values::BuiltInValues, module::UlarModule, value::UlarValue},
-    parser::program::{Identifier, Node},
 };
-use inkwell::{builder::Builder, context::Context, execution_engine::ExecutionEngine};
-use std::{cmp::Eq, collections::HashMap};
+use inkwell::{
+    builder::Builder, context::Context, execution_engine::ExecutionEngine, values::PointerValue,
+};
+use std::cmp::Eq;
 
 pub struct JitCompilerScope<'a, 'context> {
     parent: Option<&'a JitCompilerScope<'a, 'context>>,
+    function_values: &'a [UlarValue<'context>],
+    parameter_values: Option<&'a [UlarValue<'context>]>,
     next_local_name: LocalName,
-    variable_values: HashMap<String, UlarValue<'context>>,
+    expression_values: NumberMap<UlarValue<'context>>,
+    pub worker: PointerValue<'context>,
 }
 
 impl<'a, 'context> JitCompilerScope<'a, 'context> {
-    pub fn new(parent: Option<&'a JitCompilerScope<'a, 'context>>) -> Self {
-        let next_local_name = match parent {
-            Some(parent) => parent.next_local_name,
-            None => LocalName(0),
-        };
-
-        Self {
-            parent,
-            next_local_name,
-            variable_values: HashMap::new(),
-        }
-    }
-
-    pub fn declare_variable(
-        &mut self,
-        name: &Identifier,
-        value: UlarValue<'context>,
-    ) -> Result<(), CompilationError> {
-        match self.variable_values.insert(name.value.clone(), value) {
-            Some(_) => Err(CompilationError {
-                message: CompilationErrorMessage::InternalError(
-                    InternalError::JitCompilerVariableAlreadyDefined {
-                        name: name.value.clone(),
-                    },
-                ),
-
-                position: Some(name.get_position()),
-            }),
-
-            None => Ok(()),
-        }
-    }
-
     pub fn get_local_name(&mut self) -> LocalName {
         let result = self.next_local_name;
 
-        self.next_local_name = LocalName(self.next_local_name.0 + 1);
+        self.next_local_name.0 += 1;
 
         result
     }
 
-    pub fn get_variable_value(
+    pub fn get(
         &self,
-        variable_name: &str,
+        reference: &AnalyzedExpressionRef,
         local_name: LocalName,
         context: &'context Context,
         builder: &Builder<'context>,
         built_in_values: &mut BuiltInValues<'context>,
         execution_engine: &ExecutionEngine<'context>,
         module: &mut UlarModule<'context>,
-    ) -> Option<UlarValue<'context>> {
-        self.variable_values
-            .get(variable_name)
+    ) -> Result<UlarValue<'context>, CompilationError> {
+        match reference {
+            AnalyzedExpressionRef::BuiltIn { name, .. } => built_in_values
+                .get(name, local_name, context, builder, execution_engine, module)
+                .ok_or_else(|| InternalError::UnknownValue { name: name.clone() }),
+
+            AnalyzedExpressionRef::Expression { index, .. } => self
+                .get_expression(*index)
+                .ok_or_else(|| InternalError::JitCompilerUnknownExpression { index: *index }),
+
+            AnalyzedExpressionRef::Function { index, .. } => match self.function_values.get(*index)
+            {
+                Some(value) => Ok(*value),
+                None => Err(InternalError::JitCompilerUnknownFunction { index: *index }),
+            },
+
+            AnalyzedExpressionRef::Parameter { index, .. } => self
+                .parameter_values
+                .and_then(|parameter_values| parameter_values.get(*index).copied())
+                .ok_or_else(|| InternalError::JitCompilerUnknownParameter { index: *index }),
+
+            AnalyzedExpressionRef::Number(number) => Ok(UlarValue::Int(
+                number
+                    .type_
+                    .inkwell_type(context)
+                    .const_int(number.value as u64, number.type_.is_signed()),
+            )),
+        }
+        .map_err(|internal_error| CompilationError {
+            message: CompilationErrorMessage::InternalError(internal_error),
+            position: None,
+        })
+    }
+
+    fn get_expression(&self, i: usize) -> Option<UlarValue<'context>> {
+        self.expression_values
+            .get(i)
             .copied()
-            .or_else(|| {
-                self.parent.and_then(|parent| {
-                    parent.get_variable_value(
-                        variable_name,
-                        local_name,
-                        context,
-                        builder,
-                        built_in_values,
-                        execution_engine,
-                        module,
-                    )
-                })
-            })
-            .or_else(|| {
-                built_in_values.get(
-                    variable_name,
-                    local_name,
-                    context,
-                    builder,
-                    execution_engine,
-                    module,
-                )
-            })
+            .or_else(|| self.parent.and_then(|parent| parent.get_expression(i)))
     }
 
-    pub fn has_parent(&self) -> bool {
-        self.parent.is_some()
+    pub fn set_expression(&mut self, i: usize, value: UlarValue<'context>) {
+        self.expression_values.insert(i, value);
     }
 
-    pub fn with_child<A: FnOnce(&mut JitCompilerScope<'_, 'context>) -> B, B>(
+    pub fn with_child_same_function<A: FnOnce(&mut JitCompilerScope<'_, 'context>) -> B, B>(
         &mut self,
+        offset: usize,
         callback: A,
     ) -> B {
-        let mut child = JitCompilerScope::new(Some(self));
+        let mut child =
+            JitCompilerScope::new_with_parent(self, self.parameter_values, offset, self.worker);
+
         let result = callback(&mut child);
 
         self.next_local_name = child.next_local_name;
 
         result
+    }
+
+    pub fn new_with_parent(
+        parent: &'a JitCompilerScope<'a, 'context>,
+        parameter_values: Option<&'a [UlarValue<'context>]>,
+        offset: usize,
+        worker: PointerValue<'context>,
+    ) -> Self {
+        Self {
+            parent: Some(parent),
+            function_values: parent.function_values,
+            parameter_values,
+            next_local_name: parent.next_local_name,
+            expression_values: NumberMap::new(offset),
+            worker,
+        }
+    }
+
+    pub fn new_without_parent(
+        function_values: &'a [UlarValue<'context>],
+        parameter_values: Option<&'a [UlarValue<'context>]>,
+        worker: PointerValue<'context>,
+    ) -> Self {
+        Self {
+            parent: None,
+            function_values,
+            parameter_values,
+            next_local_name: LocalName(0),
+            expression_values: NumberMap::new(0),
+            worker,
+        }
     }
 }
 

@@ -9,7 +9,7 @@ use crate::{
 use std::collections::HashMap;
 
 pub struct TypecheckerScope<'a> {
-    pub built_in_values: &'a BuiltInValues,
+    built_in_values: &'a BuiltInValues,
     parent: Option<&'a TypecheckerScope<'a>>,
     variable_types: HashMap<String, Type>,
 }

@@ -13,6 +13,7 @@ nom = "7.1.3"
 num = "0.4.3"
 simplelog = "0.12.2"
 ular-derive = { path = "../ular-derive" }
+ular-scheduler = { path = "../ular-scheduler" }
 
 [dev-dependencies]
 anyhow = "1.0.97"

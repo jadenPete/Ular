@@ -1,5 +1,7 @@
 use crate::parser::type_::{FunctionType, NumericType, Type};
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::OnceLock};
+
+static GLOBAL_BUILT_IN_VALUES: OnceLock<BuiltInValues> = OnceLock::new();
 
 pub struct BuiltInValues {
     value_types: HashMap<String, Type>,
@@ -10,7 +12,11 @@ impl BuiltInValues {
         self.value_types.get(name).map(|value| value.clone())
     }
 
-    pub fn new() -> Self {
+    pub fn global() -> &'static Self {
+        GLOBAL_BUILT_IN_VALUES.get_or_init(Self::new)
+    }
+
+    fn new() -> Self {
         let mut value_types = HashMap::new();
 
         value_types.insert(
