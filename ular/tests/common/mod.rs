@@ -38,7 +38,7 @@ pub fn evaluate_program(program: &str, expect_success: bool) -> anyhow::Result<S
 
         Err(match output.status.code() {
             Some(code) => anyhow!(
-                "ular returned a status code of {}, but expected a {}.",
+                "ular returned a status code of {}, but expected {}.",
                 code,
                 expected
             ),

@@ -13,9 +13,11 @@ fn addition_works() -> anyhow::Result<()> {
     let output = evaluate_program(
         &format!(
             "\
-println_i32({min} + 0);
-println_i32({min} + 1);
-println_i32({min} + {max});
+seq {{
+    println_i32({min} + 0);
+    println_i32({min} + 1);
+    println_i32({min} + {max});
+}};
 ",
             min = i32::MIN,
             max = i32::MAX,
@@ -44,15 +46,17 @@ fn subtraction_works() -> anyhow::Result<()> {
     // Subtract combinations of a negative number, the additive identity, and a positive number
     let output = evaluate_program(
         "\
-println_i32(-1 - -1);
-println_i32(-1 - 0);
-println_i32(-1 - 1);
-println_i32(0 - -1);
-println_i32(0 - 0);
-println_i32(0 - 1);
-println_i32(1 - -1);
-println_i32(1 - 0);
-println_i32(1 - 1);
+seq {
+    println_i32(-1 - -1);
+    println_i32(-1 - 0);
+    println_i32(-1 - 1);
+    println_i32(0 - -1);
+    println_i32(0 - 0);
+    println_i32(0 - 1);
+    println_i32(1 - -1);
+    println_i32(1 - 0);
+    println_i32(1 - 1);
+};
 ",
         true,
     )?;
@@ -86,10 +90,12 @@ fn multiplication_works() -> anyhow::Result<()> {
      */
     let output = evaluate_program(
         "\
-println_i32(-2 * -2);
-println_i32(-2 * 0);
-println_i32(-2 * 1);
-println_i32(-2 * 2);
+seq {
+    println_i32(-2 * -2);
+    println_i32(-2 * 0);
+    println_i32(-2 * 1);
+    println_i32(-2 * 2);
+};
 ",
         true,
     )?;
@@ -120,16 +126,18 @@ fn division_works() -> anyhow::Result<()> {
 
     let output = evaluate_program(
         "\
-println_i32(-4 / -8);
-println_i32(-4 / -2);
-println_i32(-4 / 1);
-println_i32(-4 / 2);
-println_i32(-4 / 8);
-println_i32(4 / -8);
-println_i32(4 / -2);
-println_i32(4 / 1);
-println_i32(4 / 2);
-println_i32(4 / 8);
+seq {
+    println_i32(-4 / -8);
+    println_i32(-4 / -2);
+    println_i32(-4 / 1);
+    println_i32(-4 / 2);
+    println_i32(-4 / 8);
+    println_i32(4 / -8);
+    println_i32(4 / -2);
+    println_i32(4 / 1);
+    println_i32(4 / 2);
+    println_i32(4 / 8);
+};
 ",
         true,
     )?;
@@ -215,10 +223,12 @@ Error: Expected a value of type `u16`, but got one of type `u8`.
 fn negation_works() -> anyhow::Result<()> {
     let output = evaluate_program(
         "\
-println_i32(---5);
-println_i32(-(3 + 4));
-println_i32(--5 * 4);
-println_i32(-if true { 5 } else { -5 });
+seq {
+    println_i32(---5);
+    println_i32(-(3 + 4));
+    println_i32(--5 * 4);
+    println_i32(-if true { 5 } else { -5 });
+};
 ",
         true,
     )?;
@@ -240,11 +250,13 @@ println_i32(-if true { 5 } else { -5 });
 fn operator_precedence_works() -> anyhow::Result<()> {
     let output = evaluate_program(
         "\
-println_i32(3 + 4 * 2);
-println_i32(10 - 6 / 2);
-println_i32(8 + 9 % 4);
-println_i32(20 / 4 * 2 % 3);
-println_i32(5 + 12 / 4 * 2 - 3 % 2);
+seq {
+    println_i32(3 + 4 * 2);
+    println_i32(10 - 6 / 2);
+    println_i32(8 + 9 % 4);
+    println_i32(20 / 4 * 2 % 3);
+    println_i32(5 + 12 / 4 * 2 - 3 % 2);
+};
 ",
         true,
     )?;
@@ -267,9 +279,11 @@ println_i32(5 + 12 / 4 * 2 - 3 % 2);
 fn operator_associativity_works() -> anyhow::Result<()> {
     let output = evaluate_program(
         "\
-println_i32(20 - 5 - 2);
-println_i32(8 / 2 / 2);
-println_i32(18 % 5 % 2);
+seq {
+    println_i32(20 - 5 - 2);
+    println_i32(8 / 2 / 2);
+    println_i32(18 % 5 % 2);
+};
 ",
         true,
     )?;

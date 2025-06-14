@@ -16,13 +16,17 @@ fn multiple_statements() -> anyhow::Result<()> {
     let output = evaluate_program(
         "\
 if false {
-	println_i32(1);
-	println_i32(2);
-	println_i32(3);
+    seq {
+    	println_i32(1);
+    	println_i32(2);
+    	println_i32(3);
+	};
 } else {
-	println_i32(4);
-	println_i32(5);
-	println_i32(6);
+	seq {
+    	println_i32(4);
+    	println_i32(5);
+    	println_i32(6);
+    };
 };
 ",
         true,

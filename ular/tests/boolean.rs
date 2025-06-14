@@ -6,10 +6,12 @@ use crate::common::evaluate_program;
 fn logical_and_works() -> anyhow::Result<()> {
     let output = evaluate_program(
         "\
-println_bool(false && false);
-println_bool(false && true);
-println_bool(true && false);
-println_bool(true && true);
+seq {
+    println_bool(false && false);
+    println_bool(false && true);
+    println_bool(true && false);
+    println_bool(true && true);
+};
 ",
         true,
     )?;
@@ -23,10 +25,12 @@ println_bool(true && true);
 fn logical_or_works() -> anyhow::Result<()> {
     let output = evaluate_program(
         "\
-println_bool(false || false);
-println_bool(false || true);
-println_bool(true || false);
-println_bool(true || true);
+seq {
+    println_bool(false || false);
+    println_bool(false || true);
+    println_bool(true || false);
+    println_bool(true || true);
+};
 ",
         true,
     )?;
@@ -40,8 +44,10 @@ println_bool(true || true);
 fn not_works() -> anyhow::Result<()> {
     let output = evaluate_program(
         "\
-println_bool(!false);
-println_bool(!true);
+seq {
+    println_bool(!false);
+    println_bool(!true);
+};
 ",
         true,
     )?;
@@ -55,8 +61,10 @@ println_bool(!true);
 fn operator_precedence_works() -> anyhow::Result<()> {
     let output = evaluate_program(
         "\
-println_bool(!false || true);
-println_bool(!false && true);
+seq {
+    println_bool(!false || true);
+    println_bool(!false && true);
+};
 ",
         true,
     )?;

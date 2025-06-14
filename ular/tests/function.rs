@@ -56,14 +56,16 @@ fn add_i64(x: i64, y: i64): i64 {
 	x + y
 }
 
-println_u8(add_u8(1, 1));
-println_u16(add_u16(1, 2));
-println_u32(add_u32(2, 3));
-println_u64(add_u64(3, 5));
-println_i8(add_i8(-1, -1));
-println_i16(add_i16(-1, -2));
-println_i32(add_i32(-2, -3));
-println_i64(add_i64(-3, -5));
+seq {
+    println_u8(add_u8(1, 1));
+    println_u16(add_u16(1, 2));
+    println_u32(add_u32(2, 3));
+    println_u64(add_u64(3, 5));
+    println_i8(add_i8(-1, -1));
+    println_i16(add_i16(-1, -2));
+    println_i32(add_i32(-2, -3));
+    println_i64(add_i64(-3, -5));
+};
 ",
         true,
     )?;
@@ -149,8 +151,10 @@ fn print_number(is_odd: bool): () => unit {
 	}
 }
 
-print_number(false)();
-print_number(true)();
+seq {
+    print_number(false)();
+    print_number(true)();
+};
 ",
         true,
     )?;
@@ -175,8 +179,10 @@ fn conditional_incrementer(add_one: bool): i32 => i32 {
     }
 }
 
-println_i32(conditional_incrementer(false)(42));
-println_i32(conditional_incrementer(true)(42));
+seq {
+    println_i32(conditional_incrementer(false)(42));
+    println_i32(conditional_incrementer(true)(42));
+};
 ",
         true,
     )?;
