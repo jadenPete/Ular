@@ -286,10 +286,19 @@ pub fn report_error(error: CompilationError, source: &str) -> ! {
                 .map(|(i, _)| i - 1)
                 .unwrap_or(0);
 
-        let start_line_with_context = start_line.checked_sub(CONTEXT_LINES).unwrap_or(0);
+        let start_line_with_context = start_line.saturating_sub(CONTEXT_LINES);
         let end_line_with_context = (end_line + CONTEXT_LINES).min(lines.len() - 1);
         let mut numbered_lines_with_marker = Vec::new();
 
+        // In my opinion, this is clearer than:
+        // ```
+        // for (i, (line_index, line)) in lines[start_line_with_context..=end_line_with_context].iter().enumerate() {
+        //     let j = i + start_line_with_context;
+        //
+        //     ...
+        // }
+        // ```
+        #[allow(clippy::needless_range_loop)]
         for i in start_line_with_context..=end_line_with_context {
             let (line_index, line) = lines[i];
 

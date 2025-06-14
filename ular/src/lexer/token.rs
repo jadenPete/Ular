@@ -92,7 +92,7 @@ pub struct Tokens<'a> {
     pub source: &'a str,
 }
 
-impl<'a> Tokens<'a> {
+impl Tokens<'_> {
     pub fn get_position(&self) -> Position {
         Position(match (self.tokens.first(), self.tokens.last()) {
             (Some(first_token), Some(last_token)) => {
@@ -108,13 +108,13 @@ impl<'a> Tokens<'a> {
     }
 }
 
-impl<'a> Debug for Tokens<'a> {
+impl Debug for Tokens<'_> {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
         write!(formatter, "{}", &self.source[self.get_position().0])
     }
 }
 
-impl<'a, A: SliceIndex<[PositionedToken]>> Index<A> for Tokens<'a> {
+impl<A: SliceIndex<[PositionedToken]>> Index<A> for Tokens<'_> {
     type Output = A::Output;
 
     fn index(&self, index: A) -> &Self::Output {
@@ -148,20 +148,20 @@ impl<'a> InputIter for Tokens<'a> {
     }
 }
 
-impl<'a> InputLength for Tokens<'a> {
+impl InputLength for Tokens<'_> {
     fn input_len(&self) -> usize {
         self.tokens.len()
     }
 }
 
-impl<'a> Offset for Tokens<'a> {
+impl Offset for Tokens<'_> {
     fn offset(&self, second: &Self) -> usize {
         (second.tokens.as_ptr() as usize - self.tokens.as_ptr() as usize)
             / std::mem::size_of::<PositionedToken>()
     }
 }
 
-impl<'a> Slice<RangeFrom<usize>> for Tokens<'a> {
+impl Slice<RangeFrom<usize>> for Tokens<'_> {
     fn slice(&self, range: RangeFrom<usize>) -> Self {
         Self {
             tokens: self.tokens.slice(range),
@@ -170,7 +170,7 @@ impl<'a> Slice<RangeFrom<usize>> for Tokens<'a> {
     }
 }
 
-impl<'a> Slice<RangeTo<usize>> for Tokens<'a> {
+impl Slice<RangeTo<usize>> for Tokens<'_> {
     fn slice(&self, range: RangeTo<usize>) -> Self {
         Self {
             tokens: self.tokens.slice(range),

@@ -32,12 +32,12 @@ pub trait Node {
 /// logical_or = logical_and ('||' logical_and)*;
 /// logical_and = sum ('&&' sum)*;
 /// sum =
-/// 	| product ('+' product)*
-/// 	| product ('-' product)*;
+///     | product ('+' product)*
+///     | product ('-' product)*;
 ///
 /// product =
-/// 	| prefix_operation ('*' prefix_operation)*
-/// 	| prefix_operation ('/' prefix_operation)*;
+///     | prefix_operation ('*' prefix_operation)*
+///     | prefix_operation ('/' prefix_operation)*;
 ///
 /// prefix_operation =
 ///     | '!' prefix_operation
@@ -45,8 +45,8 @@ pub trait Node {
 ///     | call;
 ///
 /// call =
-/// 	| if ('(' ((expression ',')* expression)? ')')+
-/// 	| if;
+///     | if ('(' ((expression ',')* expression)? ')')+
+///     | if;
 ///
 /// if =
 ///     | 'if' expression block else_if_clause* else_clause?
@@ -55,8 +55,8 @@ pub trait Node {
 /// else_if_clause = 'else' 'if' expression block;
 /// else_clause = 'else' block;
 /// primary =
-/// 	| identifier
-/// 	| number;
+///     | identifier
+///     | number;
 ///     | 'unit';
 ///     | '(' expression ')';
 ///     | sequential_block;

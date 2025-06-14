@@ -132,7 +132,7 @@ impl<'a> UlarValue<'a> {
                 pointer: basic_value_enum.into_pointer_value(),
                 type_: function_type
                     .inkwell_type(context)
-                    .ok_or_else(|| CompilationError {
+                    .ok_or(CompilationError {
                         message: CompilationErrorMessage::UnitPassedAsValue,
                         position: Some(value_position),
                     })?,

@@ -421,7 +421,7 @@ fn parse_primary(input: Tokens) -> IResult<Tokens, Expression> {
         map(parse_identifier, |identifier| {
             Expression::Identifier(identifier)
         }),
-        map(parse_number, |number| Expression::Number(number)),
+        map(parse_number, Expression::Number),
         map(positioned(parse_token(Token::UnitType)), |(position, _)| {
             Expression::Unit(Unit { position })
         }),

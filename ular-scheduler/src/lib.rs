@@ -74,7 +74,6 @@ impl WorkerPool {
         let context = Arc::new(WorkerContext::new());
         let thread_count = configuration.thread_count.into();
         let worker_threads = (0..thread_count)
-            .into_iter()
             .map(|_| {
                 let cloned_context = Arc::clone(&context);
                 let heartbeat_value = Arc::new(AtomicBool::new(false));
@@ -192,7 +191,10 @@ impl Worker {
 
         if let Some(key) = self.shared_job_key {
             if shared_jobs.get(&key).is_some_and(|shared_job| {
-                *shared_job as *const Job == job as *const Job<Context, Result> as *const Job
+                std::ptr::eq(
+                    *shared_job,
+                    job as *const Job<Context, Result> as *const Job,
+                )
             }) {
                 shared_jobs.remove(&key);
 
@@ -247,7 +249,7 @@ impl Worker {
     /// If the job executed in another thread, returns [Some] with its result. Otherwise, returns
     /// [None] with the expectation that the job is executed manually in the same thread.
     ///
-    /// # Safety:
+    /// # Safety
     ///
     /// If [Worker::fork] was called with `job`, it must've been called with the same worker this
     /// function is executed with.
@@ -293,7 +295,7 @@ pub struct Job<'a, Context = (), Result = ()> {
     result: MaybeUninit<ValueBuffer<Result>>,
 }
 
-impl<'a, Context, Result> Job<'a, Context, Result> {
+impl<Context, Result> Job<'_, Context, Result> {
     /// Executes the job.
     ///
     /// # Safety
@@ -335,6 +337,12 @@ impl<'a, Context, Result> Job<'a, Context, Result> {
             Some(_) if self.link.is_linked() => JobState::Queued,
             Some(_) => JobState::Executing,
         }
+    }
+}
+
+impl Default for Job<'_, (), ()> {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

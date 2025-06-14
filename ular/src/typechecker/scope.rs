@@ -52,7 +52,7 @@ impl<'a> TypecheckerScope<'a> {
     pub fn get_variable_type(&self, name: &str) -> Option<Type> {
         self.variable_types
             .get(name)
-            .map(|type_| type_.clone())
+            .cloned()
             .or_else(|| {
                 self.parent
                     .and_then(|parent| parent.get_variable_type(name))

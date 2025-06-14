@@ -29,7 +29,7 @@ struct Typechecker<'a> {
     scope: TypecheckerScope<'a>,
 }
 
-impl<'a> Typechecker<'a> {
+impl Typechecker<'_> {
     fn typecheck_block(
         &self,
         block: &SimpleBlock,
@@ -44,8 +44,9 @@ impl<'a> Typechecker<'a> {
 
         let typechecked_result = match &block.result {
             Some(result) => Some(Box::new(
-                typechecker.typecheck_expression(&result, suggested_type)?,
+                typechecker.typecheck_expression(result, suggested_type)?,
             )),
+
             None => None,
         };
 
@@ -79,12 +80,12 @@ impl<'a> Typechecker<'a> {
 
                 for (i, argument) in call.arguments.iter().enumerate() {
                     typechecked_arguments.push(
-                        self.typecheck_expression(&argument, Some(&function_type.parameters[i]))?,
+                        self.typecheck_expression(argument, Some(&function_type.parameters[i]))?,
                     );
                 }
 
-                for i in 0..expected_arguments {
-                    assert_type(&typechecked_arguments[i], &function_type.parameters[i])?;
+                for (i, typechecked_argument) in typechecked_arguments.iter().enumerate() {
+                    assert_type(typechecked_argument, &function_type.parameters[i])?;
                 }
 
                 Ok(TypedCall {
@@ -162,7 +163,7 @@ impl<'a> Typechecker<'a> {
 
         let typechecked_result = match &definition.body.result {
             Some(result) => Some(Box::new(
-                typechecker.typecheck_expression(&result, Some(&definition.return_type))?,
+                typechecker.typecheck_expression(result, Some(&definition.return_type))?,
             )),
 
             None => None,
@@ -308,7 +309,7 @@ impl<'a> Typechecker<'a> {
             (None, Some(Type::Numeric(suggested))) => (
                 TypedNumber {
                     value: number.value,
-                    type_: suggested.clone(),
+                    type_: *suggested,
                     position,
                 },
                 Some(*suggested),

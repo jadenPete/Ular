@@ -151,7 +151,7 @@ impl NumericType {
         }
     }
 
-    pub fn inkwell_type<'a>(self, context: &'a Context) -> IntType<'a> {
+    pub fn inkwell_type(self, context: &Context) -> IntType {
         match self {
             Self::I8 | Self::U8 => context.i8_type(),
             Self::I16 | Self::U16 => context.i16_type(),

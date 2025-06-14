@@ -81,12 +81,12 @@ impl<A> DirectedGraph<A> {
             .partition(|&i| {
                 dependents
                     .get(i)
-                    .is_some_and(|i_dependents| i_dependents.len() > 0)
+                    .is_some_and(|i_dependents| !i_dependents.is_empty())
             });
 
         let mut layers = Vec::new();
 
-        while leaves.len() > 0 {
+        while !leaves.is_empty() {
             layers.push(leaves);
 
             let mut new_leaves = Vec::new();

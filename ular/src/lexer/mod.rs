@@ -29,8 +29,8 @@ struct PositionedSource<'a> {
     index: usize,
 }
 
-impl<'a> PositionedSource<'a> {
-    fn to_positioned_token(&self, token: Token) -> PositionedToken {
+impl PositionedSource<'_> {
+    fn to_positioned_token(self, token: Token) -> PositionedToken {
         PositionedToken {
             token,
             position: Position(self.index..self.index + self.source.len()),
@@ -73,13 +73,13 @@ impl<'a> InputIter for PositionedSource<'a> {
     }
 }
 
-impl<'a> InputLength for PositionedSource<'a> {
+impl InputLength for PositionedSource<'_> {
     fn input_len(&self) -> usize {
         self.source.len()
     }
 }
 
-impl<'a> InputTake for PositionedSource<'a> {
+impl InputTake for PositionedSource<'_> {
     fn take(&self, count: usize) -> Self {
         Self {
             source: self.source.take(count),
@@ -103,13 +103,13 @@ impl<'a> InputTake for PositionedSource<'a> {
     }
 }
 
-impl<'a> Offset for PositionedSource<'a> {
+impl Offset for PositionedSource<'_> {
     fn offset(&self, second: &Self) -> usize {
         self.source.offset(second.source)
     }
 }
 
-impl<'a> Slice<RangeFrom<usize>> for PositionedSource<'a> {
+impl Slice<RangeFrom<usize>> for PositionedSource<'_> {
     fn slice(&self, range: RangeFrom<usize>) -> Self {
         let range_start = range.start;
 
@@ -120,7 +120,7 @@ impl<'a> Slice<RangeFrom<usize>> for PositionedSource<'a> {
     }
 }
 
-impl<'a> Slice<RangeTo<usize>> for PositionedSource<'a> {
+impl Slice<RangeTo<usize>> for PositionedSource<'_> {
     fn slice(&self, range: RangeTo<usize>) -> Self {
         Self {
             source: self.source.slice(range),
@@ -129,7 +129,7 @@ impl<'a> Slice<RangeTo<usize>> for PositionedSource<'a> {
     }
 }
 
-impl<'a> InputTakeAtPosition for PositionedSource<'a> {
+impl InputTakeAtPosition for PositionedSource<'_> {
     type Item = char;
 
     fn split_at_position<Predicate: Fn(Self::Item) -> bool, Error: ParseError<Self>>(

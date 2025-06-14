@@ -141,7 +141,7 @@ impl AnalyzedExpressionRef {
 
             Self::Number(number) => Self::Number(TypedNumber {
                 value: number.value,
-                type_: number.type_.clone(),
+                type_: number.type_,
                 position,
             }),
 

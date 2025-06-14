@@ -40,16 +40,11 @@ impl Node {
 fn benchmark_chili(bencher: Bencher, benchmark: Benchmark) {
     fn sum(node: &Node, scope: &mut Scope) -> u64 {
         let (left_sum, right_sum) = scope.join(
-            |scope| {
-                node.left
-                    .as_ref()
-                    .map(|left| sum(&left, scope))
-                    .unwrap_or(0)
-            },
+            |scope| node.left.as_ref().map(|left| sum(left, scope)).unwrap_or(0),
             |scope| {
                 node.right
                     .as_ref()
-                    .map(|right| sum(&right, scope))
+                    .map(|right| sum(right, scope))
                     .unwrap_or(0)
             },
         );
@@ -75,21 +70,21 @@ fn benchmark_heartbeat(bencher: Bencher, benchmark: Benchmark) {
     extern "C" fn node_left_sum(worker: &mut Worker, node: &Node) -> u64 {
         node.left
             .as_ref()
-            .map(|left| *sum(worker, &left).get())
+            .map(|left| *sum(worker, left).get())
             .unwrap_or(0)
     }
 
     extern "C" fn node_left_sum_buffered(worker: &mut Worker, node: &Node) -> ValueBuffer<u64> {
         node.left
             .as_ref()
-            .map(|left| sum(worker, &left))
+            .map(|left| sum(worker, left))
             .unwrap_or(ValueBuffer::new(0))
     }
 
     extern "C" fn node_right_sum(worker: &mut Worker, node: &Node) -> u64 {
         node.right
             .as_ref()
-            .map(|right| *sum(worker, &right).get())
+            .map(|right| *sum(worker, right).get())
             .unwrap_or(0)
     }
 
@@ -105,7 +100,7 @@ fn benchmark_heartbeat(bencher: Bencher, benchmark: Benchmark) {
         result += worker.call(node_right_sum, node);
 
         // SAFETY: We call `try_join` with the same worker we called `fork` with
-        result += match unsafe { worker.try_join(&mut job) } {
+        result += match unsafe { worker.try_join(&job) } {
             FfiOption::Some(result) => *result.get(),
             FfiOption::None => worker.call(node_left_sum, node),
         };

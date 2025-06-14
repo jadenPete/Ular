@@ -16,12 +16,12 @@ use crate::{
         built_in_values::BuiltInValues,
         fork_function_cache::ForkFunctionCache,
         module::UlarModule,
-        scope::{JitCompilerScope, LocalName},
+        scope::JitCompilerScope,
         value::{UlarFunction, UlarValue},
     },
     parser::{
         program::{InfixOperator, Node},
-        type_::{NumericType, Type},
+        type_::Type,
     },
     simplifier::simple_program::SimplePrefixOperator,
     typechecker::typed_program::Typed,
@@ -114,7 +114,7 @@ impl<'a, A: InlineExpression<'a>> ForkedExpression<'a> for A {
 #[derive(Clone, Copy)]
 struct CompilableCall<'a>(&'a AnalyzedCall);
 
-impl<'a, 'context> CompilableCall<'a> {
+impl<'context> CompilableCall<'_> {
     fn get_function_and_arguments(
         &self,
         compiler: &mut JitFunctionCompiler<'_, 'context>,
@@ -245,7 +245,7 @@ struct ForkedCall<'a, 'context> {
     job_pointer: PointerValue<'context>,
 }
 
-impl<'a, 'context> ForkedExpression<'context> for ForkedCall<'a, 'context> {
+impl<'context> ForkedExpression<'context> for ForkedCall<'_, 'context> {
     fn compile_join(
         &self,
         compiler: &mut JitFunctionCompiler<'_, 'context>,
@@ -380,7 +380,7 @@ impl<'a, 'context> ForkedExpression<'context> for ForkedCall<'a, 'context> {
 #[derive(Clone, Copy)]
 struct CompilableIf<'a>(&'a AnalyzedIf);
 
-impl<'a, 'context> InlineExpression<'context> for CompilableIf<'a> {
+impl<'context> InlineExpression<'context> for CompilableIf<'_> {
     fn compile(
         &self,
         compiler: &mut JitFunctionCompiler<'_, 'context>,
@@ -429,7 +429,7 @@ impl<'a, 'context> InlineExpression<'context> for CompilableIf<'a> {
         builder.position_at_end(end_block);
 
         UlarValue::build_phi(
-            &compiler.context,
+            compiler.context,
             builder,
             &self.0.type_,
             &[
@@ -445,38 +445,7 @@ impl<'a, 'context> InlineExpression<'context> for CompilableIf<'a> {
 #[derive(Clone, Copy)]
 struct CompilableInfixOperation<'a>(&'a AnalyzedInfixOperation);
 
-impl<'a> CompilableInfixOperation<'a> {
-    fn compile_infix_division<'context>(
-        &self,
-        compiler: &mut JitFunctionCompiler<'_, 'context>,
-        builder: &Builder<'context>,
-        name: LocalName,
-        numeric_type: NumericType,
-        left_value: IntValue<'context>,
-        right_value: IntValue<'context>,
-        position: Position,
-    ) -> Result<UlarValue<'context>, CompilationError> {
-        let division_function = compiler
-            .built_in_values
-            .get_division_function_mut(numeric_type)
-            .get_inkwell_function(compiler.context, compiler.execution_engine, compiler.module);
-
-        UlarValue::from_call_site_value(
-            &compiler.context,
-            &Type::Numeric(numeric_type),
-            builder
-                .build_call(
-                    division_function,
-                    &[left_value.into(), right_value.into()],
-                    &name.to_string(),
-                )
-                .unwrap(),
-            position,
-        )
-    }
-}
-
-impl<'a, 'context> InlineExpression<'context> for CompilableInfixOperation<'a> {
+impl<'context> InlineExpression<'context> for CompilableInfixOperation<'_> {
     fn compile(
         &self,
         compiler: &mut JitFunctionCompiler<'_, 'context>,
@@ -528,15 +497,29 @@ impl<'a, 'context> InlineExpression<'context> for CompilableInfixOperation<'a> {
                 .into()),
 
             InfixOperator::Division => match self.0.get_type() {
-                Type::Numeric(numeric_type) => self.compile_infix_division(
-                    compiler,
-                    builder,
-                    name,
-                    numeric_type,
-                    left_value,
-                    right_value,
-                    self.0.get_position(),
-                ),
+                Type::Numeric(numeric_type) => {
+                    let division_function = compiler
+                        .built_in_values
+                        .get_division_function_mut(numeric_type)
+                        .get_inkwell_function(
+                            compiler.context,
+                            compiler.execution_engine,
+                            compiler.module,
+                        );
+
+                    UlarValue::from_call_site_value(
+                        compiler.context,
+                        &Type::Numeric(numeric_type),
+                        builder
+                            .build_call(
+                                division_function,
+                                &[left_value.into(), right_value.into()],
+                                &name.to_string(),
+                            )
+                            .unwrap(),
+                        self.0.get_position(),
+                    )
+                }
 
                 type_ => Err(CompilationError {
                     message: CompilationErrorMessage::InternalError(
@@ -553,7 +536,7 @@ impl<'a, 'context> InlineExpression<'context> for CompilableInfixOperation<'a> {
                 Type::Numeric(numeric_type) => Ok(if numeric_type.is_signed() {
                     builder.build_int_signed_rem(left_value, right_value, &name.to_string())
                 } else {
-                    builder.build_int_signed_rem(left_value, right_value, &name.to_string())
+                    builder.build_int_unsigned_rem(left_value, right_value, &name.to_string())
                 }
                 .unwrap()
                 .into()),
@@ -585,7 +568,7 @@ impl<'a, 'context> InlineExpression<'context> for CompilableInfixOperation<'a> {
 #[derive(Clone, Copy)]
 struct CompilablePrefixOperation<'a>(&'a AnalyzedPrefixOperation);
 
-impl<'a, 'context> InlineExpression<'context> for CompilablePrefixOperation<'a> {
+impl<'context> InlineExpression<'context> for CompilablePrefixOperation<'_> {
     fn compile(
         &self,
         compiler: &mut JitFunctionCompiler<'_, 'context>,
@@ -627,7 +610,7 @@ struct JitFunctionCompiler<'a, 'context> {
     module: &'a mut UlarModule<'context>,
 }
 
-impl<'a, 'context> JitFunctionCompiler<'a, 'context> {
+impl<'context> JitFunctionCompiler<'_, 'context> {
     fn append_basic_block(
         &self,
         scope: &mut JitCompilerScope<'_, 'context>,
@@ -642,8 +625,8 @@ impl<'a, 'context> JitFunctionCompiler<'a, 'context> {
         scope: &mut JitCompilerScope<'_, 'context>,
         block: &AnalyzedBlock,
     ) -> Result<UlarValue<'context>, CompilationError> {
-        scope.with_child_same_function(block.expression_graph.offset, |mut child_scope| {
-            self.compile_expression_graph(&builder, &mut child_scope, &block.expression_graph)?;
+        scope.with_child_same_function(block.expression_graph.offset, |child_scope| {
+            self.compile_expression_graph(builder, child_scope, &block.expression_graph)?;
 
             Ok(match &block.result {
                 Some(result_reference) => {
@@ -653,7 +636,7 @@ impl<'a, 'context> JitFunctionCompiler<'a, 'context> {
                         result_reference,
                         result_name,
                         self.context,
-                        &builder,
+                        builder,
                         self.built_in_values,
                         self.execution_engine,
                         self.module,
@@ -893,7 +876,7 @@ impl<'a, 'context> JitFunctionCompiler<'a, 'context> {
         }
         .unwrap();
 
-        UlarValue::from_call_site_value(&self.context, type_, call_result, position)
+        UlarValue::from_call_site_value(self.context, type_, call_result, position)
     }
 }
 
@@ -953,10 +936,10 @@ fn compile_main_function<'a>(
     };
 
     for (i, definition) in program.functions.iter().enumerate() {
-        function_compiler.compile_function_definition(builder, &mut scope, i, &definition)?;
+        function_compiler.compile_function_definition(builder, &mut scope, i, definition)?;
     }
 
-    function_compiler.compile_expression_graph(&builder, &mut scope, &program.expression_graph)?;
+    function_compiler.compile_expression_graph(builder, &mut scope, &program.expression_graph)?;
 
     builder.build_return(None).unwrap();
 

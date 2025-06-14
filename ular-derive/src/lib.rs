@@ -7,7 +7,7 @@ fn named_fields_has_field_with_name(fields: &FieldsNamed, expected_name: &str) -
     fields
         .named
         .iter()
-        .any(|field| field.ident.as_ref().unwrap().to_string() == expected_name)
+        .any(|field| field.ident.as_ref().unwrap() == expected_name)
 }
 
 fn derive_single_getter_trait(

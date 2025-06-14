@@ -9,7 +9,7 @@ pub struct BuiltInValues {
 
 impl BuiltInValues {
     pub fn get_value_type(&self, name: &str) -> Option<Type> {
-        self.value_types.get(name).map(|value| value.clone())
+        self.value_types.get(name).cloned()
     }
 
     pub fn global() -> &'static Self {
@@ -29,7 +29,7 @@ impl BuiltInValues {
 
         for numeric_type in enum_iterator::all::<NumericType>() {
             value_types.insert(
-                String::from(format!("println_{}", numeric_type)),
+                format!("println_{}", numeric_type),
                 Type::Function(FunctionType {
                     parameters: vec![Type::Numeric(numeric_type)],
                     return_type: Box::new(Type::Unit),

@@ -13,18 +13,14 @@ pub trait Phase<Input, Output: Debug, Error> {
         let output = self.execute(input);
         let name = Self::name();
 
-        match output {
-            Ok(ref output) => {
-                if debug_phases
-                    .iter()
-                    .any(|other_name| other_name.as_ref() == name)
-                {
-                    debug!("Output of the {} phase:", name);
-                    debug!("{:?}", output);
-                }
+        if let Ok(ref output) = output {
+            if debug_phases
+                .iter()
+                .any(|other_name| other_name.as_ref() == name)
+            {
+                debug!("Output of the {} phase:", name);
+                debug!("{:?}", output);
             }
-
-            Err(_) => {}
         }
 
         output

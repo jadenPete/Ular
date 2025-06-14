@@ -51,7 +51,7 @@ pub struct BuiltInBool<'a> {
     computed_value: Option<UlarValue<'a>>,
 }
 
-impl<'a> BuiltInBool<'a> {
+impl BuiltInBool<'_> {
     fn new(value: u64) -> Self {
         Self {
             value,

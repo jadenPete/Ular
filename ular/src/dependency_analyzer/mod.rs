@@ -107,19 +107,16 @@ impl<'a> Analyzer<'a> {
                     None => None,
                 };
 
-                match (&result_reference, last_statement_index) {
-                    (
-                        Some(AnalyzedExpressionRef::Expression {
-                            index: result_index,
-                            ..
-                        }),
-                        Some(last_statement_index),
-                    ) => {
-                        self.expression_graph
-                            .add_edge(last_statement_index, *result_index);
-                    }
-
-                    _ => {}
+                if let (
+                    Some(AnalyzedExpressionRef::Expression {
+                        index: result_index,
+                        ..
+                    }),
+                    Some(last_statement_index),
+                ) = (&result_reference, last_statement_index)
+                {
+                    self.expression_graph
+                        .add_edge(last_statement_index, *result_index);
                 }
 
                 Ok(result_reference.unwrap_or_else(|| {
@@ -135,8 +132,8 @@ impl<'a> Analyzer<'a> {
         }
     }
 
-    fn analyze_function_definition<'b>(
-        &'b mut self,
+    fn analyze_function_definition(
+        &mut self,
         i: usize,
         definition: &TypedFunctionDefinition,
     ) -> Result<(), CompilationError> {
@@ -184,7 +181,7 @@ impl<'a> Analyzer<'a> {
         identifier: &TypedIdentifier,
     ) -> Result<AnalyzedExpressionRef, CompilationError> {
         self.scope
-            .get_variable(&identifier)
+            .get_variable(identifier)
             .ok_or_else(|| CompilationError {
                 message: CompilationErrorMessage::InternalError(InternalError::UnknownValue {
                     name: identifier.underlying.value.clone(),
@@ -408,12 +405,8 @@ impl<'a> AnalyzerExpressionGraph<'a> {
     }
 
     fn add_edge_with_reference(&mut self, dependent: usize, dependency: &AnalyzedExpressionRef) {
-        match dependency {
-            AnalyzedExpressionRef::Expression { index, .. } => {
-                self.add_edge(dependent, *index);
-            }
-
-            _ => {}
+        if let AnalyzedExpressionRef::Expression { index, .. } = dependency {
+            self.add_edge(dependent, *index);
         }
     }
 
@@ -473,9 +466,8 @@ impl AnalyzerFunctions {
 
     fn into_vec(self) -> Result<Vec<AnalyzedFunctionDefinition>, CompilationError> {
         let mut result = Vec::with_capacity(self.function_count);
-        let mut i = 0;
 
-        for (j, definition) in self.functions.into_iter() {
+        for (i, (j, definition)) in self.functions.into_iter().enumerate() {
             if j > i {
                 return Err(CompilationError {
                     message: CompilationErrorMessage::InternalError(
@@ -486,8 +478,6 @@ impl AnalyzerFunctions {
             }
 
             result.push(definition);
-
-            i += 1;
         }
 
         if result.len() < self.function_count {
@@ -534,7 +524,7 @@ impl Phase<&TypedProgram, AnalyzedProgram, CompilationError> for AnalyzerPhase {
 
         Ok(AnalyzedProgram {
             functions: functions.into_vec()?,
-            expression_graph: expression_graph,
+            expression_graph,
             position: program.get_position(),
         })
     }

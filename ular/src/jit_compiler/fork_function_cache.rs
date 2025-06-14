@@ -246,7 +246,7 @@ impl<'a> ForkFunctionKey<'a> {
     }
 }
 
-impl<'a> Hash for ForkFunctionKey<'a> {
+impl Hash for ForkFunctionKey<'_> {
     fn hash<A: Hasher>(&self, state: &mut A) {
         match self {
             ForkFunctionKey::Direct { function } => {
@@ -276,7 +276,7 @@ struct HashableFunctionType<'a>(FunctionType<'a>);
 /// Although [FunctionType] implements [Eq], it doesn't implement [Hash]. Because it's known to
 /// contain a pointer, we can implement a [Hash] implementation for it by reading the raw bytes behind
 /// it and hashing that.
-impl<'a> Hash for HashableFunctionType<'a> {
+impl Hash for HashableFunctionType<'_> {
     fn hash<A: Hasher>(&self, state: &mut A) {
         let function_type_pointer: *const FunctionType = &self.0;
 

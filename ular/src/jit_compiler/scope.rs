@@ -7,7 +7,10 @@ use crate::{
 use inkwell::{
     builder::Builder, context::Context, execution_engine::ExecutionEngine, values::PointerValue,
 };
-use std::cmp::Eq;
+use std::{
+    cmp::Eq,
+    fmt::{Display, Formatter},
+};
 
 pub struct JitCompilerScope<'a, 'context> {
     parent: Option<&'a JitCompilerScope<'a, 'context>>,
@@ -27,6 +30,7 @@ impl<'a, 'context> JitCompilerScope<'a, 'context> {
         result
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn get(
         &self,
         reference: &AnalyzedExpressionRef,
@@ -44,7 +48,7 @@ impl<'a, 'context> JitCompilerScope<'a, 'context> {
 
             AnalyzedExpressionRef::Expression { index, .. } => self
                 .get_expression(*index)
-                .ok_or_else(|| InternalError::JitCompilerUnknownExpression { index: *index }),
+                .ok_or(InternalError::JitCompilerUnknownExpression { index: *index }),
 
             AnalyzedExpressionRef::Function { index, .. } => match self.function_values.get(*index)
             {
@@ -55,7 +59,7 @@ impl<'a, 'context> JitCompilerScope<'a, 'context> {
             AnalyzedExpressionRef::Parameter { index, .. } => self
                 .parameter_values
                 .and_then(|parameter_values| parameter_values.get(*index).copied())
-                .ok_or_else(|| InternalError::JitCompilerUnknownParameter { index: *index }),
+                .ok_or(InternalError::JitCompilerUnknownParameter { index: *index }),
 
             AnalyzedExpressionRef::Number(number) => Ok(UlarValue::Int(
                 number
@@ -133,8 +137,8 @@ impl<'a, 'context> JitCompilerScope<'a, 'context> {
 #[derive(Clone, Copy, Eq, Hash, PartialEq)]
 pub struct LocalName(u32);
 
-impl ToString for LocalName {
-    fn to_string(&self) -> String {
-        self.0.to_string()
+impl Display for LocalName {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(formatter, "{}", self.0)
     }
 }
