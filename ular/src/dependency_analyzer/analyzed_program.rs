@@ -6,7 +6,7 @@ use crate::{
         type_::{FunctionType, Type},
     },
     simplifier::simple_program::SimplePrefixOperator,
-    typechecker::typed_program::{Typed, TypedIdentifier, TypedNumber},
+    typechecker::typed_program::{Typed, TypedIdentifier, TypedNumber, TypedUnit},
 };
 use ular_derive::{Node, Typed};
 
@@ -106,6 +106,8 @@ pub enum AnalyzedExpressionRef {
         type_: Type,
         position: Position,
     },
+
+    Unit(TypedUnit),
 }
 
 impl AnalyzedExpressionRef {
@@ -137,12 +139,19 @@ impl AnalyzedExpressionRef {
                 position,
             },
 
-            Self::Number(number) => Self::Number(number.clone()),
+            Self::Number(number) => Self::Number(TypedNumber {
+                value: number.value,
+                type_: number.type_.clone(),
+                position,
+            }),
+
             Self::Parameter { index, type_, .. } => Self::Parameter {
                 index: *index,
                 type_: type_.clone(),
                 position,
             },
+
+            Self::Unit(_) => Self::Unit(TypedUnit { position }),
         }
     }
 }

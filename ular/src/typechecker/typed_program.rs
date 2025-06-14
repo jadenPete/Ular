@@ -56,6 +56,8 @@ pub enum TypedExpression {
     Identifier(TypedIdentifier),
     Number(TypedNumber),
     PrefixOperation(TypedPrefixOperation),
+    SequentialBlock(TypedBlock),
+    Unit(TypedUnit),
 }
 
 #[derive(Clone, Debug, Node, Typed)]
@@ -125,5 +127,16 @@ pub struct TypedNumber {
 impl Typed for TypedNumber {
     fn get_type(&self) -> Type {
         Type::Numeric(self.type_)
+    }
+}
+
+#[derive(Clone, Debug, Node)]
+pub struct TypedUnit {
+    pub position: Position,
+}
+
+impl Typed for TypedUnit {
+    fn get_type(&self) -> Type {
+        Type::Unit
     }
 }

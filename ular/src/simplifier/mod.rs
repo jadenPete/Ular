@@ -62,6 +62,12 @@ fn simplify_expression(expression: &Expression) -> SimpleExpression {
         Expression::PrefixOperation(prefix_operation) => {
             simplify_prefix_operation(prefix_operation)
         }
+
+        Expression::SequentialBlock(block) => {
+            SimpleExpression::SequentialBlock(simplify_block(block))
+        }
+
+        Expression::Unit(unit) => SimpleExpression::Unit(unit.clone()),
     }
 }
 

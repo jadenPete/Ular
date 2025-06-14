@@ -8,7 +8,7 @@ use crate::{
         program::{
             Block, Call, ElseClause, ElseIfClause, Expression, FunctionDefinition, Identifier, If,
             InfixOperation, InfixOperator, Number, Parameter, PrefixOperation, PrefixOperator,
-            Program, Statement, VariableDefinition,
+            Program, Statement, Unit, VariableDefinition,
         },
         type_::{FunctionType, NumericType, Type},
     },
@@ -422,11 +422,17 @@ fn parse_primary(input: Tokens) -> IResult<Tokens, Expression> {
             Expression::Identifier(identifier)
         }),
         map(parse_number, |number| Expression::Number(number)),
+        map(positioned(parse_token(Token::UnitType)), |(position, _)| {
+            Expression::Unit(Unit { position })
+        }),
         delimited(
             parse_token(Token::LeftParenthesis),
             parse_expression,
             parse_token(Token::RightParenthesis),
         ),
+        map(parse_sequential_block, |block| {
+            Expression::SequentialBlock(block)
+        }),
     ))(input)
 }
 
@@ -469,6 +475,13 @@ fn parse_number(input: Tokens) -> IResult<Tokens, Number> {
             suffix,
             position,
         },
+    )(input)
+}
+
+fn parse_sequential_block(input: Tokens) -> IResult<Tokens, Block> {
+    map(
+        positioned(tuple((parse_token(Token::SeqKeyword), parse_block))),
+        |(position, (_, block))| Block { position, ..block },
     )(input)
 }
 

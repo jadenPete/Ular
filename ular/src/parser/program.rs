@@ -57,10 +57,13 @@ pub trait Node {
 /// primary =
 /// 	| identifier
 /// 	| number;
+///     | 'unit';
 ///     | '(' expression ')';
+///     | sequential_block;
 ///
 /// identifier = IDENTIFIER;
 /// number = NUMBER numeric_type?;
+/// sequential_block = 'seq' block;
 /// ```
 #[derive(Debug, Node)]
 pub struct Program {
@@ -114,6 +117,8 @@ pub enum Expression {
     Identifier(Identifier),
     Number(Number),
     PrefixOperation(PrefixOperation),
+    SequentialBlock(Block),
+    Unit(Unit),
 }
 
 #[derive(Debug, Node)]
@@ -206,5 +211,10 @@ pub struct Identifier {
 pub struct Number {
     pub value: i128,
     pub suffix: Option<NumericType>,
+    pub position: Position,
+}
+
+#[derive(Clone, Debug, Node)]
+pub struct Unit {
     pub position: Position,
 }

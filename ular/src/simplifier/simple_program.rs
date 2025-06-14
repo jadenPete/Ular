@@ -1,7 +1,7 @@
 use crate::{
     error_reporting::Position,
     parser::{
-        program::{Identifier, InfixOperator, Node, Number, Parameter},
+        program::{Identifier, InfixOperator, Node, Number, Parameter, Unit},
         type_::Type,
     },
 };
@@ -52,6 +52,8 @@ pub enum SimpleExpression {
     Identifier(Identifier),
     Number(Number),
     PrefixOperation(SimplePrefixOperation),
+    SequentialBlock(SimpleBlock),
+    Unit(Unit),
 }
 
 #[derive(Debug, Node)]

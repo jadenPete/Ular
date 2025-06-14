@@ -11,7 +11,7 @@ use crate::{
         },
         scope::AnalyzerScope,
     },
-    error_reporting::{CompilationError, CompilationErrorMessage, InternalError},
+    error_reporting::{CompilationError, CompilationErrorMessage, InternalError, Position},
     parser::program::Node,
     phase::Phase,
     typechecker::{
@@ -19,7 +19,7 @@ use crate::{
         typed_program::{
             Typed, TypedBlock, TypedCall, TypedExpression, TypedFunctionDefinition,
             TypedIdentifier, TypedIf, TypedInfixOperation, TypedPrefixOperation, TypedProgram,
-            TypedStatement,
+            TypedStatement, TypedUnit,
         },
     },
 };
@@ -38,7 +38,7 @@ impl<'a> Analyzer<'a> {
     ) -> Result<AnalyzedBlock, CompilationError> {
         let mut analyzer = Analyzer::with_parent(self, Some(surrounding_expression));
 
-        analyzer.analyze_statements_with_functions_hoisted(&block.statements)?;
+        analyzer.analyze_statements_with_functions_hoisted(&block.statements, false)?;
 
         let result_reference = match &block.result {
             Some(result) => Some(analyzer.analyze_expression(result)?),
@@ -97,6 +97,41 @@ impl<'a> Analyzer<'a> {
             TypedExpression::PrefixOperation(prefix_operation) => {
                 self.analyze_prefix_operation(prefix_operation)
             }
+
+            TypedExpression::SequentialBlock(block) => {
+                let last_statement_index =
+                    self.analyze_statements_with_functions_hoisted(&block.statements, true)?;
+
+                let result_reference = match &block.result {
+                    Some(result) => Some(self.analyze_expression(result)?),
+                    None => None,
+                };
+
+                match (&result_reference, last_statement_index) {
+                    (
+                        Some(AnalyzedExpressionRef::Expression {
+                            index: result_index,
+                            ..
+                        }),
+                        Some(last_statement_index),
+                    ) => {
+                        self.expression_graph
+                            .add_edge(last_statement_index, *result_index);
+                    }
+
+                    _ => {}
+                }
+
+                Ok(result_reference.unwrap_or_else(|| {
+                    let i = block.get_position().0.end;
+
+                    AnalyzedExpressionRef::Unit(TypedUnit {
+                        position: Position(i..i),
+                    })
+                }))
+            }
+
+            TypedExpression::Unit(unit) => Ok(AnalyzedExpressionRef::Unit(unit.clone())),
         }
     }
 
@@ -118,7 +153,7 @@ impl<'a> Analyzer<'a> {
             )?;
         }
 
-        analyzer.analyze_statements_with_functions_hoisted(&definition.body.statements)?;
+        analyzer.analyze_statements_with_functions_hoisted(&definition.body.statements, false)?;
 
         let result_reference = match &definition.body.result {
             Some(result) => Some(analyzer.analyze_expression(result)?),
@@ -233,14 +268,18 @@ impl<'a> Analyzer<'a> {
         Ok(AnalyzedExpressionRef::for_expression(i, prefix_operation))
     }
 
-    fn analyze_statement(&mut self, statement: &TypedStatement) -> Result<(), CompilationError> {
+    fn analyze_statement(
+        &mut self,
+        statement: &TypedStatement,
+    ) -> Result<Option<AnalyzedExpressionRef>, CompilationError> {
         match statement {
             TypedStatement::VariableDefinition(definition) => {
                 let analyzed = self.analyze_expression(&definition.value)?;
 
-                self.scope.declare_variable(&definition.name, analyzed)?;
+                self.scope
+                    .declare_variable(&definition.name, analyzed.clone())?;
 
-                Ok(())
+                Ok(Some(analyzed))
             }
 
             TypedStatement::FunctionDefinition(definition) => Err(CompilationError {
@@ -249,19 +288,18 @@ impl<'a> Analyzer<'a> {
             }),
 
             TypedStatement::Expression(expression) => {
-                self.analyze_expression(expression)?;
-
-                Ok(())
+                Ok(Some(self.analyze_expression(expression)?))
             }
 
-            TypedStatement::NoOp { .. } => Ok(()),
+            TypedStatement::NoOp { .. } => Ok(None),
         }
     }
 
     fn analyze_statements_with_functions_hoisted(
         &mut self,
         statements: &[TypedStatement],
-    ) -> Result<(), CompilationError> {
+        sequential: bool,
+    ) -> Result<Option<usize>, CompilationError> {
         let mut function_indices = Vec::new();
 
         for statement in statements {
@@ -298,14 +336,31 @@ impl<'a> Analyzer<'a> {
             }
         }
 
+        let mut last_index = None;
+
         for statement in statements {
             if let TypedStatement::FunctionDefinition(_) = statement {
             } else {
-                self.analyze_statement(statement)?;
+                let next_index = match self.analyze_statement(statement)? {
+                    Some(AnalyzedExpressionRef::Expression { index, .. }) => Some(index),
+                    _ => None,
+                };
+
+                match (last_index, next_index) {
+                    (Some(last_index), Some(next_index)) if sequential => {
+                        self.expression_graph.add_edge(next_index, last_index);
+                    }
+
+                    _ => {}
+                }
+
+                if next_index.is_some() {
+                    last_index = next_index;
+                }
             }
         }
 
-        Ok(())
+        Ok(last_index)
     }
 
     fn into_expression_graph(self) -> DirectedGraph<AnalyzedExpression> {
@@ -473,7 +528,7 @@ impl Phase<&TypedProgram, AnalyzedProgram, CompilationError> for AnalyzerPhase {
         let mut functions = AnalyzerFunctions::new();
         let mut analyzer = Analyzer::without_parent(BuiltInValues::global(), &mut functions);
 
-        analyzer.analyze_statements_with_functions_hoisted(&program.statements)?;
+        analyzer.analyze_statements_with_functions_hoisted(&program.statements, false)?;
 
         let expression_graph = analyzer.into_expression_graph();
 

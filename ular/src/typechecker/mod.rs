@@ -5,7 +5,7 @@ pub mod typed_program;
 use crate::{
     error_reporting::{CompilationError, CompilationErrorMessage},
     parser::{
-        program::{Identifier, Node, Number, OperatorType},
+        program::{Identifier, Node, Number, OperatorType, Unit},
         type_::{FunctionType, NumericType, Type},
     },
     phase::Phase,
@@ -20,7 +20,7 @@ use crate::{
         typed_program::{
             Typed, TypedBlock, TypedCall, TypedExpression, TypedFunctionDefinition,
             TypedIdentifier, TypedIf, TypedInfixOperation, TypedNumber, TypedPrefixOperation,
-            TypedProgram, TypedStatement, TypedVariableDefinition,
+            TypedProgram, TypedStatement, TypedUnit, TypedVariableDefinition,
         },
     },
 };
@@ -132,6 +132,14 @@ impl<'a> Typechecker<'a> {
                     self.typecheck_prefix_operation(prefix_operation, suggested_type)?,
                 ))
             }
+
+            SimpleExpression::SequentialBlock(block) => Ok(TypedExpression::SequentialBlock(
+                self.typecheck_block(block, suggested_type)?,
+            )),
+
+            SimpleExpression::Unit(Unit { position }) => Ok(TypedExpression::Unit(TypedUnit {
+                position: position.clone(),
+            })),
         }
     }
 

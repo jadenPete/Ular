@@ -63,6 +63,8 @@ impl<'a, 'context> JitCompilerScope<'a, 'context> {
                     .inkwell_type(context)
                     .const_int(number.value as u64, number.type_.is_signed()),
             )),
+
+            AnalyzedExpressionRef::Unit(_) => Ok(UlarValue::Unit),
         }
         .map_err(|internal_error| CompilationError {
             message: CompilationErrorMessage::InternalError(internal_error),

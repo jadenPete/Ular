@@ -25,6 +25,7 @@ use std::{
 /// UNIT_TYPE = 'unit';
 /// IF_KEYWORD = "if";
 /// ELSE_KEYWORD = "else";
+/// SEQ_KEYWORD = "seq";
 /// IDENTIFIER = ?[a-zA-Z_][a-zA-Z0-9_]*?;
 /// LEFT_CURLY_BRACKET = "{";
 /// RIGHT_CURLY_BRACKET = "}";
@@ -60,6 +61,7 @@ pub enum Token {
     FnKeyword,
     IfKeyword,
     ElseKeyword,
+    SeqKeyword,
     Identifier(String),
     LeftCurlyBracket,
     RightCurlyBracket,
