@@ -50,7 +50,7 @@ impl Display for CompilationErrorMessage {
         match self {
             Self::ExpectedNumericType { actual_type } => write!(
                 formatter,
-                "Expected a numerically typed value, but got one of type `{}`.",
+                "Expected a numeric value, but got one of type `{}`.",
                 actual_type
             ),
 
