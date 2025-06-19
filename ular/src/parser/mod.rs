@@ -7,8 +7,9 @@ use crate::{
     parser::{
         program::{
             Block, Call, ElseClause, ElseIfClause, Expression, FunctionDefinition, Identifier, If,
-            InfixOperation, InfixOperator, Number, Parameter, PrefixOperation, PrefixOperator,
-            Program, Statement, Unit, VariableDefinition,
+            InfixOperation, InfixOperator, LogicalInfixOperator, Number, NumericInfixOperator,
+            Parameter, PrefixOperation, PrefixOperator, Program, Statement, Unit,
+            UniversalInfixOperator, VariableDefinition,
         },
         type_::{FunctionType, NumericType, Type},
     },
@@ -220,7 +221,7 @@ fn parse_block(input: Tokens) -> IResult<Tokens, Block> {
 }
 
 fn parse_expression(input: Tokens) -> IResult<Tokens, Expression> {
-    parse_logical_or(input)
+    parse_comparison(input)
 }
 
 fn parse_infix_operation<
@@ -277,16 +278,60 @@ fn parse_infix_operation<
     }
 }
 
+fn parse_comparison(input: Tokens) -> IResult<Tokens, Expression> {
+    alt((
+        map(
+            tuple((
+                parse_logical_or,
+                alt((
+                    map(parse_token(Token::EqualComparison), |_| {
+                        InfixOperator::Universal(UniversalInfixOperator::EqualComparison)
+                    }),
+                    map(parse_token(Token::LessThan), |_| {
+                        InfixOperator::Numeric(NumericInfixOperator::LessThan)
+                    }),
+                    map(parse_token(Token::LessThanOrEqual), |_| {
+                        InfixOperator::Numeric(NumericInfixOperator::LessThanOrEqual)
+                    }),
+                    map(parse_token(Token::GreaterThan), |_| {
+                        InfixOperator::Numeric(NumericInfixOperator::GreaterThan)
+                    }),
+                    map(parse_token(Token::GreaterThanOrEqual), |_| {
+                        InfixOperator::Numeric(NumericInfixOperator::GreaterThanOrEqual)
+                    }),
+                    map(parse_token(Token::UnequalComparison), |_| {
+                        InfixOperator::Universal(UniversalInfixOperator::UnequalComparison)
+                    }),
+                )),
+                parse_logical_or,
+            )),
+            |(left, operator, right)| {
+                let position = Position(left.get_position().0.start..right.get_position().0.end);
+
+                Expression::InfixOperation(InfixOperation {
+                    left: Box::new(left),
+                    operator,
+                    right: Box::new(right),
+                    position,
+                })
+            },
+        ),
+        parse_logical_or,
+    ))(input)
+}
+
 fn parse_logical_or(input: Tokens) -> IResult<Tokens, Expression> {
     parse_infix_operation(parse_logical_and, || {
-        map(parse_token(Token::LogicalOr), |_| InfixOperator::LogicalOr)
+        map(parse_token(Token::LogicalOr), |_| {
+            InfixOperator::Logical(LogicalInfixOperator::LogicalOr)
+        })
     })(input)
 }
 
 fn parse_logical_and(input: Tokens) -> IResult<Tokens, Expression> {
     parse_infix_operation(parse_sum, || {
         map(parse_token(Token::LogicalAnd), |_| {
-            InfixOperator::LogicalAnd
+            InfixOperator::Logical(LogicalInfixOperator::LogicalAnd)
         })
     })(input)
 }
@@ -294,8 +339,12 @@ fn parse_logical_and(input: Tokens) -> IResult<Tokens, Expression> {
 fn parse_sum(input: Tokens) -> IResult<Tokens, Expression> {
     parse_infix_operation(parse_product, || {
         alt((
-            map(parse_token(Token::Plus), |_| InfixOperator::Addition),
-            map(parse_token(Token::Minus), |_| InfixOperator::Subtraction),
+            map(parse_token(Token::Plus), |_| {
+                InfixOperator::Numeric(NumericInfixOperator::Addition)
+            }),
+            map(parse_token(Token::Minus), |_| {
+                InfixOperator::Numeric(NumericInfixOperator::Subtraction)
+            }),
         ))
     })(input)
 }
@@ -303,9 +352,15 @@ fn parse_sum(input: Tokens) -> IResult<Tokens, Expression> {
 fn parse_product(input: Tokens) -> IResult<Tokens, Expression> {
     parse_infix_operation(parse_prefix_operation, || {
         alt((
-            map(parse_token(Token::Times), |_| InfixOperator::Multiplication),
-            map(parse_token(Token::Over), |_| InfixOperator::Division),
-            map(parse_token(Token::Modulo), |_| InfixOperator::Modulo),
+            map(parse_token(Token::Times), |_| {
+                InfixOperator::Numeric(NumericInfixOperator::Multiplication)
+            }),
+            map(parse_token(Token::Over), |_| {
+                InfixOperator::Numeric(NumericInfixOperator::Division)
+            }),
+            map(parse_token(Token::Modulo), |_| {
+                InfixOperator::Numeric(NumericInfixOperator::Modulo)
+            }),
         ))
     })(input)
 }

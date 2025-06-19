@@ -7,10 +7,41 @@ use std::{
     slice::SliceIndex,
 };
 
-/// Grammer:
+/// A token in the language.
+///
+/// Tokens follow the following grammer, defined in
+/// [extended Backus–Naur form](https://en.wikipedia.org/wiki/Extended_Backus%E2%80%93Naur_form):
 /// ```ebnf
+/// (*
+///  * Structure:
+///  *
+///  * Tokens are divided into two categories: fixed-length and variable-length. We define the
+///  * fixed-length tokens first to prevent them from being interpreted as variable-length tokens
+///  * (e.g. a keyword being interpreted as an identifier).
+///  *
+///  * For the most part, they're are ordered alphabetically by name, with the exception that
+///  * similar tokens are grouped together. For example, the following tokens are grouped together:
+///  * - Comparison operators
+///  * - Keywords
+///  * - Braces
+///  * - Logical operators
+///  * - Arithmetic operators
+///  *)
+///
+/// (* Fixed-length tokens *)
 /// ARROW = "=>";
 /// COMMA = ",";
+/// EQUAL_COMPARISON = "==";
+/// LESS_THAN_OR_EQUAL = "<=";
+/// LESS_THAN = "<";
+/// GREATER_THAN_OR_EQUAL = ">=";
+/// GREATER_THAN = ">";
+/// UNEQUAL_COMPARISON = "!=";
+///
+/// (*
+///  * This needs to come after the comparison operators so they aren't misinterpreted as
+///  * `DEFINITION`s
+///  *)
 /// DEFINITION = "=";
 /// FN_KEYWORD = "fn";
 /// I8_TYPE = "i8";
@@ -26,7 +57,6 @@ use std::{
 /// IF_KEYWORD = "if";
 /// ELSE_KEYWORD = "else";
 /// SEQ_KEYWORD = "seq";
-/// IDENTIFIER = ?[a-zA-Z_][a-zA-Z0-9_]*?;
 /// LEFT_CURLY_BRACKET = "{";
 /// RIGHT_CURLY_BRACKET = "}";
 /// LEFT_PARENTHESIS = "(";
@@ -36,16 +66,30 @@ use std::{
 /// NOT = "!";
 /// OVER = "/";
 /// PLUS = "+";
-/// MINUS = "-";
 /// MODULO = "%";
-/// NUMBER = ?[+-]?[0-9]+?;
 /// TIMES = "*";
 /// SEMICOLON = ";";
 /// TYPE_ANNOTATION = ":";
+///
+/// (* Variable-length tokens *)
+/// IDENTIFIER = ?[a-zA-Z_][a-zA-Z0-9_]*?;
+/// NUMBER = ?[+-]?[0-9]+?;
+///
+/// (* This needs to come after `NUMBER` so signs aren't interpreted as operators *)
+/// MINUS = "-";
 /// ```
 #[derive(Clone, Debug, PartialEq)]
 pub enum Token {
     Arrow,
+    Comma,
+    Definition,
+    EqualComparison,
+    LessThan,
+    LessThanOrEqual,
+    GreaterThan,
+    GreaterThanOrEqual,
+    UnequalComparison,
+    FnKeyword,
     I8Type,
     I16Type,
     I32Type,
@@ -56,13 +100,9 @@ pub enum Token {
     U64Type,
     BoolType,
     UnitType,
-    Comma,
-    Definition,
-    FnKeyword,
     IfKeyword,
     ElseKeyword,
     SeqKeyword,
-    Identifier(String),
     LeftCurlyBracket,
     RightCurlyBracket,
     LeftParenthesis,
@@ -74,10 +114,11 @@ pub enum Token {
     Plus,
     Minus,
     Modulo,
-    Number(i128),
     Times,
     Semicolon,
     TypeAnnotation,
+    Identifier(String),
+    Number(i128),
 }
 
 #[derive(Clone, Debug)]

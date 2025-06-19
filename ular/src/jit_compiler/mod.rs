@@ -20,7 +20,9 @@ use crate::{
         value::{UlarFunction, UlarValue},
     },
     parser::{
-        program::{InfixOperator, Node},
+        program::{
+            InfixOperator, LogicalInfixOperator, Node, NumericInfixOperator, UniversalInfixOperator,
+        },
         type_::Type,
     },
     simplifier::simple_program::SimplePrefixOperator,
@@ -34,7 +36,7 @@ use inkwell::{
     execution_engine::{ExecutionEngine, JitFunction},
     types::ArrayType,
     values::{BasicValueEnum, FunctionValue, IntValue, PointerValue},
-    AddressSpace, OptimizationLevel,
+    AddressSpace, IntPredicate, OptimizationLevel,
 };
 use log::debug;
 use ular_scheduler::VALUE_BUFFER_WORD_SIZE;
@@ -445,6 +447,180 @@ impl<'context> InlineExpression<'context> for CompilableIf<'_> {
 #[derive(Clone, Copy)]
 struct CompilableInfixOperation<'a>(&'a AnalyzedInfixOperation);
 
+impl<'context> CompilableInfixOperation<'_> {
+    fn compile_logical_operation(
+        builder: &Builder<'context>,
+        scope: &mut JitCompilerScope<'_, 'context>,
+        left_value: UlarValue<'context>,
+        right_value: UlarValue<'context>,
+        operator: LogicalInfixOperator,
+    ) -> Result<UlarValue<'context>, CompilationError> {
+        let left_int_value = IntValue::try_from(left_value)?;
+        let right_int_value = IntValue::try_from(right_value)?;
+        let name = scope.get_local_name();
+
+        match operator {
+            LogicalInfixOperator::LogicalAnd => Ok(builder
+                .build_and(left_int_value, right_int_value, &name.to_string())
+                .unwrap()
+                .into()),
+
+            LogicalInfixOperator::LogicalOr => Ok(builder
+                .build_or(left_int_value, right_int_value, &name.to_string())
+                .unwrap()
+                .into()),
+        }
+    }
+
+    fn compile_numeric_operation(
+        &self,
+        compiler: &mut JitFunctionCompiler<'_, 'context>,
+        builder: &Builder<'context>,
+        scope: &mut JitCompilerScope<'_, 'context>,
+        left_value: UlarValue<'context>,
+        right_value: UlarValue<'context>,
+        operator: NumericInfixOperator,
+    ) -> Result<UlarValue<'context>, CompilationError> {
+        let left_int_value = IntValue::try_from(left_value)?;
+        let right_int_value = IntValue::try_from(right_value)?;
+        let argument_numeric_type = match self.0.left.get_type() {
+            Type::Numeric(numeric_type) => numeric_type,
+            type_ => {
+                return Err(CompilationError {
+                    message: CompilationErrorMessage::InternalError(
+                        InternalError::JitCompilerExpectedNumericType {
+                            actual_type: format!("{}", type_),
+                        },
+                    ),
+
+                    position: Some(self.0.get_position()),
+                })
+            }
+        };
+
+        let name = scope.get_local_name();
+
+        match operator {
+            NumericInfixOperator::Addition => Ok(builder
+                .build_int_add(left_int_value, right_int_value, &name.to_string())
+                .unwrap()
+                .into()),
+
+            NumericInfixOperator::Subtraction => Ok(builder
+                .build_int_sub(left_int_value, right_int_value, &name.to_string())
+                .unwrap()
+                .into()),
+
+            NumericInfixOperator::Multiplication => Ok(builder
+                .build_int_mul(left_int_value, right_int_value, &name.to_string())
+                .unwrap()
+                .into()),
+
+            NumericInfixOperator::Division => {
+                let division_function = compiler
+                    .built_in_values
+                    .get_division_function_mut(argument_numeric_type)
+                    .get_inkwell_function(
+                        compiler.context,
+                        compiler.execution_engine,
+                        compiler.module,
+                    );
+
+                UlarValue::from_call_site_value(
+                    compiler.context,
+                    &Type::Numeric(argument_numeric_type),
+                    builder
+                        .build_call(
+                            division_function,
+                            &[left_value.try_into()?, right_value.try_into()?],
+                            &name.to_string(),
+                        )
+                        .unwrap(),
+                    self.0.get_position(),
+                )
+            }
+
+            NumericInfixOperator::Modulo => Ok(if argument_numeric_type.is_signed() {
+                builder.build_int_signed_rem(left_int_value, right_int_value, &name.to_string())
+            } else {
+                builder.build_int_unsigned_rem(left_int_value, right_int_value, &name.to_string())
+            }
+            .unwrap()
+            .into()),
+
+            operator => Ok(builder
+                .build_int_compare(
+                    match (operator, argument_numeric_type.is_signed()) {
+                        (NumericInfixOperator::LessThan, false) => IntPredicate::ULT,
+                        (NumericInfixOperator::LessThan, true) => IntPredicate::SLT,
+                        (NumericInfixOperator::LessThanOrEqual, false) => IntPredicate::ULE,
+                        (NumericInfixOperator::LessThanOrEqual, true) => IntPredicate::SLE,
+                        (NumericInfixOperator::GreaterThan, false) => IntPredicate::UGT,
+                        (NumericInfixOperator::GreaterThan, true) => IntPredicate::SGT,
+                        (NumericInfixOperator::GreaterThanOrEqual, false) => IntPredicate::UGE,
+                        (NumericInfixOperator::GreaterThanOrEqual, true) => IntPredicate::SGE,
+                        _ => panic!("Unexpected comparison operator: {:?}", operator),
+                    },
+                    left_int_value,
+                    right_int_value,
+                    &name.to_string(),
+                )
+                .unwrap()
+                .into()),
+        }
+    }
+
+    fn compile_universal_comparison(
+        compiler: &mut JitFunctionCompiler<'_, 'context>,
+        builder: &Builder<'context>,
+        scope: &mut JitCompilerScope<'_, 'context>,
+        left_value: UlarValue<'context>,
+        right_value: UlarValue<'context>,
+        operator: UniversalInfixOperator,
+    ) -> Result<UlarValue<'context>, CompilationError> {
+        let name = scope.get_local_name();
+
+        Ok(match (left_value, right_value) {
+            (UlarValue::Function(left_function), _) => {
+                let left_pointer = left_function.get_pointer_value();
+                let right_pointer = UlarFunction::try_from(right_value)?.get_pointer_value();
+
+                builder
+                    .build_int_compare(
+                        match operator {
+                            UniversalInfixOperator::EqualComparison => IntPredicate::EQ,
+                            UniversalInfixOperator::UnequalComparison => IntPredicate::NE,
+                        },
+                        left_pointer,
+                        right_pointer,
+                        &name.to_string(),
+                    )
+                    .unwrap()
+                    .into()
+            }
+
+            (UlarValue::Int(left_int), _) => {
+                let right_int = right_value.try_into()?;
+
+                builder
+                    .build_int_compare(
+                        match operator {
+                            UniversalInfixOperator::EqualComparison => IntPredicate::EQ,
+                            UniversalInfixOperator::UnequalComparison => IntPredicate::NE,
+                        },
+                        left_int,
+                        right_int,
+                        &name.to_string(),
+                    )
+                    .unwrap()
+                    .into()
+            }
+
+            (UlarValue::Unit, _) => compiler.context.i8_type().const_int(1, false).into(),
+        })
+    }
+}
+
 impl<'context> InlineExpression<'context> for CompilableInfixOperation<'_> {
     fn compile(
         &self,
@@ -453,114 +629,49 @@ impl<'context> InlineExpression<'context> for CompilableInfixOperation<'_> {
         scope: &mut JitCompilerScope<'_, 'context>,
     ) -> Result<UlarValue<'context>, CompilationError> {
         let left_name = scope.get_local_name();
-        let left_value: IntValue = scope
-            .get(
-                &self.0.left,
-                left_name,
-                compiler.context,
-                builder,
-                compiler.built_in_values,
-                compiler.execution_engine,
-                compiler.module,
-            )?
-            .try_into()?;
+        let left_value = scope.get(
+            &self.0.left,
+            left_name,
+            compiler.context,
+            builder,
+            compiler.built_in_values,
+            compiler.execution_engine,
+            compiler.module,
+        )?;
 
         let right_name = scope.get_local_name();
-        let right_value: IntValue = scope
-            .get(
-                &self.0.right,
-                right_name,
-                compiler.context,
-                builder,
-                compiler.built_in_values,
-                compiler.execution_engine,
-                compiler.module,
-            )?
-            .try_into()?;
-
-        let name = scope.get_local_name();
+        let right_value = scope.get(
+            &self.0.right,
+            right_name,
+            compiler.context,
+            builder,
+            compiler.built_in_values,
+            compiler.execution_engine,
+            compiler.module,
+        )?;
 
         match self.0.operator {
-            InfixOperator::Addition => Ok(builder
-                .build_int_add(left_value, right_value, &name.to_string())
-                .unwrap()
-                .into()),
+            InfixOperator::Logical(operator) => {
+                Self::compile_logical_operation(builder, scope, left_value, right_value, operator)
+            }
 
-            InfixOperator::Subtraction => Ok(builder
-                .build_int_sub(left_value, right_value, &name.to_string())
-                .unwrap()
-                .into()),
+            InfixOperator::Numeric(operator) => self.compile_numeric_operation(
+                compiler,
+                builder,
+                scope,
+                left_value,
+                right_value,
+                operator,
+            ),
 
-            InfixOperator::Multiplication => Ok(builder
-                .build_int_mul(left_value, right_value, &name.to_string())
-                .unwrap()
-                .into()),
-
-            InfixOperator::Division => match self.0.get_type() {
-                Type::Numeric(numeric_type) => {
-                    let division_function = compiler
-                        .built_in_values
-                        .get_division_function_mut(numeric_type)
-                        .get_inkwell_function(
-                            compiler.context,
-                            compiler.execution_engine,
-                            compiler.module,
-                        );
-
-                    UlarValue::from_call_site_value(
-                        compiler.context,
-                        &Type::Numeric(numeric_type),
-                        builder
-                            .build_call(
-                                division_function,
-                                &[left_value.into(), right_value.into()],
-                                &name.to_string(),
-                            )
-                            .unwrap(),
-                        self.0.get_position(),
-                    )
-                }
-
-                type_ => Err(CompilationError {
-                    message: CompilationErrorMessage::InternalError(
-                        InternalError::JitCompilerExpectedNumericType {
-                            actual_type: format!("{}", type_),
-                        },
-                    ),
-
-                    position: Some(self.0.get_position()),
-                }),
-            },
-
-            InfixOperator::Modulo => match self.0.get_type() {
-                Type::Numeric(numeric_type) => Ok(if numeric_type.is_signed() {
-                    builder.build_int_signed_rem(left_value, right_value, &name.to_string())
-                } else {
-                    builder.build_int_unsigned_rem(left_value, right_value, &name.to_string())
-                }
-                .unwrap()
-                .into()),
-
-                type_ => Err(CompilationError {
-                    message: CompilationErrorMessage::InternalError(
-                        InternalError::JitCompilerExpectedNumericType {
-                            actual_type: format!("{}", type_),
-                        },
-                    ),
-
-                    position: Some(self.0.get_position()),
-                }),
-            },
-
-            InfixOperator::LogicalAnd => Ok(builder
-                .build_and(left_value, right_value, &name.to_string())
-                .unwrap()
-                .into()),
-
-            InfixOperator::LogicalOr => Ok(builder
-                .build_or(left_value, right_value, &name.to_string())
-                .unwrap()
-                .into()),
+            InfixOperator::Universal(operator) => Self::compile_universal_comparison(
+                compiler,
+                builder,
+                scope,
+                left_value,
+                right_value,
+                operator,
+            ),
         }
     }
 }
@@ -861,7 +972,7 @@ impl<'context> JitFunctionCompiler<'_, 'context> {
         let mut argument_values = vec![scope.worker.into()];
 
         for &argument in arguments {
-            argument_values.push(BasicValueEnum::try_from(argument)?.into());
+            argument_values.push(argument.try_into()?);
         }
 
         let name = scope.get_local_name();

@@ -5,7 +5,10 @@ pub mod typed_program;
 use crate::{
     error_reporting::{CompilationError, CompilationErrorMessage},
     parser::{
-        program::{Identifier, Node, Number, OperatorType, Unit},
+        program::{
+            Identifier, InfixOperator, Node, Number, NumericInfixOperator, Unit,
+            UniversalInfixOperator,
+        },
         type_::{FunctionType, NumericType, Type},
     },
     phase::Phase,
@@ -265,17 +268,38 @@ impl Typechecker<'_> {
         let typechecked_right =
             self.typecheck_expression(&infix_operation.right, suggested_type)?;
 
-        let type_ = match infix_operation.operator.operator_type() {
-            OperatorType::Arithmetic => {
+        let type_ = match infix_operation.operator {
+            InfixOperator::Logical(_) => {
+                assert_type(&typechecked_left, &Type::Bool)?;
+                assert_type(&typechecked_right, &Type::Bool)?;
+
+                Type::Bool
+            }
+
+            InfixOperator::Numeric(operator) => {
                 assert_numeric(&typechecked_left)?;
                 assert_type(&typechecked_right, &typechecked_left.get_type())?;
 
-                typechecked_left.get_type()
+                match operator {
+                    NumericInfixOperator::Addition
+                    | NumericInfixOperator::Subtraction
+                    | NumericInfixOperator::Multiplication
+                    | NumericInfixOperator::Division
+                    | NumericInfixOperator::Modulo => typechecked_left.get_type(),
+
+                    NumericInfixOperator::LessThan
+                    | NumericInfixOperator::LessThanOrEqual
+                    | NumericInfixOperator::GreaterThan
+                    | NumericInfixOperator::GreaterThanOrEqual => Type::Bool,
+                }
             }
 
-            OperatorType::Logical => {
-                assert_type(&typechecked_left, &Type::Bool)?;
-                assert_type(&typechecked_right, &Type::Bool)?;
+            InfixOperator::Universal(
+                UniversalInfixOperator::EqualComparison | UniversalInfixOperator::UnequalComparison,
+            ) => {
+                let left_type = typechecked_left.get_type();
+
+                assert_type(&typechecked_right, &left_type)?;
 
                 Type::Bool
             }

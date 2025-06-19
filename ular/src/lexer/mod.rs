@@ -312,6 +312,16 @@ fn lex_token(input: PositionedSource) -> IResult<PositionedSource, PositionedTok
         alt((
             lex_static_token("=>", Token::Arrow),
             lex_static_token(",", Token::Comma),
+            lex_static_token("==", Token::EqualComparison),
+            lex_static_token("<=", Token::LessThanOrEqual),
+            lex_static_token("<", Token::LessThan),
+            lex_static_token(">=", Token::GreaterThanOrEqual),
+            lex_static_token(">", Token::GreaterThan),
+            lex_static_token("!=", Token::UnequalComparison),
+            /*
+             * This needs to come after the comparison operators so they aren't misinterpreted as
+             * `Token::Definition`s.
+             */
             lex_static_token("=", Token::Definition),
             lex_keyword("fn", Token::FnKeyword),
             lex_keyword("i8", Token::I8Type),
@@ -325,27 +335,27 @@ fn lex_token(input: PositionedSource) -> IResult<PositionedSource, PositionedTok
             lex_keyword("bool", Token::BoolType),
             lex_keyword("unit", Token::UnitType),
             lex_keyword("if", Token::IfKeyword),
+        )),
+        alt((
             lex_keyword("else", Token::ElseKeyword),
             lex_keyword("seq", Token::SeqKeyword),
-            lex_identifier,
             lex_static_token("{", Token::LeftCurlyBracket),
             lex_static_token("}", Token::RightCurlyBracket),
             lex_static_token("(", Token::LeftParenthesis),
-        )),
-        alt((
             lex_static_token(")", Token::RightParenthesis),
             lex_static_token("&&", Token::LogicalAnd),
             lex_static_token("||", Token::LogicalOr),
             lex_static_token("%", Token::Modulo),
             lex_static_token("!", Token::Not),
-            lex_number,
-            // This needs to come after `lex_number` so signs aren't interpreted as operators
-            lex_static_token("-", Token::Minus),
             lex_static_token("/", Token::Over),
             lex_static_token("+", Token::Plus),
             lex_static_token("*", Token::Times),
             lex_static_token(";", Token::Semicolon),
             lex_static_token(":", Token::TypeAnnotation),
+            lex_number,
+            lex_identifier,
+            // This needs to come after `lex_number` so signs aren't interpreted as operators
+            lex_static_token("-", Token::Minus),
         )),
     ))(input)
 }

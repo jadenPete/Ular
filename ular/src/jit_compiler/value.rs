@@ -10,7 +10,10 @@ use inkwell::{
     builder::Builder,
     context::Context,
     types::FunctionType,
-    values::{BasicValue, BasicValueEnum, CallSiteValue, FunctionValue, IntValue, PointerValue},
+    values::{
+        BasicMetadataValueEnum, BasicValue, BasicValueEnum, CallSiteValue, FunctionValue, IntValue,
+        PointerValue,
+    },
 };
 
 #[derive(Clone, Copy, Debug)]
@@ -188,6 +191,14 @@ impl<'a> TryFrom<UlarValue<'a>> for BasicValueEnum<'a> {
                 position: None,
             }),
         }
+    }
+}
+
+impl<'a> TryFrom<UlarValue<'a>> for BasicMetadataValueEnum<'a> {
+    type Error = CompilationError;
+
+    fn try_from(value: UlarValue<'a>) -> Result<Self, Self::Error> {
+        Ok(BasicValueEnum::try_from(value)?.into())
     }
 }
 

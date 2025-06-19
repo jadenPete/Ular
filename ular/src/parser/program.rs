@@ -9,7 +9,11 @@ pub trait Node {
     fn get_position(&self) -> Position;
 }
 
-/// Grammar:
+/// The abstract syntax tree ([AST](https://en.wikipedia.org/wiki/Abstract_syntax_tree)] element
+/// containing the entire program.
+///
+/// It follows the following grammer, defined in
+/// [extended Backus–Naur form](https://en.wikipedia.org/wiki/Extended_Backus%E2%80%93Naur_form):
 /// ```ebnf
 /// program = statement*;
 /// statement = variable_definition | function_definition | expression ';' | ';';
@@ -28,7 +32,17 @@ pub trait Node {
 ///
 /// numeric_type = 'i8' | 'i16' | 'i32' | 'i64' | 'u8' | 'u16' | 'u32' | 'u64';
 /// block = '{' statement* expression? '}';
-/// expression =  logical_or;
+/// expression = comparison;
+/// comparison =
+///     | logical_or '==' logical_or
+///     | logical_or '<' logical_or
+///     | logical_or '<=' logical_or
+///     | logical_or '>' logical_or
+///     | logical_or '>=' logical_or
+///     | logical_or '<=' logical_or
+///     | logical_or '!=' logical_or
+///     | logical_or;
+///
 /// logical_or = logical_and ('||' logical_and)*;
 /// logical_and = sum ('&&' sum)*;
 /// sum =
@@ -152,33 +166,34 @@ pub struct InfixOperation {
 
 #[derive(Clone, Copy, Debug)]
 pub enum InfixOperator {
+    Logical(LogicalInfixOperator),
+    Numeric(NumericInfixOperator),
+    Universal(UniversalInfixOperator),
+}
+
+#[derive(Clone, Copy, Debug)]
+pub enum LogicalInfixOperator {
+    LogicalAnd,
+    LogicalOr,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub enum NumericInfixOperator {
     Addition,
     Subtraction,
     Multiplication,
     Division,
     Modulo,
-    LogicalAnd,
-    LogicalOr,
+    LessThan,
+    LessThanOrEqual,
+    GreaterThan,
+    GreaterThanOrEqual,
 }
 
-impl InfixOperator {
-    pub fn operator_type(self) -> OperatorType {
-        match self {
-            Self::Addition
-            | Self::Subtraction
-            | Self::Multiplication
-            | Self::Division
-            | Self::Modulo => OperatorType::Arithmetic,
-
-            Self::LogicalAnd | Self::LogicalOr => OperatorType::Logical,
-        }
-    }
-}
-
-#[derive(Clone, Copy)]
-pub enum OperatorType {
-    Arithmetic,
-    Logical,
+#[derive(Clone, Copy, Debug)]
+pub enum UniversalInfixOperator {
+    EqualComparison,
+    UnequalComparison,
 }
 
 #[derive(Debug, Node)]

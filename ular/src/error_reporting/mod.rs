@@ -168,7 +168,7 @@ impl Display for InternalError {
 
             Self::JitCompilerExpectedNumericType { actual_type } => write!(
                 formatter,
-                "Expected a numerically typed value, but got one of type `{}`. This should've been caught by the typechecker.",
+                "Expected a numeric value, but got one of type `{}`. This should've been caught by the typechecker.",
                 actual_type
             ),
 

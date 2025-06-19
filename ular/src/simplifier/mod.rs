@@ -5,7 +5,8 @@ use crate::{
     parser::{
         program::{
             Block, Call, Expression, FunctionDefinition, If, InfixOperation, InfixOperator, Node,
-            Number, PrefixOperation, PrefixOperator, Program, Statement, VariableDefinition,
+            Number, NumericInfixOperator, PrefixOperation, PrefixOperator, Program, Statement,
+            VariableDefinition,
         },
         type_::Type,
     },
@@ -153,7 +154,7 @@ fn simplify_prefix_operation(prefix_operation: &PrefixOperation) -> SimpleExpres
     match prefix_operation.operator {
         PrefixOperator::Negate => SimpleExpression::InfixOperation(SimpleInfixOperation {
             left: simple_expression,
-            operator: InfixOperator::Multiplication,
+            operator: InfixOperator::Numeric(NumericInfixOperator::Multiplication),
             right: Box::new(SimpleExpression::Number(Number {
                 value: -1,
                 suffix: None,
