@@ -396,7 +396,7 @@ struct AnalyzerExpressionGraph<'a> {
 impl<'a> AnalyzerExpressionGraph<'a> {
     fn add_edge(&mut self, dependent: usize, dependency: usize) {
         match self.parent_add_edge.as_mut() {
-            Some(parent_add_edge) if dependency < self.expressions.offset => {
+            Some(parent_add_edge) if dependency < self.expressions.get_offset() => {
                 parent_add_edge(self.surrounding_expression.unwrap(), dependency);
             }
 
@@ -412,6 +412,10 @@ impl<'a> AnalyzerExpressionGraph<'a> {
 
     fn add_node(&mut self, node: AnalyzedExpression) -> usize {
         self.expressions.add_node(node)
+    }
+
+    fn get_next_node(&self) -> usize {
+        self.expressions.get_next_node()
     }
 
     fn into_graph(self) -> DirectedGraph<AnalyzedExpression> {
@@ -430,10 +434,7 @@ impl<'a> AnalyzerExpressionGraph<'a> {
         parent: &'a mut AnalyzerExpressionGraph,
         surrounding_expression: Option<usize>,
     ) -> Self {
-        let offset = match parent.expressions.last() {
-            Some((i, _)) => i + 1,
-            None => parent.expressions.offset,
-        };
+        let offset = parent.get_next_node();
 
         Self {
             parent_add_edge: Some(Box::new(|i, j| parent.add_edge(i, j))),

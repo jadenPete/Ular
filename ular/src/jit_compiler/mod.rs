@@ -736,7 +736,7 @@ impl<'context> JitFunctionCompiler<'_, 'context> {
         scope: &mut JitCompilerScope<'_, 'context>,
         block: &AnalyzedBlock,
     ) -> Result<UlarValue<'context>, CompilationError> {
-        scope.with_child_same_function(block.expression_graph.offset, |child_scope| {
+        scope.with_child_same_function(block.expression_graph.get_offset(), |child_scope| {
             self.compile_expression_graph(builder, child_scope, &block.expression_graph)?;
 
             Ok(match &block.result {

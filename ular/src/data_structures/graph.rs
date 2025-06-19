@@ -5,7 +5,7 @@ use std::{
 };
 
 pub struct DirectedGraph<A> {
-    pub offset: usize,
+    offset: usize,
     next_node: usize,
     nodes: NumberMap<A>,
     edges: NumberMap<HashSet<usize>>,
@@ -24,12 +24,16 @@ impl<A> DirectedGraph<A> {
         self.edges.get_or_insert_with(i, HashSet::new).insert(j);
     }
 
+    pub fn get_next_node(&self) -> usize {
+        self.next_node
+    }
+
     pub fn get_node(&self, i: usize) -> Option<&A> {
         self.nodes.get(i)
     }
 
-    pub fn last(&self) -> Option<(usize, &A)> {
-        self.nodes.last()
+    pub fn get_offset(&self) -> usize {
+        self.offset
     }
 
     pub fn new(offset: usize) -> Self {

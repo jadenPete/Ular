@@ -53,12 +53,16 @@ impl<A> NumberMap<A> {
     }
 
     pub fn get(&self, key: usize) -> Option<&A> {
-        self.get_values().get(key).and_then(|value| value.as_ref())
+        self.get_values()
+            .get(key - self.offset)
+            .and_then(|value| value.as_ref())
     }
 
     pub fn get_mut(&mut self, key: usize) -> Option<&mut A> {
+        let offset = self.offset;
+
         self.get_values_mut()
-            .get_mut(key)
+            .get_mut(key - offset)
             .and_then(|value| value.as_mut())
     }
 
@@ -99,16 +103,6 @@ impl<A> NumberMap<A> {
             .iter()
             .enumerate()
             .flat_map(|(i, value)| value.as_ref().map(|value| (i + self.offset, value)))
-    }
-
-    pub fn last(&self) -> Option<(usize, &A)> {
-        for (i, value) in self.get_values().iter().enumerate().rev() {
-            if let Some(value) = value {
-                return Some((i, value));
-            }
-        }
-
-        None
     }
 
     pub fn new(offset: usize) -> Self {

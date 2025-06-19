@@ -19,7 +19,7 @@ pub trait Phase<Input, Output: Debug, Error> {
                 .any(|other_name| other_name.as_ref() == name)
             {
                 debug!("Output of the {} phase:", name);
-                debug!("{:?}", output);
+                debug!("{:#?}", output);
             }
         }
 
