@@ -6,25 +6,24 @@ use crate::{
     dependency_analyzer::{
         analyzed_program::{
             AnalyzedBlock, AnalyzedCall, AnalyzedExpression, AnalyzedExpressionRef,
-            AnalyzedFunctionDefinition, AnalyzedIf, AnalyzedInfixOperation,
-            AnalyzedPrefixOperation, AnalyzedProgram,
+            AnalyzedFunctionDefinition, AnalyzedIf, AnalyzedInfixOperation, AnalyzedNumber,
+            AnalyzedParameter, AnalyzedPrefixOperation, AnalyzedProgram, AnalyzedStructApplication,
+            AnalyzedStructApplicationField, AnalyzedType, AnalyzedUnit,
         },
-        scope::AnalyzerScope,
+        scope::{AnalyzerScope, AnalyzerScopeContext},
     },
     error_reporting::{CompilationError, CompilationErrorMessage, InternalError, Position},
-    parser::program::Node,
+    parser::{program::Node, type_::Type},
     phase::Phase,
-    typechecker::{
-        built_in_values::BuiltInValues,
-        typed_program::{
-            Typed, TypedBlock, TypedCall, TypedExpression, TypedFunctionDefinition,
-            TypedIdentifier, TypedIf, TypedInfixOperation, TypedPrefixOperation, TypedProgram,
-            TypedStatement, TypedUnit,
-        },
+    typechecker::typed_program::{
+        TypedBlock, TypedCall, TypedExpression, TypedFunctionDefinition, TypedIdentifier, TypedIf,
+        TypedInfixOperation, TypedNumber, TypedPrefixOperation, TypedProgram, TypedStatement,
+        TypedStructApplication, TypedUnit,
     },
 };
 
 struct Analyzer<'a> {
+    scope_context: &'a mut AnalyzerScopeContext,
     scope: AnalyzerScope<'a>,
     functions: &'a mut AnalyzerFunctions,
     expression_graph: AnalyzerExpressionGraph<'a>,
@@ -38,7 +37,7 @@ impl<'a> Analyzer<'a> {
     ) -> Result<AnalyzedBlock, CompilationError> {
         let mut analyzer = Analyzer::with_parent(self, Some(surrounding_expression));
 
-        analyzer.analyze_statements_with_functions_hoisted(&block.statements, false)?;
+        analyzer.analyze_statements_with_hoisting(&block.statements, false)?;
 
         let result_reference = match &block.result {
             Some(result) => Some(analyzer.analyze_expression(result)?),
@@ -62,12 +61,12 @@ impl<'a> Analyzer<'a> {
             argument_references.push(self.analyze_expression(argument)?);
         }
 
-        let i = self
+        let (i, result) = self
             .expression_graph
             .add_node(AnalyzedExpression::Call(AnalyzedCall {
                 function: function_reference.clone(),
                 arguments: argument_references.clone(),
-                type_: call.get_type(),
+                type_: self.scope.analyze_type(&call.type_)?,
                 position: call.get_position(),
             }));
 
@@ -78,7 +77,7 @@ impl<'a> Analyzer<'a> {
             self.expression_graph.add_edge_with_reference(i, reference);
         }
 
-        Ok(AnalyzedExpressionRef::for_expression(i, call))
+        Ok(result)
     }
 
     fn analyze_expression(
@@ -92,15 +91,22 @@ impl<'a> Analyzer<'a> {
             }
 
             TypedExpression::Call(call) => self.analyze_call(call),
+            TypedExpression::StructApplication(struct_application) => {
+                self.analyze_struct_application(struct_application)
+            }
+
             TypedExpression::Identifier(identifier) => self.analyze_identifier(identifier),
-            TypedExpression::Number(number) => Ok(AnalyzedExpressionRef::Number(number.clone())),
+            TypedExpression::Number(number) => {
+                Ok(AnalyzedExpressionRef::Number(self.analyze_number(number)))
+            }
+
             TypedExpression::PrefixOperation(prefix_operation) => {
                 self.analyze_prefix_operation(prefix_operation)
             }
 
             TypedExpression::SequentialBlock(block) => {
                 let last_statement_index =
-                    self.analyze_statements_with_functions_hoisted(&block.statements, true)?;
+                    self.analyze_statements_with_hoisting(&block.statements, true)?;
 
                 let result_reference = match &block.result {
                     Some(result) => Some(self.analyze_expression(result)?),
@@ -122,13 +128,13 @@ impl<'a> Analyzer<'a> {
                 Ok(result_reference.unwrap_or_else(|| {
                     let i = block.get_position().0.end;
 
-                    AnalyzedExpressionRef::Unit(TypedUnit {
+                    AnalyzedExpressionRef::Unit(AnalyzedUnit {
                         position: Position(i..i),
                     })
                 }))
             }
 
-            TypedExpression::Unit(unit) => Ok(AnalyzedExpressionRef::Unit(unit.clone())),
+            TypedExpression::Unit(unit) => Ok(AnalyzedExpressionRef::Unit(self.analyze_unit(unit))),
         }
     }
 
@@ -137,6 +143,18 @@ impl<'a> Analyzer<'a> {
         i: usize,
         definition: &TypedFunctionDefinition,
     ) -> Result<(), CompilationError> {
+        let mut analyzed_parameters = Vec::with_capacity(definition.parameters.len());
+
+        for parameter in &definition.parameters {
+            let analyzed_type = self.scope.analyze_type(&parameter.type_)?;
+
+            analyzed_parameters.push(AnalyzedParameter {
+                name: parameter.underlying.value.clone(),
+                type_: analyzed_type.clone(),
+                position: parameter.get_position(),
+            });
+        }
+
         let mut analyzer = Analyzer::with_parent(self, None);
 
         for (j, parameter) in definition.parameters.iter().enumerate() {
@@ -144,13 +162,13 @@ impl<'a> Analyzer<'a> {
                 &parameter.underlying,
                 AnalyzedExpressionRef::Parameter {
                     index: j,
-                    type_: parameter.get_type(),
+                    type_: analyzed_parameters[j].type_.clone(),
                     position: parameter.get_position(),
                 },
             )?;
         }
 
-        analyzer.analyze_statements_with_functions_hoisted(&definition.body.statements, false)?;
+        analyzer.analyze_statements_with_hoisting(&definition.body.statements, false)?;
 
         let result_reference = match &definition.body.result {
             Some(result) => Some(analyzer.analyze_expression(result)?),
@@ -166,9 +184,9 @@ impl<'a> Analyzer<'a> {
             i,
             AnalyzedFunctionDefinition {
                 name: definition.name.clone(),
-                parameters: definition.parameters.clone(),
+                parameters: analyzed_parameters,
                 body: analyzed_body,
-                type_: definition.type_.clone(),
+                type_: self.scope.analyze_function_type(&definition.type_)?,
                 position: definition.get_position(),
             },
         );
@@ -181,7 +199,7 @@ impl<'a> Analyzer<'a> {
         identifier: &TypedIdentifier,
     ) -> Result<AnalyzedExpressionRef, CompilationError> {
         self.scope
-            .get_variable(identifier)
+            .get_variable(identifier)?
             .ok_or_else(|| CompilationError {
                 message: CompilationErrorMessage::InternalError(InternalError::UnknownValue {
                     name: identifier.underlying.value.clone(),
@@ -204,18 +222,16 @@ impl<'a> Analyzer<'a> {
         let analyzed_then_block = self.analyze_block(&if_expression.then_block, i)?;
         let analyzed_else_block = self.analyze_block(&if_expression.else_block, i)?;
 
-        self.expression_graph.set_node(
+        Ok(self.expression_graph.set_node(
             i,
             AnalyzedExpression::If(AnalyzedIf {
                 condition: condition_reference,
                 then_block: analyzed_then_block,
                 else_block: analyzed_else_block,
-                type_: if_expression.get_type(),
+                type_: self.scope.analyze_type(&if_expression.type_)?,
                 position: if_expression.get_position(),
             }),
-        );
-
-        Ok(AnalyzedExpressionRef::for_expression(i, if_expression))
+        ))
     }
 
     fn analyze_infix_operation(
@@ -224,13 +240,13 @@ impl<'a> Analyzer<'a> {
     ) -> Result<AnalyzedExpressionRef, CompilationError> {
         let left_reference = self.analyze_expression(&infix_operation.left)?;
         let right_reference = self.analyze_expression(&infix_operation.right)?;
-        let i = self
+        let (i, result) = self
             .expression_graph
             .add_node(AnalyzedExpression::InfixOperation(AnalyzedInfixOperation {
                 left: left_reference.clone(),
                 operator: infix_operation.operator,
                 right: right_reference.clone(),
-                type_: infix_operation.type_.clone(),
+                type_: self.scope.analyze_type(&infix_operation.type_)?,
                 position: infix_operation.get_position(),
             }));
 
@@ -240,7 +256,15 @@ impl<'a> Analyzer<'a> {
         self.expression_graph
             .add_edge_with_reference(i, &right_reference);
 
-        Ok(AnalyzedExpressionRef::for_expression(i, infix_operation))
+        Ok(result)
+    }
+
+    fn analyze_number(&self, number: &TypedNumber) -> AnalyzedNumber {
+        AnalyzedNumber {
+            value: number.value,
+            type_: number.type_,
+            position: number.get_position(),
+        }
     }
 
     fn analyze_prefix_operation(
@@ -248,13 +272,13 @@ impl<'a> Analyzer<'a> {
         prefix_operation: &TypedPrefixOperation,
     ) -> Result<AnalyzedExpressionRef, CompilationError> {
         let expression_reference = self.analyze_expression(&prefix_operation.expression)?;
-        let i = self
+        let (i, result) = self
             .expression_graph
             .add_node(AnalyzedExpression::PrefixOperation(
                 AnalyzedPrefixOperation {
                     operator: prefix_operation.operator,
                     expression: expression_reference.clone(),
-                    type_: prefix_operation.get_type(),
+                    type_: self.scope.analyze_type(&prefix_operation.type_)?,
                     position: prefix_operation.get_position(),
                 },
             ));
@@ -262,7 +286,7 @@ impl<'a> Analyzer<'a> {
         self.expression_graph
             .add_edge_with_reference(i, &expression_reference);
 
-        Ok(AnalyzedExpressionRef::for_expression(i, prefix_operation))
+        Ok(result)
     }
 
     fn analyze_statement(
@@ -270,6 +294,8 @@ impl<'a> Analyzer<'a> {
         statement: &TypedStatement,
     ) -> Result<Option<AnalyzedExpressionRef>, CompilationError> {
         match statement {
+            // `analyze_statements_with_hoisting` should've already analyzed the struct definitions
+            TypedStatement::StructDefinition(_) => Ok(None),
             TypedStatement::VariableDefinition(definition) => {
                 let analyzed = self.analyze_expression(&definition.value)?;
 
@@ -292,45 +318,77 @@ impl<'a> Analyzer<'a> {
         }
     }
 
-    fn analyze_statements_with_functions_hoisted(
+    fn analyze_statements_with_hoisting(
         &mut self,
         statements: &[TypedStatement],
         sequential: bool,
     ) -> Result<Option<usize>, CompilationError> {
+        let mut struct_indices = Vec::new();
         let mut function_indices = Vec::new();
 
         for statement in statements {
-            if let TypedStatement::FunctionDefinition(definition) = statement {
-                if self.scope.has_parent() {
-                    return Err(CompilationError {
-                        message: CompilationErrorMessage::NestedFunctionsNotSupported,
-                        position: Some(definition.get_position()),
-                    });
+            match statement {
+                TypedStatement::StructDefinition(definition) => {
+                    struct_indices.push(
+                        self.scope
+                            .declare_struct(definition.name.value.clone(), self.scope_context),
+                    );
                 }
 
-                let i = self.functions.reserve_function();
+                TypedStatement::FunctionDefinition(definition) => {
+                    if self.scope.has_parent() {
+                        return Err(CompilationError {
+                            message: CompilationErrorMessage::NestedFunctionsNotSupported,
+                            position: Some(definition.get_position()),
+                        });
+                    }
 
-                function_indices.push(i);
+                    let i = self.functions.reserve_function();
 
-                self.scope.declare_variable(
-                    &definition.name,
-                    AnalyzedExpressionRef::Function {
-                        index: i,
-                        type_: definition.get_type(),
-                        position: definition.get_position(),
-                    },
-                )?;
+                    function_indices.push(i);
+
+                    self.scope.declare_variable(
+                        &definition.name,
+                        AnalyzedExpressionRef::Function {
+                            index: i,
+                            type_: self
+                                .scope
+                                .analyze_type(&Type::Function(definition.type_.clone()))?,
+
+                            position: definition.get_position(),
+                        },
+                    )?;
+                }
+
+                _ => {}
             }
+        }
+
+        for (i, definition) in statements
+            .iter()
+            .filter_map(|statement| match statement {
+                TypedStatement::StructDefinition(definition) => Some(definition),
+                _ => None,
+            })
+            .enumerate()
+        {
+            self.scope
+                .define_struct(struct_indices[i], definition, self.scope_context)?;
         }
 
         /*
          * Analyze the functions first, so they don't yet have access to global variables. The
          * typechecker should've already prevented this, but it never hurts to check again.
          */
-        for (i, statement) in statements.iter().enumerate() {
-            if let TypedStatement::FunctionDefinition(definition) = statement {
-                self.analyze_function_definition(function_indices[i], definition)?;
-            }
+        for (i, definition) in statements
+            .iter()
+            .filter_map(|statement| match statement {
+                TypedStatement::FunctionDefinition(definition) => Some(definition),
+                _ => None,
+            })
+            .enumerate()
+        {
+            self.analyze_function_definition(function_indices[i], definition)?
         }
 
         let mut last_index = None;
@@ -360,12 +418,61 @@ impl<'a> Analyzer<'a> {
         Ok(last_index)
     }
 
+    fn analyze_struct_application(
+        &mut self,
+        struct_application: &TypedStructApplication,
+    ) -> Result<AnalyzedExpressionRef, CompilationError> {
+        let mut analyzed_fields = Vec::with_capacity(struct_application.fields.len());
+
+        for field in &struct_application.fields {
+            analyzed_fields.push(AnalyzedStructApplicationField {
+                name: field.name.value.clone(),
+                value: self.analyze_expression(&field.value)?,
+            });
+        }
+
+        let i = self.expression_graph.reserve_node();
+
+        for analyzed_field in &analyzed_fields {
+            self.expression_graph
+                .add_edge_with_reference(i, &analyzed_field.value);
+        }
+
+        let struct_index = self
+            .scope
+            .get_struct_index(&struct_application.name.value)
+            .ok_or_else(|| CompilationError {
+                message: CompilationErrorMessage::UnknownType {
+                    name: struct_application.name.value.clone(),
+                },
+                position: Some(struct_application.name.get_position()),
+            })?;
+
+        Ok(self.expression_graph.set_node(
+            i,
+            AnalyzedExpression::StructApplication(AnalyzedStructApplication {
+                struct_index,
+                fields: analyzed_fields,
+                // We probably should call `self.scope.analyze_type` here, but this is faster
+                type_: AnalyzedType::Struct(struct_index),
+                position: struct_application.get_position(),
+            }),
+        ))
+    }
+
+    fn analyze_unit(&self, unit: &TypedUnit) -> AnalyzedUnit {
+        AnalyzedUnit {
+            position: unit.get_position(),
+        }
+    }
+
     fn into_expression_graph(self) -> DirectedGraph<AnalyzedExpression> {
         self.expression_graph.into_graph()
     }
 
     fn with_parent(parent: &'a mut Analyzer, surrounding_expression: Option<usize>) -> Self {
         Self {
+            scope_context: parent.scope_context,
             scope: AnalyzerScope::with_parent(&parent.scope),
             functions: parent.functions,
             expression_graph: AnalyzerExpressionGraph::with_parent(
@@ -376,11 +483,12 @@ impl<'a> Analyzer<'a> {
     }
 
     fn without_parent(
-        built_in_values: &'a BuiltInValues,
+        scope_context: &'a mut AnalyzerScopeContext,
         functions: &'a mut AnalyzerFunctions,
     ) -> Self {
         Self {
-            scope: AnalyzerScope::without_parent(built_in_values),
+            scope_context,
+            scope: AnalyzerScope::without_parent(),
             functions,
             expression_graph: AnalyzerExpressionGraph::without_parent(),
         }
@@ -410,8 +518,10 @@ impl<'a> AnalyzerExpressionGraph<'a> {
         }
     }
 
-    fn add_node(&mut self, node: AnalyzedExpression) -> usize {
-        self.expressions.add_node(node)
+    fn add_node(&mut self, node: AnalyzedExpression) -> (usize, AnalyzedExpressionRef) {
+        let (i, node_reference) = self.expressions.add_node(node);
+
+        (i, AnalyzedExpressionRef::for_expression(i, node_reference))
     }
 
     fn get_next_node(&self) -> usize {
@@ -426,8 +536,10 @@ impl<'a> AnalyzerExpressionGraph<'a> {
         self.expressions.reserve_node()
     }
 
-    fn set_node(&mut self, i: usize, node: AnalyzedExpression) {
-        self.expressions.set_node(i, node);
+    fn set_node(&mut self, i: usize, node: AnalyzedExpression) -> AnalyzedExpressionRef {
+        let node_reference = self.expressions.set_node(i, node);
+
+        AnalyzedExpressionRef::for_expression(i, node_reference)
     }
 
     fn with_parent(
@@ -458,41 +570,22 @@ struct AnalyzerFunctions {
 }
 
 impl AnalyzerFunctions {
+    fn into_vec(self) -> Result<Vec<AnalyzedFunctionDefinition>, CompilationError> {
+        self.functions
+            .into_contiguous_values(self.function_count)
+            .map_err(|error| CompilationError {
+                message: CompilationErrorMessage::InternalError(
+                    InternalError::AnalyzerFunctionNotDefined { index: error.index },
+                ),
+                position: None,
+            })
+    }
+
     fn new() -> Self {
         Self {
             function_count: 0,
             functions: NumberMap::new(0),
         }
-    }
-
-    fn into_vec(self) -> Result<Vec<AnalyzedFunctionDefinition>, CompilationError> {
-        let mut result = Vec::with_capacity(self.function_count);
-
-        for (i, (j, definition)) in self.functions.into_iter().enumerate() {
-            if j > i {
-                return Err(CompilationError {
-                    message: CompilationErrorMessage::InternalError(
-                        InternalError::AnalyzerFunctionNotDefined { index: i },
-                    ),
-                    position: None,
-                });
-            }
-
-            result.push(definition);
-        }
-
-        if result.len() < self.function_count {
-            return Err(CompilationError {
-                message: CompilationErrorMessage::InternalError(
-                    InternalError::AnalyzerFunctionNotDefined {
-                        index: result.len(),
-                    },
-                ),
-                position: None,
-            });
-        }
-
-        Ok(result)
     }
 
     fn reserve_function(&mut self) -> usize {
@@ -517,13 +610,15 @@ impl Phase<&TypedProgram, AnalyzedProgram, CompilationError> for AnalyzerPhase {
 
     fn execute(&self, program: &TypedProgram) -> Result<AnalyzedProgram, CompilationError> {
         let mut functions = AnalyzerFunctions::new();
-        let mut analyzer = Analyzer::without_parent(BuiltInValues::global(), &mut functions);
+        let mut analyzer_scope_context = AnalyzerScopeContext::new();
+        let mut analyzer = Analyzer::without_parent(&mut analyzer_scope_context, &mut functions);
 
-        analyzer.analyze_statements_with_functions_hoisted(&program.statements, false)?;
+        analyzer.analyze_statements_with_hoisting(&program.statements, false)?;
 
         let expression_graph = analyzer.into_expression_graph();
 
         Ok(AnalyzedProgram {
+            structs: analyzer_scope_context.into_structs()?,
             functions: functions.into_vec()?,
             expression_graph,
             position: program.get_position(),

@@ -12,12 +12,11 @@ pub struct DirectedGraph<A> {
 }
 
 impl<A> DirectedGraph<A> {
-    pub fn add_node(&mut self, node: A) -> usize {
+    pub fn add_node(&mut self, node: A) -> (usize, &mut A) {
         let i = self.reserve_node();
+        let node_reference = self.set_node(i, node);
 
-        self.set_node(i, node);
-
-        i
+        (i, node_reference)
     }
 
     pub fn add_edge(&mut self, i: usize, j: usize) {
@@ -53,8 +52,8 @@ impl<A> DirectedGraph<A> {
         result
     }
 
-    pub fn set_node(&mut self, i: usize, node: A) {
-        self.nodes.insert(i, node);
+    pub fn set_node(&mut self, i: usize, node: A) -> &mut A {
+        self.nodes.insert(i, node)
     }
 
     pub fn topological_sort(&self) -> TopologicalSort {

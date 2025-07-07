@@ -99,6 +99,17 @@ fn derive_single_getter_trait(
     .into()
 }
 
+#[proc_macro_derive(AnalyzerTyped)]
+pub fn derive_analyzed(input: TokenStream) -> TokenStream {
+    derive_single_getter_trait(
+        input,
+        quote! { AnalyzerTyped },
+        quote! { type_ },
+        quote! { AnalyzedType },
+        quote! { get_type },
+    )
+}
+
 #[proc_macro_derive(Node)]
 pub fn derive_node(input: TokenStream) -> TokenStream {
     derive_single_getter_trait(

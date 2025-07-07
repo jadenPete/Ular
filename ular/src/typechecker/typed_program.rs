@@ -1,7 +1,7 @@
 use crate::{
     error_reporting::Position,
     parser::{
-        program::{Identifier, InfixOperator, Node},
+        program::{Identifier, InfixOperator, Node, StructDefinition},
         type_::{FunctionType, NumericType, Type},
     },
     simplifier::simple_program::SimplePrefixOperator,
@@ -20,6 +20,7 @@ pub struct TypedProgram {
 
 #[derive(Clone, Debug, Node)]
 pub enum TypedStatement {
+    StructDefinition(StructDefinition),
     VariableDefinition(TypedVariableDefinition),
     FunctionDefinition(TypedFunctionDefinition),
     Expression(TypedExpression),
@@ -53,6 +54,7 @@ pub enum TypedExpression {
     If(TypedIf),
     InfixOperation(TypedInfixOperation),
     Call(TypedCall),
+    StructApplication(TypedStructApplication),
     Identifier(TypedIdentifier),
     Number(TypedNumber),
     PrefixOperation(TypedPrefixOperation),
@@ -108,6 +110,25 @@ pub struct TypedCall {
     pub arguments: Vec<TypedExpression>,
     pub type_: Type,
     pub position: Position,
+}
+
+#[derive(Clone, Debug, Node)]
+pub struct TypedStructApplication {
+    pub name: Identifier,
+    pub fields: Vec<TypedStructApplicationField>,
+    pub position: Position,
+}
+
+impl Typed for TypedStructApplication {
+    fn get_type(&self) -> Type {
+        Type::Identifier(self.name.value.clone())
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct TypedStructApplicationField {
+    pub name: Identifier,
+    pub value: TypedExpression,
 }
 
 #[derive(Clone, Debug, Node, Typed)]

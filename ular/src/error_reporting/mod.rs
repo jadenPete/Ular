@@ -21,6 +21,11 @@ pub enum CompilationErrorMessage {
     },
 
     InternalError(InternalError),
+    MissingFields {
+        type_: String,
+        fields: Vec<String>,
+    },
+
     NestedFunctionsNotSupported,
     NumberOutOfRange {
         expected_type: Option<String>,
@@ -29,9 +34,17 @@ pub enum CompilationErrorMessage {
         maximum: i128,
     },
 
+    StructAlreadyDefined {
+        name: String,
+    },
+
     TypeMismatch {
         expected_type: String,
         actual_type: String,
+    },
+    
+    UnknownType {
+        name: String,
     },
 
     UnknownValue {
@@ -69,6 +82,29 @@ impl Display for CompilationErrorMessage {
             }
 
             Self::InternalError(error) => write!(formatter, "{}", error),
+            Self::MissingFields { type_, fields } => {
+                let field_word = if fields.len() == 1 { "field" } else { "fields" };
+
+                write!(
+                    formatter,
+                    "Missing {} when constructing a value of type `{}`: ",
+                    field_word,
+                    type_,
+                )?;
+
+                let mut fields_iterator = fields.iter();
+
+                if let Some(head) = fields_iterator.next() {
+                    write!(formatter, "`{}`", head)?;
+
+                    for field in fields_iterator {
+                        write!(formatter, ", `{}`", field)?;
+                    }
+                }
+
+                Ok(())
+            }
+
             Self::NestedFunctionsNotSupported => {
                 write!(formatter, "Nested functions aren't currently supported.")
             }
@@ -94,6 +130,12 @@ impl Display for CompilationErrorMessage {
             } => {
                 write!(formatter, "The default numeric type is i32, but {} isn't between {} and {}. Consider using a different type.", value, minimum, maximum)
             }
+            
+            Self::StructAlreadyDefined { name } => write!(
+                formatter,
+                "A struct with name `{}` is already defined.",
+                name
+            ),
 
             Self::TypeMismatch {
                 expected_type,
@@ -103,7 +145,8 @@ impl Display for CompilationErrorMessage {
                 "Expected a value of type `{}`, but got one of type `{}`.",
                 expected_type, actual_type
             ),
-
+            
+            Self::UnknownType { name } => write!(formatter, "Unknown type `{}`.", name),
             Self::UnknownValue { name } => write!(formatter, "Unknown value `{}`.", name),
             Self::UnitPassedAsValue => write!(formatter, "It looks like you're trying to pass around `unit` as a value. This isn't currently supported."),
             Self::ValueNotCallable => write!(
@@ -121,6 +164,10 @@ impl Display for CompilationErrorMessage {
 }
 
 pub enum InternalError {
+    AnalyzerStructNotDefined {
+        index: usize,
+    },
+    
     AnalyzerFunctionNotDefined {
         index: usize,
     },
@@ -128,7 +175,8 @@ pub enum InternalError {
     JitCompilerExpectedNumericType {
         actual_type: String,
     },
-
+    
+    JitCompilerStructComparisonNotRewritten,
     JitCompilerTypeMismatch {
         expected_type: String,
         actual_value: String,
@@ -145,6 +193,10 @@ pub enum InternalError {
     JitCompilerUnknownParameter {
         index: usize,
     },
+    
+    UnknownType {
+        name: String,
+    },
 
     UnknownValue {
         name: String,
@@ -158,6 +210,14 @@ pub enum InternalError {
 impl Display for InternalError {
     fn fmt(&self, formatter: &mut Formatter) -> std::fmt::Result {
         match self {
+            Self::AnalyzerStructNotDefined { index } => {
+                write!(
+                    formatter,
+                    "The analyzer phase reserved struct {}, but didn't define it.",
+                    index,
+                )
+            },
+            
             Self::AnalyzerFunctionNotDefined { index } => {
                 write!(
                     formatter,
@@ -172,6 +232,11 @@ impl Display for InternalError {
                 actual_type
             ),
 
+            Self::JitCompilerStructComparisonNotRewritten => write!(
+                formatter,
+                "This struct comparison should've been rewritten in the typechecking phase, but it wasn't.",
+            ),
+            
             Self::JitCompilerTypeMismatch { expected_type, actual_value } => write!(
                 formatter,
                 "Attempted to coerce `{}` into a `{}`.",
@@ -202,6 +267,12 @@ impl Display for InternalError {
                     index,
                 )
             }
+            
+            Self::UnknownType { name } => write!(
+                formatter,
+                "Unknown type `{}`. This should've been caught by the typechecker.",
+                name
+            ),
 
             Self::UnknownValue { name } => write!(
                 formatter,

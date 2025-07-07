@@ -339,6 +339,7 @@ fn lex_token(input: PositionedSource) -> IResult<PositionedSource, PositionedTok
         alt((
             lex_keyword("else", Token::ElseKeyword),
             lex_keyword("seq", Token::SeqKeyword),
+            lex_keyword("struct", Token::StructKeyword),
             lex_static_token("{", Token::LeftCurlyBracket),
             lex_static_token("}", Token::RightCurlyBracket),
             lex_static_token("(", Token::LeftParenthesis),

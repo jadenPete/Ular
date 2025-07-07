@@ -10,6 +10,7 @@ programs (with the file extension `*.ul`) directly.
 
 - First-class functions
 - Basic data types (`i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`, `bool`, `unit`)
+- Structural types (structs)
 - Arithmetic, logical, and comparison operators
 - If expressions
 
@@ -18,7 +19,7 @@ programs (with the file extension `*.ul`) directly.
 - Anonymous functions
   - Tail call optimization
   - Parametric polymorphism (generics)
-- Complex data types (strings, tuples, algebraic data types like structs and enums)
+- Other complex data types (strings, tuples, and sum types)
 - Type classes (similar to Rust's `trait`s)
 - Pattern matching
 - Garbage collection

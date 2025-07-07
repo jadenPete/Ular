@@ -12,11 +12,15 @@ pub trait Node {
 /// The abstract syntax tree ([AST](https://en.wikipedia.org/wiki/Abstract_syntax_tree)] element
 /// containing the entire program.
 ///
-/// It follows the following grammer, defined in
+/// It follows the following grammar, defined in
 /// [extended Backus–Naur form](https://en.wikipedia.org/wiki/Extended_Backus%E2%80%93Naur_form):
 /// ```ebnf
 /// program = statement*;
-/// statement = variable_definition | function_definition | expression ';' | ';';
+/// statement = struct_definition | variable_definition | function_definition | expression ';' | ';';
+/// struct_definition =
+///     'struct' identifier '{' struct_definition_field (',' struct_definition_field)* '}';
+///
+/// struct_definition_field = identifier ':' type;
 /// variable_definition = identifier ':=' expression ';';
 /// function_definition = 'fn' identifier '(' (parameter (',' parameter)*)? ')' (':' type)? block;
 /// parameter = identifier ':' type;
@@ -69,12 +73,15 @@ pub trait Node {
 /// else_if_clause = 'else' 'if' expression block;
 /// else_clause = 'else' block;
 /// primary =
+///     | struct_application
 ///     | identifier
 ///     | number;
 ///     | 'unit';
 ///     | '(' expression ')';
 ///     | sequential_block;
 ///
+/// struct_application = identifier '{' struct_application_field (',' struct_application_field)* '}';
+/// struct_application_field = identifier ':' expression;
 /// identifier = IDENTIFIER;
 /// number = NUMBER numeric_type?;
 /// sequential_block = 'seq' block;
@@ -87,10 +94,24 @@ pub struct Program {
 
 #[derive(Debug, Node)]
 pub enum Statement {
+    StructDefinition(StructDefinition),
     VariableDefinition(VariableDefinition),
     FunctionDefinition(FunctionDefinition),
     Expression(Expression),
     NoOp { position: Position },
+}
+
+#[derive(Clone, Debug, Node)]
+pub struct StructDefinition {
+    pub name: Identifier,
+    pub fields: Vec<StructDefinitionField>,
+    pub position: Position,
+}
+
+#[derive(Clone, Debug)]
+pub struct StructDefinitionField {
+    pub name: Identifier,
+    pub type_: Type,
 }
 
 #[derive(Debug, Node)]
@@ -128,6 +149,7 @@ pub enum Expression {
     If(If),
     InfixOperation(InfixOperation),
     Call(Call),
+    StructApplication(StructApplication),
     Identifier(Identifier),
     Number(Number),
     PrefixOperation(PrefixOperation),
@@ -214,6 +236,19 @@ pub struct Call {
     pub function: Box<Expression>,
     pub arguments: Vec<Expression>,
     pub position: Position,
+}
+
+#[derive(Debug, Node)]
+pub struct StructApplication {
+    pub name: Identifier,
+    pub fields: Vec<StructApplicationField>,
+    pub position: Position,
+}
+
+#[derive(Debug)]
+pub struct StructApplicationField {
+    pub name: Identifier,
+    pub value: Expression,
 }
 
 #[derive(Clone, Debug, Node)]

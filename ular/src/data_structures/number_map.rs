@@ -73,11 +73,16 @@ impl<A> NumberMap<A> {
         self.get_values_mut()[key - offset].get_or_insert_with(default)
     }
 
-    pub fn insert(&mut self, key: usize, value: A) {
+    pub fn insert(&mut self, key: usize, value: A) -> &mut A {
         let offset = self.offset;
 
         self.ensure_defined(key);
-        self.get_values_mut()[key - offset] = Some(value);
+
+        let values = self.get_values_mut();
+        let i = key - offset;
+
+        values[i] = Some(value);
+        values[i].as_mut().unwrap()
     }
 
     /// Returns a consuming iterator of each entry of the map. [NumberMap] doesn't implement
@@ -92,6 +97,29 @@ impl<A> NumberMap<A> {
             .into_iter()
             .enumerate()
             .flat_map(move |(i, value)| value.map(|value| (i + offset, value)))
+    }
+
+    pub fn into_contiguous_values(
+        self,
+        expected_length: usize,
+    ) -> Result<Vec<A>, IndexUndefinedError> {
+        let mut result = Vec::with_capacity(expected_length);
+
+        for (i, (j, value)) in self.into_iter().enumerate() {
+            if j > i {
+                return Err(IndexUndefinedError { index: i });
+            }
+
+            result.push(value);
+        }
+
+        if result.len() < expected_length {
+            return Err(IndexUndefinedError {
+                index: result.len(),
+            });
+        }
+
+        Ok(result)
     }
 
     fn into_values(self) -> Vec<Option<A>> {
@@ -117,4 +145,8 @@ impl<A: Debug> Debug for NumberMap<A> {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
         formatter.debug_map().entries(self.iter()).finish()
     }
+}
+
+pub struct IndexUndefinedError {
+    pub index: usize,
 }

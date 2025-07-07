@@ -4,12 +4,15 @@ mod module;
 mod scope;
 mod value;
 
+use std::collections::HashMap;
+
 use crate::{
     data_structures::graph::DirectedGraph,
     dependency_analyzer::analyzed_program::{
         AnalyzedBlock, AnalyzedCall, AnalyzedExpression, AnalyzedExpressionRef,
         AnalyzedFunctionDefinition, AnalyzedIf, AnalyzedInfixOperation, AnalyzedPrefixOperation,
-        AnalyzedProgram,
+        AnalyzedProgram, AnalyzedStructApplication, AnalyzedStructDefinition, AnalyzedType,
+        AnalyzerTyped,
     },
     error_reporting::{CompilationError, CompilationErrorMessage, InternalError, Position},
     jit_compiler::{
@@ -17,16 +20,12 @@ use crate::{
         fork_function_cache::ForkFunctionCache,
         module::UlarModule,
         scope::JitCompilerScope,
-        value::{UlarFunction, UlarValue},
+        value::{UlarFunction, UlarStruct, UlarValue},
     },
-    parser::{
-        program::{
-            InfixOperator, LogicalInfixOperator, Node, NumericInfixOperator, UniversalInfixOperator,
-        },
-        type_::Type,
+    parser::program::{
+        InfixOperator, LogicalInfixOperator, Node, NumericInfixOperator, UniversalInfixOperator,
     },
     simplifier::simple_program::SimplePrefixOperator,
-    typechecker::typed_program::Typed,
 };
 use built_in_values::BuiltInFunction;
 use inkwell::{
@@ -34,7 +33,7 @@ use inkwell::{
     builder::Builder,
     context::Context,
     execution_engine::{ExecutionEngine, JitFunction},
-    types::ArrayType,
+    types::{ArrayType, StructType},
     values::{BasicValueEnum, FunctionValue, IntValue, PointerValue},
     AddressSpace, IntPredicate, OptimizationLevel,
 };
@@ -484,12 +483,12 @@ impl<'context> CompilableInfixOperation<'_> {
         let left_int_value = IntValue::try_from(left_value)?;
         let right_int_value = IntValue::try_from(right_value)?;
         let argument_numeric_type = match self.0.left.get_type() {
-            Type::Numeric(numeric_type) => numeric_type,
+            AnalyzedType::Numeric(numeric_type) => numeric_type,
             type_ => {
                 return Err(CompilationError {
                     message: CompilationErrorMessage::InternalError(
                         InternalError::JitCompilerExpectedNumericType {
-                            actual_type: format!("{}", type_),
+                            actual_type: format!("{}", type_.display(compiler.struct_types)),
                         },
                     ),
 
@@ -528,7 +527,7 @@ impl<'context> CompilableInfixOperation<'_> {
 
                 UlarValue::from_call_site_value(
                     compiler.context,
-                    &Type::Numeric(argument_numeric_type),
+                    &AnalyzedType::Numeric(argument_numeric_type),
                     builder
                         .build_call(
                             division_function,
@@ -577,15 +576,16 @@ impl<'context> CompilableInfixOperation<'_> {
         left_value: UlarValue<'context>,
         right_value: UlarValue<'context>,
         operator: UniversalInfixOperator,
+        position: Position,
     ) -> Result<UlarValue<'context>, CompilationError> {
         let name = scope.get_local_name();
 
-        Ok(match (left_value, right_value) {
-            (UlarValue::Function(left_function), _) => {
+        match left_value {
+            UlarValue::Function(left_function) => {
                 let left_pointer = left_function.get_pointer_value();
                 let right_pointer = UlarFunction::try_from(right_value)?.get_pointer_value();
 
-                builder
+                Ok(builder
                     .build_int_compare(
                         match operator {
                             UniversalInfixOperator::EqualComparison => IntPredicate::EQ,
@@ -596,13 +596,13 @@ impl<'context> CompilableInfixOperation<'_> {
                         &name.to_string(),
                     )
                     .unwrap()
-                    .into()
+                    .into())
             }
 
-            (UlarValue::Int(left_int), _) => {
+            UlarValue::Int(left_int) => {
                 let right_int = right_value.try_into()?;
 
-                builder
+                Ok(builder
                     .build_int_compare(
                         match operator {
                             UniversalInfixOperator::EqualComparison => IntPredicate::EQ,
@@ -613,11 +613,18 @@ impl<'context> CompilableInfixOperation<'_> {
                         &name.to_string(),
                     )
                     .unwrap()
-                    .into()
+                    .into())
             }
 
-            (UlarValue::Unit, _) => compiler.context.i8_type().const_int(1, false).into(),
-        })
+            UlarValue::Struct(_) => Err(CompilationError {
+                message: CompilationErrorMessage::InternalError(
+                    InternalError::JitCompilerStructComparisonNotRewritten,
+                ),
+                position: Some(position),
+            }),
+
+            UlarValue::Unit => Ok(compiler.context.i8_type().const_int(1, false).into()),
+        }
     }
 }
 
@@ -671,6 +678,7 @@ impl<'context> InlineExpression<'context> for CompilableInfixOperation<'_> {
                 left_value,
                 right_value,
                 operator,
+                self.0.get_position(),
             ),
         }
     }
@@ -712,13 +720,97 @@ impl<'context> InlineExpression<'context> for CompilablePrefixOperation<'_> {
     }
 }
 
+#[derive(Clone, Copy)]
+struct CompilableStructApplication<'a>(&'a AnalyzedStructApplication);
+
+impl<'context> InlineExpression<'context> for CompilableStructApplication<'_> {
+    fn compile(
+        &self,
+        compiler: &mut JitFunctionCompiler<'_, 'context>,
+        builder: &Builder<'context>,
+        scope: &mut JitCompilerScope<'_, 'context>,
+    ) -> Result<UlarValue<'context>, CompilationError> {
+        let (struct_definition, struct_type) = compiler.struct_types[self.0.struct_index];
+        let allocated_size = struct_type.size_of().unwrap();
+        let allocated_align = struct_type.get_alignment();
+        let struct_pointer_name = scope.get_local_name();
+        let struct_pointer = builder
+            .build_direct_call(
+                compiler.built_in_values._alloc.build_function(
+                    compiler.context,
+                    compiler.execution_engine,
+                    compiler.module,
+                ),
+                &[allocated_size.into(), allocated_align.into()],
+                &struct_pointer_name.to_string(),
+            )
+            .unwrap()
+            .try_as_basic_value()
+            .unwrap_left()
+            .into_pointer_value();
+
+        let field_expressions = self
+            .0
+            .fields
+            .iter()
+            .map(|field| {
+                let field_value_name = scope.get_local_name();
+
+                Ok((
+                    field.name.clone(),
+                    scope.get(
+                        &field.value,
+                        field_value_name,
+                        compiler.context,
+                        builder,
+                        compiler.built_in_values,
+                        compiler.execution_engine,
+                        compiler.module,
+                    )?,
+                ))
+            })
+            .collect::<Result<HashMap<_, _>, _>>()?;
+
+        for (i, field) in struct_definition.fields.iter().enumerate() {
+            let field_pointer_name = scope.get_local_name();
+            let field_pointer = builder
+                .build_struct_gep(
+                    field
+                        .type_
+                        .inkwell_type(compiler.context)
+                        .ok_or_else(|| CompilationError {
+                            message: CompilationErrorMessage::UnitPassedAsValue,
+                            position: Some(field.name.get_position()),
+                        })?,
+                    struct_pointer,
+                    i as u32,
+                    &field_pointer_name.to_string(),
+                )
+                .unwrap();
+
+            builder
+                .build_store::<BasicValueEnum>(
+                    field_pointer,
+                    field_expressions[&field.name.value].try_into()?,
+                )
+                .unwrap();
+        }
+
+        Ok(UlarValue::Struct(UlarStruct {
+            pointer: struct_pointer,
+            struct_index: self.0.struct_index,
+        }))
+    }
+}
+
 struct JitFunctionCompiler<'a, 'context> {
-    context: &'context Context,
     built_in_values: &'a mut BuiltInValues<'context>,
-    fork_function_cache: &'a mut ForkFunctionCache<'context>,
-    function: FunctionValue<'context>,
+    context: &'context Context,
     execution_engine: &'a ExecutionEngine<'context>,
+    fork_function_cache: &'a mut ForkFunctionCache<'context>,
     module: &'a mut UlarModule<'context>,
+    struct_types: &'a [(&'a AnalyzedStructDefinition, StructType<'context>)],
+    function: FunctionValue<'context>,
 }
 
 impl<'context> JitFunctionCompiler<'_, 'context> {
@@ -772,6 +864,10 @@ impl<'context> JitFunctionCompiler<'_, 'context> {
             }
 
             AnalyzedExpression::Call(call) => Box::new(CompilableCall(call)),
+            AnalyzedExpression::StructApplication(struct_application) => {
+                Box::new(CompilableStructApplication(struct_application))
+            }
+
             AnalyzedExpression::PrefixOperation(prefix_operation) => {
                 Box::new(CompilablePrefixOperation(prefix_operation))
             }
@@ -864,7 +960,7 @@ impl<'context> JitFunctionCompiler<'_, 'context> {
         let ular_function = UlarFunction::try_from(scope.get(
             &AnalyzedExpressionRef::Function {
                 index: i,
-                type_: definition.get_type(),
+                type_: AnalyzedType::Function(definition.type_.clone()),
                 position: definition.get_position(),
             },
             local_name,
@@ -887,9 +983,9 @@ impl<'context> JitFunctionCompiler<'_, 'context> {
         {
             parameter_values.push(UlarValue::from_basic_value(
                 self.context,
-                &definition_parameter.get_type(),
+                &definition_parameter.type_,
                 function_parameter,
-                definition_parameter.get_position(),
+                definition_parameter.position.clone(),
             )?);
         }
 
@@ -897,12 +993,13 @@ impl<'context> JitFunctionCompiler<'_, 'context> {
             JitCompilerScope::new_with_parent(scope, Some(&parameter_values), 0, worker_parameter);
 
         let mut function_compiler = JitFunctionCompiler {
-            context: self.context,
             built_in_values: self.built_in_values,
-            fork_function_cache: self.fork_function_cache,
-            function,
+            context: self.context,
             execution_engine: self.execution_engine,
+            fork_function_cache: self.fork_function_cache,
             module: self.module,
+            struct_types: self.struct_types,
+            function,
         };
 
         /*
@@ -954,7 +1051,7 @@ impl<'context> JitFunctionCompiler<'_, 'context> {
         scope: &mut JitCompilerScope<'_, 'context>,
         function: UlarFunction<'context>,
         arguments: &[UlarValue<'context>],
-        type_: &Type,
+        type_: &AnalyzedType,
         position: Position,
     ) -> Result<UlarValue<'context>, CompilationError> {
         builder
@@ -991,6 +1088,7 @@ impl<'context> JitFunctionCompiler<'_, 'context> {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn compile_main_function<'a>(
     context: &'a Context,
     builder: &Builder<'a>,
@@ -999,6 +1097,7 @@ fn compile_main_function<'a>(
     module: &mut UlarModule<'a>,
     execution_engine: &ExecutionEngine<'a>,
     program: &AnalyzedProgram,
+    struct_types: Vec<(&'a AnalyzedStructDefinition, StructType<'a>)>,
 ) -> Result<FunctionValue<'a>, CompilationError> {
     let main_function = module.underlying.add_function(
         MAIN_FUNCTION_NAME,
@@ -1038,12 +1137,13 @@ fn compile_main_function<'a>(
 
     let mut scope = JitCompilerScope::new_without_parent(&function_values, None, worker);
     let mut function_compiler = JitFunctionCompiler {
-        context,
         built_in_values,
-        fork_function_cache,
+        context,
         execution_engine,
-        function: main_function,
+        fork_function_cache,
         module,
+        struct_types: &struct_types,
+        function: main_function,
     };
 
     for (i, definition) in program.functions.iter().enumerate() {
@@ -1264,10 +1364,35 @@ fn compile_program<'a>(
     fork_function_cache: &mut ForkFunctionCache<'a>,
     module: &mut UlarModule<'a>,
     execution_engine: &ExecutionEngine<'a>,
-    program: &AnalyzedProgram,
+    program: &'a AnalyzedProgram,
     print_to_stderr: bool,
 ) -> Result<JitFunction<'a, MainFunction>, CompilationError> {
     let builder = context.create_builder();
+    let struct_types = program
+        .structs
+        .iter()
+        .map(|struct_definition| {
+            let struct_type = context.struct_type(
+                &struct_definition
+                    .fields
+                    .iter()
+                    .map(|field| {
+                        field
+                            .type_
+                            .inkwell_type(context)
+                            .ok_or_else(|| CompilationError {
+                                message: CompilationErrorMessage::UnitPassedAsValue,
+                                position: Some(field.name.get_position()),
+                            })
+                    })
+                    .collect::<Result<Vec<_>, _>>()?,
+                false,
+            );
+
+            Ok((struct_definition, struct_type))
+        })
+        .collect::<Result<_, _>>()?;
+
     let main_function = compile_main_function(
         context,
         &builder,
@@ -1276,6 +1401,7 @@ fn compile_program<'a>(
         module,
         execution_engine,
         program,
+        struct_types,
     )?;
 
     compile_main_harness_function(
@@ -1304,13 +1430,14 @@ pub fn compile_and_execute_program(
     print_to_stderr: bool,
 ) -> Result<u8, CompilationError> {
     let context = Context::create();
-    let mut built_in_values = BuiltInValues::new(&context);
-    let mut fork_function_cache = ForkFunctionCache::new();
     let mut module: UlarModule = context.create_module("main").into();
     let execution_engine = module
         .underlying
         .create_jit_execution_engine(OptimizationLevel::None)
         .unwrap();
+
+    let mut built_in_values = BuiltInValues::new(&context, &execution_engine);
+    let mut fork_function_cache = ForkFunctionCache::new();
 
     let main_function = compile_program(
         &context,

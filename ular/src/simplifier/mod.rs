@@ -6,7 +6,7 @@ use crate::{
         program::{
             Block, Call, Expression, FunctionDefinition, If, InfixOperation, InfixOperator, Node,
             Number, NumericInfixOperator, PrefixOperation, PrefixOperator, Program, Statement,
-            VariableDefinition,
+            StructApplication, VariableDefinition,
         },
         type_::Type,
     },
@@ -14,7 +14,8 @@ use crate::{
     simplifier::simple_program::{
         SimpleBlock, SimpleCall, SimpleExpression, SimpleFunctionDefinition, SimpleIf,
         SimpleInfixOperation, SimplePrefixOperation, SimplePrefixOperator, SimpleProgram,
-        SimpleStatement, SimpleVariableDefinition,
+        SimpleStatement, SimpleStructApplication, SimpleStructApplicationField,
+        SimpleVariableDefinition,
     },
 };
 
@@ -58,6 +59,10 @@ fn simplify_expression(expression: &Expression) -> SimpleExpression {
         }
 
         Expression::Call(call) => SimpleExpression::Call(simplify_call(call)),
+        Expression::StructApplication(struct_application) => {
+            SimpleExpression::StructApplication(simplify_struct_application(struct_application))
+        }
+
         Expression::Identifier(identifier) => SimpleExpression::Identifier(identifier.clone()),
         Expression::Number(number) => SimpleExpression::Number(number.clone()),
         Expression::PrefixOperation(prefix_operation) => {
@@ -193,6 +198,10 @@ fn simplify_statement(statement: &Statement) -> SimpleStatement {
             SimpleStatement::Expression(simplify_expression(expression))
         }
 
+        Statement::StructDefinition(definition) => {
+            SimpleStatement::StructDefinition(definition.clone())
+        }
+
         Statement::FunctionDefinition(definition) => {
             SimpleStatement::FunctionDefinition(simplify_function_definition(definition))
         }
@@ -204,6 +213,21 @@ fn simplify_statement(statement: &Statement) -> SimpleStatement {
         Statement::NoOp { position } => SimpleStatement::NoOp {
             position: position.clone(),
         },
+    }
+}
+
+fn simplify_struct_application(struct_application: &StructApplication) -> SimpleStructApplication {
+    SimpleStructApplication {
+        name: struct_application.name.clone(),
+        fields: struct_application
+            .fields
+            .iter()
+            .map(|field| SimpleStructApplicationField {
+                name: field.name.clone(),
+                value: simplify_expression(&field.value),
+            })
+            .collect(),
+        position: struct_application.get_position(),
     }
 }
 

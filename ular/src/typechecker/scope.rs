@@ -1,7 +1,7 @@
 use crate::{
     error_reporting::{CompilationError, CompilationErrorMessage},
     parser::{
-        program::{Identifier, Node},
+        program::{Identifier, Node, StructDefinition},
         type_::Type,
     },
     typechecker::built_in_values::BuiltInValues,
@@ -11,6 +11,7 @@ use std::collections::HashMap;
 pub struct TypecheckerScope<'a> {
     built_in_values: &'a BuiltInValues,
     parent: Option<&'a TypecheckerScope<'a>>,
+    structs: HashMap<String, StructDefinition>,
     variable_types: HashMap<String, Type>,
 }
 
@@ -19,6 +20,7 @@ impl<'a> TypecheckerScope<'a> {
         Self {
             built_in_values: parent.built_in_values,
             parent: Some(parent),
+            structs: HashMap::new(),
             variable_types: HashMap::new(),
         }
     }
@@ -27,7 +29,25 @@ impl<'a> TypecheckerScope<'a> {
         Self {
             built_in_values,
             parent: None,
+            structs: HashMap::new(),
             variable_types: HashMap::new(),
+        }
+    }
+
+    pub fn declare_struct(&mut self, definition: StructDefinition) -> Result<(), CompilationError> {
+        match self
+            .structs
+            .insert(definition.name.value.clone(), definition)
+        {
+            Some(existing) => Err(CompilationError {
+                message: CompilationErrorMessage::StructAlreadyDefined {
+                    name: existing.name.value.clone(),
+                },
+
+                position: Some(existing.name.get_position()),
+            }),
+
+            None => Ok(()),
         }
     }
 
@@ -47,6 +67,13 @@ impl<'a> TypecheckerScope<'a> {
 
             None => Ok(()),
         }
+    }
+
+    pub fn get_struct_definition(&self, name: &str) -> Option<&StructDefinition> {
+        self.structs.get(name).or_else(|| {
+            self.parent
+                .and_then(|parent| parent.get_struct_definition(name))
+        })
     }
 
     pub fn get_variable_type(&self, name: &str) -> Option<Type> {

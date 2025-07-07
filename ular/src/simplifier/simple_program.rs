@@ -1,7 +1,7 @@
 use crate::{
     error_reporting::Position,
     parser::{
-        program::{Identifier, InfixOperator, Node, Number, Parameter, Unit},
+        program::{Identifier, InfixOperator, Node, Number, Parameter, StructDefinition, Unit},
         type_::Type,
     },
 };
@@ -15,6 +15,7 @@ pub struct SimpleProgram {
 
 #[derive(Debug, Node)]
 pub enum SimpleStatement {
+    StructDefinition(StructDefinition),
     VariableDefinition(SimpleVariableDefinition),
     FunctionDefinition(SimpleFunctionDefinition),
     Expression(SimpleExpression),
@@ -49,6 +50,7 @@ pub enum SimpleExpression {
     If(SimpleIf),
     InfixOperation(SimpleInfixOperation),
     Call(SimpleCall),
+    StructApplication(SimpleStructApplication),
     Identifier(Identifier),
     Number(Number),
     PrefixOperation(SimplePrefixOperation),
@@ -89,4 +91,17 @@ pub struct SimpleCall {
     pub function: Box<SimpleExpression>,
     pub arguments: Vec<SimpleExpression>,
     pub position: Position,
+}
+
+#[derive(Debug, Node)]
+pub struct SimpleStructApplication {
+    pub name: Identifier,
+    pub fields: Vec<SimpleStructApplicationField>,
+    pub position: Position,
+}
+
+#[derive(Debug)]
+pub struct SimpleStructApplicationField {
+    pub name: Identifier,
+    pub value: SimpleExpression,
 }

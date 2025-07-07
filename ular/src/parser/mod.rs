@@ -8,7 +8,8 @@ use crate::{
         program::{
             Block, Call, ElseClause, ElseIfClause, Expression, FunctionDefinition, Identifier, If,
             InfixOperation, InfixOperator, LogicalInfixOperator, Number, NumericInfixOperator,
-            Parameter, PrefixOperation, PrefixOperator, Program, Statement, Unit,
+            Parameter, PrefixOperation, PrefixOperator, Program, Statement, StructApplication,
+            StructApplicationField, StructDefinition, StructDefinitionField, Unit,
             UniversalInfixOperator, VariableDefinition,
         },
         type_::{FunctionType, NumericType, Type},
@@ -20,7 +21,7 @@ use nom::{
     branch::alt,
     combinator::{consumed, eof, map, opt},
     error::{ErrorKind, ParseError},
-    multi::{many0, many1, separated_list0},
+    multi::{many0, many1, separated_list0, separated_list1},
     sequence::{delimited, tuple},
     IResult, InputIter, Parser, Slice,
 };
@@ -76,6 +77,9 @@ fn parse_program(input: Tokens) -> IResult<Tokens, Program> {
 
 fn parse_statement(input: Tokens) -> IResult<Tokens, Statement> {
     alt((
+        map(parse_struct_definition, |definition| {
+            Statement::StructDefinition(definition)
+        }),
         map(parse_variable_definition, |definition| {
             Statement::VariableDefinition(definition)
         }),
@@ -91,6 +95,34 @@ fn parse_statement(input: Tokens) -> IResult<Tokens, Statement> {
             |(position, _)| Statement::NoOp { position },
         ),
     ))(input)
+}
+
+fn parse_struct_definition(input: Tokens) -> IResult<Tokens, StructDefinition> {
+    map(
+        positioned(tuple((
+            parse_token(Token::StructKeyword),
+            parse_identifier,
+            parse_token(Token::LeftCurlyBracket),
+            separated_list1(parse_token(Token::Comma), parse_struct_definition_field),
+            parse_token(Token::RightCurlyBracket),
+        ))),
+        |(position, (_, name, _, fields, _))| StructDefinition {
+            name,
+            fields,
+            position,
+        },
+    )(input)
+}
+
+fn parse_struct_definition_field(input: Tokens) -> IResult<Tokens, StructDefinitionField> {
+    map(
+        tuple((
+            parse_identifier,
+            parse_token(Token::TypeAnnotation),
+            parse_type,
+        )),
+        |(name, _, type_)| StructDefinitionField { name, type_ },
+    )(input)
 }
 
 fn parse_variable_definition(input: Tokens) -> IResult<Tokens, VariableDefinition> {
@@ -473,6 +505,9 @@ fn parse_if(input: Tokens) -> IResult<Tokens, Expression> {
 
 fn parse_primary(input: Tokens) -> IResult<Tokens, Expression> {
     alt((
+        map(parse_struct_application, |application| {
+            Expression::StructApplication(application)
+        }),
         map(parse_identifier, |identifier| {
             Expression::Identifier(identifier)
         }),
@@ -489,6 +524,33 @@ fn parse_primary(input: Tokens) -> IResult<Tokens, Expression> {
             Expression::SequentialBlock(block)
         }),
     ))(input)
+}
+
+fn parse_struct_application(input: Tokens) -> IResult<Tokens, StructApplication> {
+    map(
+        positioned(tuple((
+            parse_identifier,
+            parse_token(Token::LeftCurlyBracket),
+            separated_list1(parse_token(Token::Comma), parse_struct_application_field),
+            parse_token(Token::RightCurlyBracket),
+        ))),
+        |(position, (name, _, fields, _))| StructApplication {
+            name,
+            fields,
+            position,
+        },
+    )(input)
+}
+
+fn parse_struct_application_field(input: Tokens) -> IResult<Tokens, StructApplicationField> {
+    map(
+        tuple((
+            parse_identifier,
+            parse_token(Token::TypeAnnotation),
+            parse_expression,
+        )),
+        |(name, _, value)| StructApplicationField { name, value },
+    )(input)
 }
 
 fn parse_identifier(input: Tokens) -> IResult<Tokens, Identifier> {

@@ -18,6 +18,7 @@ use inkwell::{
 };
 use num::Zero;
 use std::{
+    alloc::{alloc, Layout},
     collections::HashMap,
     ffi::{c_char, CString},
     fmt::Display,
@@ -229,6 +230,7 @@ pub struct BuiltInValues<'a> {
     pub __cxa_end_catch: BuiltInLinkedFunction<'a>,
     pub __cxa_throw: BuiltInLinkedFunction<'a>,
     pub __gxx_personality_v0: BuiltInLinkedFunction<'a>,
+    pub _alloc: BuiltInMappedFunction<'a>,
     pub _divide_i8: BuiltInMappedFunction<'a>,
     pub _divide_i16: BuiltInMappedFunction<'a>,
     pub _divide_i32: BuiltInMappedFunction<'a>,
@@ -286,7 +288,7 @@ impl<'a> BuiltInValues<'a> {
         }
     }
 
-    pub fn new(context: &'a Context) -> Self {
+    pub fn new(context: &'a Context, execution_engine: &ExecutionEngine<'a>) -> Self {
         let mut referencable_values = HashMap::<String, Box<dyn BuiltInValue>>::new();
 
         referencable_values.insert(String::from("true"), Box::new(BuiltInBool::new(1)));
@@ -462,6 +464,18 @@ impl<'a> BuiltInValues<'a> {
             context.i32_type().fn_type(&[], true),
         );
 
+        let pointer_sized_int_type = context
+            .ptr_sized_int_type(execution_engine.get_target_data(), None)
+            .into();
+
+        let _alloc = BuiltInMappedFunction::new(
+            String::from("_malloc"),
+            context
+                .ptr_type(AddressSpace::default())
+                .fn_type(&[pointer_sized_int_type, pointer_sized_int_type], false),
+            _alloc as usize,
+        );
+
         let _divide_i8 = divide_built_in_function::<i8>(context, NumericType::I8);
         let _divide_i16 = divide_built_in_function::<i16>(context, NumericType::I16);
         let _divide_i32 = divide_built_in_function::<i32>(context, NumericType::I32);
@@ -591,6 +605,7 @@ impl<'a> BuiltInValues<'a> {
             __cxa_end_catch,
             __cxa_throw,
             __gxx_personality_v0,
+            _alloc,
             _divide_i8,
             _divide_i16,
             _divide_i32,
@@ -621,6 +636,13 @@ pub extern "C" fn println_bool(_worker: &Worker, value: u8) {
 
 pub extern "C" fn println_display<A: Display>(_worker: &Worker, value: A) {
     println!("{}", value);
+}
+
+/// # Safety
+///
+/// See [std::alloc::GlobalAlloc::alloc].
+pub unsafe extern "C" fn _alloc(size: usize, align: usize) -> *mut u8 {
+    alloc(Layout::from_size_align(size, align).unwrap())
 }
 
 pub extern "C" fn _divide_number<A: Display + Div<Output = A> + Zero>(x: A, y: A) -> A {

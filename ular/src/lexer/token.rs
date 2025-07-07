@@ -9,7 +9,7 @@ use std::{
 
 /// A token in the language.
 ///
-/// Tokens follow the following grammer, defined in
+/// Tokens follow the following grammar, defined in
 /// [extended Backus–Naur form](https://en.wikipedia.org/wiki/Extended_Backus%E2%80%93Naur_form):
 /// ```ebnf
 /// (*
@@ -57,6 +57,7 @@ use std::{
 /// IF_KEYWORD = "if";
 /// ELSE_KEYWORD = "else";
 /// SEQ_KEYWORD = "seq";
+/// STRUCT_KEYWORD = "struct";
 /// LEFT_CURLY_BRACKET = "{";
 /// RIGHT_CURLY_BRACKET = "}";
 /// LEFT_PARENTHESIS = "(";
@@ -103,6 +104,7 @@ pub enum Token {
     IfKeyword,
     ElseKeyword,
     SeqKeyword,
+    StructKeyword,
     LeftCurlyBracket,
     RightCurlyBracket,
     LeftParenthesis,

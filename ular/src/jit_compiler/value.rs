@@ -1,7 +1,7 @@
 use crate::{
+    dependency_analyzer::analyzed_program::AnalyzedType,
     error_reporting::{CompilationError, CompilationErrorMessage, InternalError, Position},
     jit_compiler::scope::LocalName,
-    parser::type_::Type,
 };
 
 use either::Either::{Left, Right};
@@ -32,7 +32,7 @@ impl<'a> UlarFunction<'a> {
         builder: &Builder<'a>,
         arguments: &[UlarValue<'a>],
         name: LocalName,
-        type_: &Type,
+        type_: &AnalyzedType,
         position: Position,
     ) -> Result<UlarValue<'a>, CompilationError> {
         let mut non_unit_arguments = Vec::with_capacity(arguments.len());
@@ -89,9 +89,16 @@ impl<'a> TryFrom<UlarFunction<'a>> for FunctionValue<'a> {
 }
 
 #[derive(Clone, Copy, Debug)]
+pub struct UlarStruct<'a> {
+    pub pointer: PointerValue<'a>,
+    pub struct_index: usize,
+}
+
+#[derive(Clone, Copy, Debug)]
 pub enum UlarValue<'a> {
     Function(UlarFunction<'a>),
     Int(IntValue<'a>),
+    Struct(UlarStruct<'a>),
     Unit,
 }
 
@@ -99,7 +106,7 @@ impl<'a> UlarValue<'a> {
     pub fn build_phi(
         context: &'a Context,
         builder: &Builder<'a>,
-        type_: &Type,
+        type_: &AnalyzedType,
         incoming: &[(UlarValue<'a>, BasicBlock<'a>)],
         name: LocalName,
         position: Position,
@@ -123,25 +130,35 @@ impl<'a> UlarValue<'a> {
 
     pub fn from_basic_value<A: BasicValue<'a>>(
         context: &'a Context,
-        type_: &Type,
+        type_: &AnalyzedType,
         value: A,
         value_position: Position,
     ) -> Result<Self, CompilationError> {
         let basic_value_enum = value.as_basic_value_enum();
 
         match type_ {
-            Type::Bool | Type::Numeric(_) => Ok(UlarValue::Int(basic_value_enum.into_int_value())),
-            Type::Function(function_type) => Ok(Self::Function(UlarFunction::IndirectReference {
+            AnalyzedType::Bool | AnalyzedType::Numeric(_) => {
+                Ok(UlarValue::Int(basic_value_enum.into_int_value()))
+            }
+
+            AnalyzedType::Struct(i) => Ok(UlarValue::Struct(UlarStruct {
                 pointer: basic_value_enum.into_pointer_value(),
-                type_: function_type
-                    .inkwell_type(context)
-                    .ok_or(CompilationError {
-                        message: CompilationErrorMessage::UnitPassedAsValue,
-                        position: Some(value_position),
-                    })?,
+                struct_index: *i,
             })),
 
-            Type::Unit => Err(CompilationError {
+            AnalyzedType::Function(function_type) => {
+                Ok(Self::Function(UlarFunction::IndirectReference {
+                    pointer: basic_value_enum.into_pointer_value(),
+                    type_: function_type
+                        .inkwell_type(context)
+                        .ok_or(CompilationError {
+                            message: CompilationErrorMessage::UnitPassedAsValue,
+                            position: Some(value_position),
+                        })?,
+                }))
+            }
+
+            AnalyzedType::Unit => Err(CompilationError {
                 message: CompilationErrorMessage::UnitPassedAsValue,
                 position: Some(value_position),
             }),
@@ -150,7 +167,7 @@ impl<'a> UlarValue<'a> {
 
     pub fn from_call_site_value(
         context: &'a Context,
-        type_: &Type,
+        type_: &AnalyzedType,
         value: CallSiteValue<'a>,
         value_position: Position,
     ) -> Result<Self, CompilationError> {
@@ -180,6 +197,7 @@ impl<'a> TryFrom<UlarValue<'a>> for BasicValueEnum<'a> {
             }
 
             UlarValue::Int(int_value) => Ok(BasicValueEnum::IntValue(int_value)),
+            UlarValue::Struct(struct_) => Ok(BasicValueEnum::PointerValue(struct_.pointer)),
             UlarValue::Unit => Err(CompilationError {
                 message: CompilationErrorMessage::InternalError(
                     InternalError::JitCompilerTypeMismatch {
@@ -228,6 +246,26 @@ impl<'a> TryFrom<UlarValue<'a>> for UlarFunction<'a> {
     fn try_from(value: UlarValue<'a>) -> Result<Self, Self::Error> {
         match value {
             UlarValue::Function(function) => Ok(function),
+            _ => Err(CompilationError {
+                message: CompilationErrorMessage::InternalError(
+                    InternalError::JitCompilerTypeMismatch {
+                        expected_type: String::from("PointerValue"),
+                        actual_value: format!("{:?}", value),
+                    },
+                ),
+
+                position: None,
+            }),
+        }
+    }
+}
+
+impl<'a> TryFrom<UlarValue<'a>> for UlarStruct<'a> {
+    type Error = CompilationError;
+
+    fn try_from(value: UlarValue<'a>) -> Result<Self, Self::Error> {
+        match value {
+            UlarValue::Struct(struct_) => Ok(struct_),
             _ => Err(CompilationError {
                 message: CompilationErrorMessage::InternalError(
                     InternalError::JitCompilerTypeMismatch {

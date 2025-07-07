@@ -1,32 +1,14 @@
 use enum_iterator::Sequence;
-use inkwell::{
-    context::Context,
-    types::{BasicType, BasicTypeEnum, IntType},
-    AddressSpace,
-};
-
+use inkwell::{context::Context, types::IntType};
 use std::fmt::{Debug, Display, Formatter};
 
 #[derive(Clone, PartialEq)]
 pub enum Type {
     Bool,
     Function(FunctionType),
+    Identifier(String),
     Numeric(NumericType),
     Unit,
-}
-
-impl Type {
-    pub fn inkwell_type<'a>(&self, context: &'a Context) -> Option<BasicTypeEnum<'a>> {
-        match self {
-            Self::Bool => Some(BasicTypeEnum::IntType(context.i8_type())),
-            Self::Function(_) => Some(BasicTypeEnum::PointerType(
-                context.ptr_type(AddressSpace::default()),
-            )),
-
-            Self::Numeric(type_) => Some(BasicTypeEnum::IntType(type_.inkwell_type(context))),
-            Self::Unit => None,
-        }
-    }
 }
 
 impl Display for Type {
@@ -51,6 +33,7 @@ impl Debug for Type {
                 write!(formatter, " => {:?}", function.return_type)
             }
 
+            Self::Identifier(value) => write!(formatter, "{}", value),
             Self::Numeric(numeric_type) => write!(formatter, "{}", numeric_type),
             Self::Unit => write!(formatter, "unit"),
         }
@@ -61,29 +44,6 @@ impl Debug for Type {
 pub struct FunctionType {
     pub parameters: Vec<Type>,
     pub return_type: Box<Type>,
-}
-
-impl FunctionType {
-    pub fn inkwell_type<'a>(
-        &self,
-        context: &'a Context,
-    ) -> Option<inkwell::types::FunctionType<'a>> {
-        let mut parameter_types = Vec::with_capacity(self.parameters.len() + 1);
-
-        // Add an extra parameter for the worker pointer
-        parameter_types.push(context.ptr_type(AddressSpace::default()).into());
-
-        for parameter in &self.parameters {
-            parameter_types.push(parameter.inkwell_type(context)?.into());
-        }
-
-        Some(match self.return_type.inkwell_type(context) {
-            Some(return_type) => return_type.fn_type(parameter_types.as_slice(), false),
-            None => context
-                .void_type()
-                .fn_type(parameter_types.as_slice(), false),
-        })
-    }
 }
 
 #[derive(Clone, Copy, PartialEq, Sequence)]
