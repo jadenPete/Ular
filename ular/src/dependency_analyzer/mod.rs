@@ -7,8 +7,8 @@ use crate::{
         analyzed_program::{
             AnalyzedBlock, AnalyzedCall, AnalyzedExpression, AnalyzedExpressionRef,
             AnalyzedFunctionDefinition, AnalyzedIf, AnalyzedInfixOperation, AnalyzedNumber,
-            AnalyzedParameter, AnalyzedPrefixOperation, AnalyzedProgram, AnalyzedStructApplication,
-            AnalyzedStructApplicationField, AnalyzedType, AnalyzedUnit,
+            AnalyzedParameter, AnalyzedPrefixOperation, AnalyzedProgram, AnalyzedSelect,
+            AnalyzedStructApplication, AnalyzedStructApplicationField, AnalyzedType, AnalyzedUnit,
         },
         scope::{AnalyzerScope, AnalyzerScopeContext},
     },
@@ -17,8 +17,8 @@ use crate::{
     phase::Phase,
     typechecker::typed_program::{
         TypedBlock, TypedCall, TypedExpression, TypedFunctionDefinition, TypedIdentifier, TypedIf,
-        TypedInfixOperation, TypedNumber, TypedPrefixOperation, TypedProgram, TypedStatement,
-        TypedStructApplication, TypedUnit,
+        TypedInfixOperation, TypedNumber, TypedPrefixOperation, TypedProgram, TypedSelect,
+        TypedStatement, TypedStructApplication, TypedUnit,
     },
 };
 
@@ -90,6 +90,7 @@ impl<'a> Analyzer<'a> {
                 self.analyze_infix_operation(infix_operation)
             }
 
+            TypedExpression::Select(select) => self.analyze_select(select),
             TypedExpression::Call(call) => self.analyze_call(call),
             TypedExpression::StructApplication(struct_application) => {
                 self.analyze_struct_application(struct_application)
@@ -285,6 +286,26 @@ impl<'a> Analyzer<'a> {
 
         self.expression_graph
             .add_edge_with_reference(i, &expression_reference);
+
+        Ok(result)
+    }
+
+    fn analyze_select(
+        &mut self,
+        select: &TypedSelect,
+    ) -> Result<AnalyzedExpressionRef, CompilationError> {
+        let analyzed_left = self.analyze_expression(&select.left_hand_side)?;
+        let (i, result) =
+            self.expression_graph
+                .add_node(AnalyzedExpression::Select(AnalyzedSelect {
+                    left_hand_side: analyzed_left.clone(),
+                    field_index: select.field_index,
+                    type_: self.scope.analyze_type(&select.type_)?,
+                    position: select.get_position(),
+                }));
+
+        self.expression_graph
+            .add_edge_with_reference(i, &analyzed_left);
 
         Ok(result)
     }

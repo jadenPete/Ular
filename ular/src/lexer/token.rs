@@ -78,6 +78,9 @@ use std::{
 ///
 /// (* This needs to come after `NUMBER` so signs aren't interpreted as operators *)
 /// MINUS = "-";
+///
+/// (* This needs to come after `NUMBER` so decimal points aren't interpreted as `SELECT`s *)
+/// SELECT = "."
 /// ```
 #[derive(Clone, Debug, PartialEq)]
 pub enum Token {
@@ -121,6 +124,7 @@ pub enum Token {
     TypeAnnotation,
     Identifier(String),
     Number(i128),
+    Select,
 }
 
 #[derive(Clone, Debug)]

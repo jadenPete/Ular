@@ -8,9 +8,9 @@ use crate::{
         program::{
             Block, Call, ElseClause, ElseIfClause, Expression, FunctionDefinition, Identifier, If,
             InfixOperation, InfixOperator, LogicalInfixOperator, Number, NumericInfixOperator,
-            Parameter, PrefixOperation, PrefixOperator, Program, Statement, StructApplication,
-            StructApplicationField, StructDefinition, StructDefinitionField, Unit,
-            UniversalInfixOperator, VariableDefinition,
+            Parameter, PrefixOperation, PrefixOperator, Program, Select, Statement,
+            StructApplication, StructApplicationField, StructDefinition, StructDefinitionField,
+            Unit, UniversalInfixOperator, VariableDefinition,
         },
         type_::{FunctionType, NumericType, Type},
     },
@@ -411,6 +411,26 @@ fn parse_prefix_operation(input: Tokens) -> IResult<Tokens, Expression> {
                 Expression::PrefixOperation(PrefixOperation {
                     operator,
                     expression: Box::new(expression),
+                    position,
+                })
+            },
+        ),
+        parse_select,
+    ))(input)
+}
+
+fn parse_select(input: Tokens) -> IResult<Tokens, Expression> {
+    alt((
+        map(
+            positioned(tuple((
+                parse_call,
+                parse_token(Token::Select),
+                parse_identifier,
+            ))),
+            |(position, (left_hand_side, _, right_hand_side))| {
+                Expression::Select(Select {
+                    left_hand_side: Box::new(left_hand_side),
+                    right_hand_side,
                     position,
                 })
             },

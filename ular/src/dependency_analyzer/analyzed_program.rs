@@ -150,6 +150,7 @@ pub struct AnalyzedParameter {
 pub enum AnalyzedExpression {
     If(AnalyzedIf),
     InfixOperation(AnalyzedInfixOperation),
+    Select(AnalyzedSelect),
     Call(AnalyzedCall),
     StructApplication(AnalyzedStructApplication),
     PrefixOperation(AnalyzedPrefixOperation),
@@ -183,6 +184,14 @@ pub struct AnalyzedInfixOperation {
 pub struct AnalyzedPrefixOperation {
     pub operator: SimplePrefixOperator,
     pub expression: AnalyzedExpressionRef,
+    pub type_: AnalyzedType,
+    pub position: Position,
+}
+
+#[derive(AnalyzerTyped, Debug, Node)]
+pub struct AnalyzedSelect {
+    pub left_hand_side: AnalyzedExpressionRef,
+    pub field_index: usize,
     pub type_: AnalyzedType,
     pub position: Position,
 }

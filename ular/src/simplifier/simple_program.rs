@@ -49,6 +49,7 @@ pub struct SimpleBlock {
 pub enum SimpleExpression {
     If(SimpleIf),
     InfixOperation(SimpleInfixOperation),
+    Select(SimpleSelect),
     Call(SimpleCall),
     StructApplication(SimpleStructApplication),
     Identifier(Identifier),
@@ -84,6 +85,13 @@ pub struct SimplePrefixOperation {
 #[derive(Clone, Copy, Debug)]
 pub enum SimplePrefixOperator {
     Not,
+}
+
+#[derive(Debug, Node)]
+pub struct SimpleSelect {
+    pub left_hand_side: Box<SimpleExpression>,
+    pub right_hand_side: Identifier,
+    pub position: Position,
 }
 
 #[derive(Debug, Node)]

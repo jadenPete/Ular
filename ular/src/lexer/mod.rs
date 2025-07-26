@@ -357,6 +357,7 @@ fn lex_token(input: PositionedSource) -> IResult<PositionedSource, PositionedTok
             lex_identifier,
             // This needs to come after `lex_number` so signs aren't interpreted as operators
             lex_static_token("-", Token::Minus),
+            lex_static_token(".", Token::Select),
         )),
     ))(input)
 }

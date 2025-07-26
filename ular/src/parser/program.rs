@@ -60,6 +60,10 @@ pub trait Node {
 /// prefix_operation =
 ///     | '!' prefix_operation
 ///     | '-' prefix_operation
+///     | select;
+///
+/// select =
+///     | call '.' identifier
 ///     | call;
 ///
 /// call =
@@ -148,6 +152,7 @@ pub struct Block {
 pub enum Expression {
     If(If),
     InfixOperation(InfixOperation),
+    Select(Select),
     Call(Call),
     StructApplication(StructApplication),
     Identifier(Identifier),
@@ -229,6 +234,13 @@ pub struct PrefixOperation {
 pub enum PrefixOperator {
     Negate,
     Not,
+}
+
+#[derive(Debug, Node)]
+pub struct Select {
+    pub left_hand_side: Box<Expression>,
+    pub right_hand_side: Identifier,
+    pub position: Position,
 }
 
 #[derive(Debug, Node)]

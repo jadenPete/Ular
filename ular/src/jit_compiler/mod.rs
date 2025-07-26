@@ -11,8 +11,8 @@ use crate::{
     dependency_analyzer::analyzed_program::{
         AnalyzedBlock, AnalyzedCall, AnalyzedExpression, AnalyzedExpressionRef,
         AnalyzedFunctionDefinition, AnalyzedIf, AnalyzedInfixOperation, AnalyzedPrefixOperation,
-        AnalyzedProgram, AnalyzedStructApplication, AnalyzedStructDefinition, AnalyzedType,
-        AnalyzerTyped,
+        AnalyzedProgram, AnalyzedSelect, AnalyzedStructApplication, AnalyzedStructDefinition,
+        AnalyzedType, AnalyzerTyped,
     },
     error_reporting::{CompilationError, CompilationErrorMessage, InternalError, Position},
     jit_compiler::{
@@ -721,6 +721,72 @@ impl<'context> InlineExpression<'context> for CompilablePrefixOperation<'_> {
 }
 
 #[derive(Clone, Copy)]
+struct CompilableSelect<'a>(&'a AnalyzedSelect);
+
+impl<'context> InlineExpression<'context> for CompilableSelect<'_> {
+    fn compile(
+        &self,
+        compiler: &mut JitFunctionCompiler<'_, 'context>,
+        builder: &Builder<'context>,
+        scope: &mut JitCompilerScope<'_, 'context>,
+    ) -> Result<UlarValue<'context>, CompilationError> {
+        let struct_index = match self.0.left_hand_side.get_type() {
+            AnalyzedType::Struct(i) => i,
+            type_ => {
+                return Err(CompilationError {
+                    message: CompilationErrorMessage::InternalError(
+                        InternalError::JitCompilerExpectedStructType {
+                            actual_type: format!("{}", type_.display(compiler.struct_types)),
+                        },
+                    ),
+
+                    position: Some(self.0.get_position()),
+                })
+            }
+        };
+
+        let (struct_definition, struct_type) = compiler.struct_types[struct_index];
+        let struct_value_name = scope.get_local_name();
+        let struct_value = scope.get(
+            &self.0.left_hand_side,
+            struct_value_name,
+            compiler.context,
+            builder,
+            compiler.built_in_values,
+            compiler.execution_engine,
+            compiler.module,
+        )?;
+
+        let field_pointer_name = scope.get_local_name();
+        let field_pointer = builder
+            .build_struct_gep(
+                struct_type,
+                UlarStruct::try_from(struct_value)?.pointer,
+                self.0.field_index as u32,
+                &field_pointer_name.to_string(),
+            )
+            .unwrap();
+
+        let field_name = scope.get_local_name();
+        let field_type = &struct_definition.fields[self.0.field_index].type_;
+        let field = builder
+            .build_load(
+                field_type
+                    .inkwell_type(compiler.context)
+                    .ok_or_else(|| CompilationError {
+                        message: CompilationErrorMessage::UnitPassedAsValue,
+                        position: Some(self.0.get_position()),
+                    })?,
+                field_pointer,
+                &field_name.to_string(),
+            )
+            .unwrap();
+
+        UlarValue::from_basic_value(compiler.context, field_type, field, self.0.get_position())
+    }
+}
+
+#[derive(Clone, Copy)]
 struct CompilableStructApplication<'a>(&'a AnalyzedStructApplication);
 
 impl<'context> InlineExpression<'context> for CompilableStructApplication<'_> {
@@ -773,8 +839,10 @@ impl<'context> InlineExpression<'context> for CompilableStructApplication<'_> {
 
         for (i, field) in struct_definition.fields.iter().enumerate() {
             let field_pointer_name = scope.get_local_name();
-            let field_pointer = builder
-                .build_struct_gep(
+
+            // SAFETY: `i` is a valid index of the struct we're building
+            let field_pointer = unsafe {
+                builder.build_gep(
                     field
                         .type_
                         .inkwell_type(compiler.context)
@@ -783,10 +851,11 @@ impl<'context> InlineExpression<'context> for CompilableStructApplication<'_> {
                             position: Some(field.name.get_position()),
                         })?,
                     struct_pointer,
-                    i as u32,
+                    &[compiler.context.i64_type().const_int(i as u64, false)],
                     &field_pointer_name.to_string(),
                 )
-                .unwrap();
+            }
+            .unwrap();
 
             builder
                 .build_store::<BasicValueEnum>(
@@ -863,6 +932,7 @@ impl<'context> JitFunctionCompiler<'_, 'context> {
                 Box::new(CompilableInfixOperation(infix_operation))
             }
 
+            AnalyzedExpression::Select(select) => Box::new(CompilableSelect(select)),
             AnalyzedExpression::Call(call) => Box::new(CompilableCall(call)),
             AnalyzedExpression::StructApplication(struct_application) => {
                 Box::new(CompilableStructApplication(struct_application))

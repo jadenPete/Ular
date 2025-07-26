@@ -38,11 +38,20 @@ pub enum CompilationErrorMessage {
         name: String,
     },
 
+    StructEvadesScope {
+        struct_name: String,
+    },
+
     TypeMismatch {
         expected_type: String,
         actual_type: String,
     },
-    
+
+    UnknownField {
+        type_: String,
+        field: String,
+    },
+
     UnknownType {
         name: String,
     },
@@ -61,11 +70,13 @@ pub enum CompilationErrorMessage {
 impl Display for CompilationErrorMessage {
     fn fmt(&self, formatter: &mut Formatter) -> std::fmt::Result {
         match self {
-            Self::ExpectedNumericType { actual_type } => write!(
-                formatter,
-                "Expected a numeric value, but got one of type `{}`.",
-                actual_type
-            ),
+            Self::ExpectedNumericType { actual_type } => {
+                write!(
+                    formatter,
+                    "Expected a numeric value, but got one of type `{}`.",
+                    actual_type,
+                )
+            }
 
             Self::IncorrectNumberOfArguments { expected, actual } => {
                 let argument_word = if *expected == 1 {
@@ -118,7 +129,10 @@ impl Display for CompilationErrorMessage {
                 write!(
                     formatter,
                     "Expected a `{}`, but {} isn't between {} and {}.",
-                    expected_type, value, minimum, maximum,
+                    expected_type,
+                    value,
+                    minimum,
+                    maximum,
                 )
             }
 
@@ -130,35 +144,46 @@ impl Display for CompilationErrorMessage {
             } => {
                 write!(formatter, "The default numeric type is i32, but {} isn't between {} and {}. Consider using a different type.", value, minimum, maximum)
             }
-            
-            Self::StructAlreadyDefined { name } => write!(
-                formatter,
-                "A struct with name `{}` is already defined.",
-                name
-            ),
+
+            Self::StructAlreadyDefined { name } => {
+                write!(formatter, "A struct with name `{}` is already defined.", name)
+            }
+
+            Self::StructEvadesScope { struct_name } => {
+                write!(
+                    formatter,
+                    "A value of type `{}` evades the scope of `{}`.",
+                    struct_name,
+                    struct_name,
+                )
+            }
 
             Self::TypeMismatch {
                 expected_type,
                 actual_type,
-            } => write!(
-                formatter,
-                "Expected a value of type `{}`, but got one of type `{}`.",
-                expected_type, actual_type
-            ),
-            
+            } => {
+                write!(
+                    formatter,
+                    "Expected a value of type `{}`, but got one of type `{}`.",
+                    expected_type,
+                    actual_type,
+                )
+            }
+
+            Self::UnknownField { type_, field } => {
+                write!(formatter, "Type `{}` has no field named `{}`.", type_, field)
+            }
+
             Self::UnknownType { name } => write!(formatter, "Unknown type `{}`.", name),
             Self::UnknownValue { name } => write!(formatter, "Unknown value `{}`.", name),
             Self::UnitPassedAsValue => write!(formatter, "It looks like you're trying to pass around `unit` as a value. This isn't currently supported."),
-            Self::ValueNotCallable => write!(
-                formatter,
-                "This value can't be called because it isn't a function."
-            ),
+            Self::ValueNotCallable => {
+                write!(formatter, "This value can't be called because it isn't a function.")
+            }
 
-            Self::VariableAlreadyDefined { name } => write!(
-                formatter,
-                "A variable with name `{}` is already defined.",
-                name
-            ),
+            Self::VariableAlreadyDefined { name } => {
+                write!(formatter, "A variable with name `{}` is already defined.", name)
+            }
         }
     }
 }
@@ -167,7 +192,7 @@ pub enum InternalError {
     AnalyzerStructNotDefined {
         index: usize,
     },
-    
+
     AnalyzerFunctionNotDefined {
         index: usize,
     },
@@ -175,7 +200,11 @@ pub enum InternalError {
     JitCompilerExpectedNumericType {
         actual_type: String,
     },
-    
+
+    JitCompilerExpectedStructType {
+        actual_type: String,
+    },
+
     JitCompilerStructComparisonNotRewritten,
     JitCompilerTypeMismatch {
         expected_type: String,
@@ -193,7 +222,7 @@ pub enum InternalError {
     JitCompilerUnknownParameter {
         index: usize,
     },
-    
+
     UnknownType {
         name: String,
     },
@@ -216,33 +245,49 @@ impl Display for InternalError {
                     "The analyzer phase reserved struct {}, but didn't define it.",
                     index,
                 )
-            },
-            
+            }
+
             Self::AnalyzerFunctionNotDefined { index } => {
                 write!(
                     formatter,
                     "The analyzer phase reserved function {}, but didn't define it.",
                     index,
                 )
-            },
+            }
 
-            Self::JitCompilerExpectedNumericType { actual_type } => write!(
-                formatter,
-                "Expected a numeric value, but got one of type `{}`. This should've been caught by the typechecker.",
-                actual_type
-            ),
+            Self::JitCompilerExpectedNumericType { actual_type } => {
+                write!(
+                    formatter,
+                    "Expected a numeric value, but got one of type `{}`. This should've been caught by the typechecker.",
+                    actual_type,
+                )
+            }
 
-            Self::JitCompilerStructComparisonNotRewritten => write!(
-                formatter,
-                "This struct comparison should've been rewritten in the typechecking phase, but it wasn't.",
-            ),
-            
-            Self::JitCompilerTypeMismatch { expected_type, actual_value } => write!(
-                formatter,
-                "Attempted to coerce `{}` into a `{}`.",
+            Self::JitCompilerExpectedStructType { actual_type } => {
+                write!(
+                    formatter,
+                    "Expected a struct value, but got one of type `{}`. This should've been caught by the typechecker.",
+                    actual_type,
+                )
+            }
+
+            Self::JitCompilerStructComparisonNotRewritten => {
+                write!(
+                    formatter,
+                    "This struct comparison should've been rewritten in the typechecking phase, but it wasn't.",
+                )
+            }
+
+            Self::JitCompilerTypeMismatch {
+                expected_type,
                 actual_value,
-                expected_type
-            ),
+            } => {
+                write!(
+                    formatter,
+                    "Attempted to coerce `{}` into a `{}`.",
+                    actual_value, expected_type,
+                )
+            }
 
             Self::JitCompilerUnknownExpression { index } => {
                 write!(
@@ -267,24 +312,30 @@ impl Display for InternalError {
                     index,
                 )
             }
-            
-            Self::UnknownType { name } => write!(
-                formatter,
-                "Unknown type `{}`. This should've been caught by the typechecker.",
-                name
-            ),
 
-            Self::UnknownValue { name } => write!(
-                formatter,
-                "Unknown value `{}`. This should've been caught by the typechecker.",
-                name
-            ),
+            Self::UnknownType { name } => {
+                write!(
+                    formatter,
+                    "Unknown type `{}`. This should've been caught by the typechecker.",
+                    name,
+                )
+            }
 
-            Self::VariableAlreadyDefined { name } => write!(
-                formatter,
-                "A variable with name `{}` is already defined. This should've been caught by the typechecker.",
-                name
-            ),
+            Self::UnknownValue { name } => {
+                write!(
+                    formatter,
+                    "Unknown value `{}`. This should've been caught by the typechecker.",
+                    name,
+                )
+            }
+
+            Self::VariableAlreadyDefined { name } => {
+                write!(
+                    formatter,
+                    "A variable with name `{}` is already defined. This should've been caught by the typechecker.",
+                    name,
+                )
+            }
         }
     }
 }

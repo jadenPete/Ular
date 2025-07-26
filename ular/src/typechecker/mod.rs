@@ -15,7 +15,7 @@ use crate::{
     simplifier::simple_program::{
         SimpleBlock, SimpleCall, SimpleExpression, SimpleFunctionDefinition, SimpleIf,
         SimpleInfixOperation, SimplePrefixOperation, SimplePrefixOperator, SimpleProgram,
-        SimpleStatement, SimpleStructApplication, SimpleVariableDefinition,
+        SimpleSelect, SimpleStatement, SimpleStructApplication, SimpleVariableDefinition,
     },
     typechecker::{
         built_in_values::BuiltInValues,
@@ -23,8 +23,8 @@ use crate::{
         typed_program::{
             Typed, TypedBlock, TypedCall, TypedExpression, TypedFunctionDefinition,
             TypedIdentifier, TypedIf, TypedInfixOperation, TypedNumber, TypedPrefixOperation,
-            TypedProgram, TypedStatement, TypedStructApplication, TypedStructApplicationField,
-            TypedUnit, TypedVariableDefinition,
+            TypedProgram, TypedSelect, TypedStatement, TypedStructApplication,
+            TypedStructApplicationField, TypedUnit, TypedVariableDefinition,
         },
     },
 };
@@ -122,6 +122,10 @@ impl Typechecker<'_> {
                 Ok(TypedExpression::InfixOperation(
                     self.typecheck_infix_operation(infix_operation, suggested_type)?,
                 ))
+            }
+
+            SimpleExpression::Select(select) => {
+                Ok(TypedExpression::Select(self.typecheck_select(select)?))
             }
 
             SimpleExpression::Call(call) => Ok(TypedExpression::Call(self.typecheck_call(call)?)),
@@ -400,6 +404,49 @@ impl Typechecker<'_> {
             expression: Box::new(typechecked_expression),
             type_,
             position: prefix_operation.get_position(),
+        })
+    }
+
+    fn typecheck_select(&self, select: &SimpleSelect) -> Result<TypedSelect, CompilationError> {
+        let typechecked_left = self.typecheck_expression(&select.left_hand_side, None)?;
+        let left_type = typechecked_left.get_type();
+        let unknown_field_error = || CompilationError {
+            message: CompilationErrorMessage::UnknownField {
+                type_: format!("{}", left_type),
+                field: select.right_hand_side.value.clone(),
+            },
+
+            position: Some(select.get_position()),
+        };
+
+        let struct_name = if let Type::Identifier(ref struct_name) = left_type {
+            struct_name
+        } else {
+            return Err(unknown_field_error());
+        };
+
+        let struct_definition = self
+            .scope
+            .get_struct_definition(struct_name)
+            .ok_or_else(|| CompilationError {
+                message: CompilationErrorMessage::StructEvadesScope {
+                    struct_name: struct_name.clone(),
+                },
+                position: Some(select.get_position()),
+            })?;
+
+        let (field_index, field) = struct_definition
+            .fields
+            .iter()
+            .enumerate()
+            .find(|(_, field)| field.name.value == select.right_hand_side.value)
+            .ok_or_else(unknown_field_error)?;
+
+        Ok(TypedSelect {
+            left_hand_side: Box::new(typechecked_left),
+            field_index,
+            type_: field.type_.clone(),
+            position: select.get_position(),
         })
     }
 

@@ -53,6 +53,7 @@ impl Typed for TypedFunctionDefinition {
 pub enum TypedExpression {
     If(TypedIf),
     InfixOperation(TypedInfixOperation),
+    Select(TypedSelect),
     Call(TypedCall),
     StructApplication(TypedStructApplication),
     Identifier(TypedIdentifier),
@@ -100,6 +101,14 @@ pub struct TypedInfixOperation {
 pub struct TypedPrefixOperation {
     pub operator: SimplePrefixOperator,
     pub expression: Box<TypedExpression>,
+    pub type_: Type,
+    pub position: Position,
+}
+
+#[derive(Clone, Debug, Node, Typed)]
+pub struct TypedSelect {
+    pub left_hand_side: Box<TypedExpression>,
+    pub field_index: usize,
     pub type_: Type,
     pub position: Position,
 }

@@ -5,8 +5,8 @@ use crate::{
     parser::{
         program::{
             Block, Call, Expression, FunctionDefinition, If, InfixOperation, InfixOperator, Node,
-            Number, NumericInfixOperator, PrefixOperation, PrefixOperator, Program, Statement,
-            StructApplication, VariableDefinition,
+            Number, NumericInfixOperator, PrefixOperation, PrefixOperator, Program, Select,
+            Statement, StructApplication, VariableDefinition,
         },
         type_::Type,
     },
@@ -14,7 +14,7 @@ use crate::{
     simplifier::simple_program::{
         SimpleBlock, SimpleCall, SimpleExpression, SimpleFunctionDefinition, SimpleIf,
         SimpleInfixOperation, SimplePrefixOperation, SimplePrefixOperator, SimpleProgram,
-        SimpleStatement, SimpleStructApplication, SimpleStructApplicationField,
+        SimpleSelect, SimpleStatement, SimpleStructApplication, SimpleStructApplicationField,
         SimpleVariableDefinition,
     },
 };
@@ -58,6 +58,7 @@ fn simplify_expression(expression: &Expression) -> SimpleExpression {
             SimpleExpression::InfixOperation(simplify_infix_operation(infix_operation))
         }
 
+        Expression::Select(select) => SimpleExpression::Select(simplify_select(select)),
         Expression::Call(call) => SimpleExpression::Call(simplify_call(call)),
         Expression::StructApplication(struct_application) => {
             SimpleExpression::StructApplication(simplify_struct_application(struct_application))
@@ -189,6 +190,14 @@ fn simplify_program(program: &Program) -> SimpleProgram {
     SimpleProgram {
         statements: program.statements.iter().map(simplify_statement).collect(),
         position: program.get_position(),
+    }
+}
+
+fn simplify_select(select: &Select) -> SimpleSelect {
+    SimpleSelect {
+        left_hand_side: Box::new(simplify_expression(&select.left_hand_side)),
+        right_hand_side: select.right_hand_side.clone(),
+        position: select.get_position(),
     }
 }
 
