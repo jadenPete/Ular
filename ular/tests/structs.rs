@@ -231,3 +231,75 @@ seq {
 
     Ok(())
 }
+
+#[test]
+fn nested_structs_supported() -> anyhow::Result<()> {
+    let output = evaluate_program(
+        "\
+fn increment(n: i32): i32 {
+    struct Wrapper {
+        value: i32
+    }
+
+    wrapper = Wrapper {
+        value: n + 1
+    };
+
+    wrapper.value
+}
+
+println_i32(increment(1));
+",
+        true,
+    )?;
+
+    assert_eq!(output, "2\n");
+
+    Ok(())
+}
+
+#[test]
+fn structs_cannot_evade_scope() -> anyhow::Result<()> {
+    let output = evaluate_program(
+        "\
+fn flip(n: u8): u8 {
+    wrapper = if n > 0u8 {
+        struct Wrapper {
+            value: u8
+        }
+
+        Wrapper {
+            value: 0
+        }
+    } else {
+        struct Wrapper {
+            value: u8
+        }
+
+        Wrapper {
+            value: 1
+        }
+    };
+
+    wrapper.value
+}
+",
+        false,
+    )?;
+
+    assert_eq!(
+        output,
+        "\
+Error: A value of type `Wrapper` evades the scope of `Wrapper`.
+
+ 18 │     };
+ 19 │ 
+ 20 │     wrapper.value
+    │     ^^^^^^^^^^^^^
+ 21 │ }
+
+",
+    );
+
+    Ok(())
+}

@@ -11,6 +11,11 @@ pub struct CompilationError {
 }
 
 pub enum CompilationErrorMessage {
+    ExpectedFunctionResult {
+        function_name: String,
+        return_type: String,
+    },
+    
     ExpectedNumericType {
         actual_type: String,
     },
@@ -70,6 +75,15 @@ pub enum CompilationErrorMessage {
 impl Display for CompilationErrorMessage {
     fn fmt(&self, formatter: &mut Formatter) -> std::fmt::Result {
         match self {
+            Self::ExpectedFunctionResult { function_name, return_type } => {
+                write!(
+                    formatter,
+                    "Expected `{}` to return a value of type `{}`.",
+                    function_name,
+                    return_type,
+                )
+            }
+            
             Self::ExpectedNumericType { actual_type } => {
                 write!(
                     formatter,

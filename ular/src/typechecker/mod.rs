@@ -183,11 +183,29 @@ impl Typechecker<'_> {
             typechecker.typecheck_statements_with_hoisting(&definition.body.statements)?;
 
         let typechecked_result = match &definition.body.result {
-            Some(result) => Some(Box::new(
-                typechecker.typecheck_expression(result, Some(&definition.return_type))?,
-            )),
+            Some(result) => {
+                let typechecked_result =
+                    typechecker.typecheck_expression(result, Some(&definition.return_type))?;
 
-            None => None,
+                assert_type(&typechecked_result, &definition.return_type)?;
+
+                Some(Box::new(typechecked_result))
+            }
+
+            None => {
+                if definition.return_type != Type::Unit {
+                    return Err(CompilationError {
+                        message: CompilationErrorMessage::ExpectedFunctionResult {
+                            function_name: definition.name.value.clone(),
+                            return_type: format!("{}", definition.return_type),
+                        },
+
+                        position: Some(definition.get_position()),
+                    });
+                }
+
+                None
+            }
         };
 
         Ok(TypedFunctionDefinition {

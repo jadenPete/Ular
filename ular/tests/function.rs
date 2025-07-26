@@ -219,7 +219,7 @@ Error: Unknown value `forty_two`.
  5 │ }
  6 │ 
 
-"
+",
     );
 
     Ok(())
@@ -254,6 +254,49 @@ Error: Nested functions aren't currently supported.
  4 │     }
  5 │ 
  6 │     inner();
+
+",
+    );
+
+    Ok(())
+}
+
+#[test]
+fn function_return_values_typechecked() -> anyhow::Result<()> {
+    let output1 = evaluate_program(
+        "\
+fn the_meaning_of_life_the_universe_and_everything(): i32 {
+    42u8
+}
+",
+        false,
+    )?;
+
+    assert_eq!(
+        output1,
+        "\
+Error: Expected a value of type `i32`, but got one of type `u8`.
+
+ 1 │ fn the_meaning_of_life_the_universe_and_everything(): i32 {
+ 2 │     42u8
+   │     ^^^^
+ 3 │ }
+
+",
+    );
+
+    let output2 = evaluate_program(
+        "fn the_meaning_of_life_the_universe_and_everything(): i32 {}",
+        false,
+    )?;
+
+    assert_eq!(
+        output2,
+        "\
+Error: Expected `the_meaning_of_life_the_universe_and_everything` to return a value of type `i32`.
+
+ 1 │ fn the_meaning_of_life_the_universe_and_everything(): i32 {}
+   │ ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 "
     );
