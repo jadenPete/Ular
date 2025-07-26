@@ -345,7 +345,7 @@ pub struct Position(pub Range<usize>);
 
 fn print_numbered_lines(numbered_lines: &[(usize, String)]) {
     if let Some((last_line_number, _)) = numbered_lines.last() {
-        let maximum_line_length = format!("{}", last_line_number).len();
+        let maximum_line_length = format!("{}", last_line_number + 1).len();
 
         for (i, line) in numbered_lines {
             let mut line_lines = line.lines();
@@ -400,13 +400,12 @@ pub fn report_error(error: CompilationError, source: &str) -> ! {
             .unwrap_or(0);
 
         // The zero-based index of the last line the error matches
-        let end_line = start_line
-            + lines[start_line..]
-                .iter()
-                .enumerate()
-                .find(|(_, (line_index, _))| *line_index >= position.0.end)
-                .map(|(i, _)| i - 1)
-                .unwrap_or(0);
+        let end_line = lines[start_line..]
+            .iter()
+            .enumerate()
+            .find(|(_, (line_index, _))| *line_index >= position.0.end)
+            .map(|(i, _)| start_line + i - 1)
+            .unwrap_or(lines.len() - 1);
 
         let start_line_with_context = start_line.saturating_sub(CONTEXT_LINES);
         let end_line_with_context = (end_line + CONTEXT_LINES).min(lines.len() - 1);
@@ -438,7 +437,10 @@ pub fn report_error(error: CompilationError, source: &str) -> ! {
                 let line_with_marker = format!(
                     "{}\n{}{}",
                     line,
-                    " ".repeat(start_column),
+                    line[..start_column]
+                        .chars()
+                        .map(|character| if character == '\t' { '\t' } else { ' ' })
+                        .collect::<String>(),
                     "^".repeat(marker_length)
                 );
 
