@@ -434,7 +434,7 @@ impl Typechecker<'_> {
                 field: select.right_hand_side.value.clone(),
             },
 
-            position: Some(select.get_position()),
+            position: Some(select.right_hand_side.get_position()),
         };
 
         let struct_name = if let Type::Identifier(ref struct_name) = left_type {
@@ -590,6 +590,7 @@ impl Typechecker<'_> {
                             type_: struct_definition.name.value.clone(),
                             field: field.name.value.clone(),
                         },
+
                         position: Some(field.name.get_position()),
                     })?;
 

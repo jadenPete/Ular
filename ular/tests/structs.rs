@@ -169,7 +169,7 @@ fn select_typechecked() -> anyhow::Result<()> {
 Error: Type `i32` has no field named `a`.
 
  1 │ 0.a;
-   │ ^^^
+   │   ^
 
 ",
     );
@@ -192,12 +192,10 @@ Person {
         "\
 Error: Type `Person` has no field named `name`.
 
- 3 │ }
- 4 │ 
  5 │ Person {
-   │ ^^^^^^^^
  6 │     age: 21
  7 │ }.name;
+   │   ^^^^
 
 ",
     );

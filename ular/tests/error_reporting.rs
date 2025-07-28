@@ -32,7 +32,7 @@ Error: Type `Point` has no field named `z`.
  11 │ seq {
  12 │ 	println_i32(point.x);
  13 │ 	println_i32(point.z);
-    │ 	            ^^^^^^^
+    │ 	                  ^
  14 │ };
 
 "
