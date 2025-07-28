@@ -303,3 +303,54 @@ Error: A value of type `Wrapper` evades the scope of `Wrapper`.
 
     Ok(())
 }
+
+#[test]
+fn identifier_types_validated() -> anyhow::Result<()> {
+    let output1 = evaluate_program(
+        "\
+struct Person {
+    profession: Profession
+}
+",
+        false,
+    )?;
+
+    assert_eq!(output1, "Error: Unknown type `Profession`.\n");
+
+    let output2 = evaluate_program("fn coolest_person(): Person {}", false)?;
+
+    assert_eq!(output2, "Error: Unknown type `Person`.\n");
+
+    Ok(())
+}
+
+#[test]
+fn identifier_types_work() -> anyhow::Result<()> {
+    let output = evaluate_program(
+        "\
+struct Point {
+    x: i32,
+    y: i32
+}
+
+fn get_origin(): Point {
+    Point {
+        x: 0,
+        y: 0
+    }
+}
+
+origin = get_origin();
+
+seq {
+    println_i32(origin.x);
+    println_i32(origin.y);
+};
+",
+        true,
+    )?;
+
+    assert_eq!(output, "0\n0\n");
+
+    Ok(())
+}

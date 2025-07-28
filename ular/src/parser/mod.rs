@@ -215,6 +215,9 @@ fn parse_function_type(input: Tokens) -> IResult<Tokens, Type> {
 
 fn parse_primary_type(input: Tokens) -> IResult<Tokens, Type> {
     alt((
+        map(parse_identifier, |identifier| {
+            Type::Identifier(identifier.value)
+        }),
         map(parse_numeric_type, |numeric_type| {
             Type::Numeric(numeric_type)
         }),

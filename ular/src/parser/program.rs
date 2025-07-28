@@ -30,6 +30,7 @@ pub trait Node {
 ///     | primary_type;
 ///
 /// primary_type =
+///     | identifier
 ///     | numeric_type
 ///     | 'bool'
 ///     | 'unit';

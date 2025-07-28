@@ -652,6 +652,8 @@ impl Typechecker<'_> {
         Ok(())
     }
 
+    // TODO: Differentiate `Type` as an AST node vs. an internal representation of types and add a
+    // position to the former so `validate_type` can include it in the error
     fn validate_type(&self, type_: &Type) -> Result<(), CompilationError> {
         if let Type::Identifier(name) = type_ {
             if self.scope.get_struct_definition(name).is_none() {
