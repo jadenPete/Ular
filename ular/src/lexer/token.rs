@@ -69,6 +69,7 @@ use std::{
 /// PLUS = "+";
 /// MODULO = "%";
 /// TIMES = "*";
+/// PATH_SEPARATOR = "::";
 /// SEMICOLON = ";";
 /// TYPE_ANNOTATION = ":";
 ///
@@ -120,6 +121,7 @@ pub enum Token {
     Minus,
     Modulo,
     Times,
+    PathSeparator,
     Semicolon,
     TypeAnnotation,
     Identifier(String),

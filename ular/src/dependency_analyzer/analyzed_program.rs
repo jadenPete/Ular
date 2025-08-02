@@ -120,6 +120,7 @@ pub struct AnalyzedProgram {
 pub struct AnalyzedStructDefinition {
     pub name: Identifier,
     pub fields: Vec<AnalyzedStructDefinitionField>,
+    pub methods: Vec<AnalyzedFunctionDefinition>,
     pub position: Position,
 }
 
@@ -245,6 +246,13 @@ pub enum AnalyzedExpressionRef {
         position: Position,
     },
 
+    StructMethod {
+        struct_index: usize,
+        method_index: usize,
+        type_: AnalyzedType,
+        position: Position,
+    },
+
     Unit(AnalyzedUnit),
 }
 
@@ -309,6 +317,18 @@ impl AnalyzedExpressionRef {
 
             Self::Parameter { index, type_, .. } => Self::Parameter {
                 index: *index,
+                type_: type_.clone(),
+                position,
+            },
+
+            Self::StructMethod {
+                struct_index,
+                method_index,
+                type_,
+                ..
+            } => Self::StructMethod {
+                struct_index: *struct_index,
+                method_index: *method_index,
                 type_: type_.clone(),
                 position,
             },

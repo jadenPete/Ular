@@ -57,6 +57,11 @@ pub enum CompilationErrorMessage {
         field: String,
     },
 
+    UnknownMethod {
+        type_: String,
+        method: String,
+    },
+
     UnknownType {
         name: String,
     },
@@ -188,6 +193,10 @@ impl Display for CompilationErrorMessage {
                 write!(formatter, "Type `{}` has no field named `{}`.", type_, field)
             }
 
+            Self::UnknownMethod { type_, method } => {
+                write!(formatter, "Type `{}` has no method named `{}`.", type_, method)
+            }
+
             Self::UnknownType { name } => write!(formatter, "Unknown type `{}`.", name),
             Self::UnknownValue { name } => write!(formatter, "Unknown value `{}`.", name),
             Self::UnitPassedAsValue => write!(formatter, "It looks like you're trying to pass around `unit` as a value. This isn't currently supported."),
@@ -235,6 +244,11 @@ pub enum InternalError {
 
     JitCompilerUnknownParameter {
         index: usize,
+    },
+
+    JitCompilerUnknownStructMethod {
+        struct_index: usize,
+        method_index: usize,
     },
 
     UnknownType {
@@ -324,6 +338,15 @@ impl Display for InternalError {
                     formatter,
                     "JIT compiler has no value for the function parameter with index {}.",
                     index,
+                )
+            }
+
+            Self::JitCompilerUnknownStructMethod { struct_index, method_index } => {
+                write!(
+                    formatter,
+                    "JIT compiler has no value for struct method with struct index {} and method index {}.",
+                    struct_index,
+                    method_index,
                 )
             }
 

@@ -1,8 +1,10 @@
 use crate::{
     error_reporting::Position,
     parser::{
-        program::{Identifier, InfixOperator, Node, Number, Parameter, StructDefinition, Unit},
-        type_::Type,
+        program::{
+            Identifier, InfixOperator, Node, Number, Parameter, Path, StructDefinitionField, Unit,
+        },
+        type_::{FunctionType, Type},
     },
 };
 use ular_derive::Node;
@@ -15,11 +17,19 @@ pub struct SimpleProgram {
 
 #[derive(Debug, Node)]
 pub enum SimpleStatement {
-    StructDefinition(StructDefinition),
+    StructDefinition(SimpleStructDefinition),
     VariableDefinition(SimpleVariableDefinition),
     FunctionDefinition(SimpleFunctionDefinition),
     Expression(SimpleExpression),
     NoOp { position: Position },
+}
+
+#[derive(Debug, Node)]
+pub struct SimpleStructDefinition {
+    pub name: Identifier,
+    pub fields: Vec<StructDefinitionField>,
+    pub methods: Vec<SimpleFunctionDefinition>,
+    pub position: Position,
 }
 
 #[derive(Debug, Node)]
@@ -38,6 +48,20 @@ pub struct SimpleFunctionDefinition {
     pub position: Position,
 }
 
+impl SimpleFunctionDefinition {
+    pub fn reference_type(&self) -> Type {
+        Type::Function(FunctionType {
+            parameters: self
+                .parameters
+                .iter()
+                .map(|parameter| parameter.type_.clone())
+                .collect(),
+
+            return_type: Box::new(self.return_type.clone()),
+        })
+    }
+}
+
 #[derive(Debug, Node)]
 pub struct SimpleBlock {
     pub statements: Vec<SimpleStatement>,
@@ -52,6 +76,7 @@ pub enum SimpleExpression {
     Select(SimpleSelect),
     Call(SimpleCall),
     StructApplication(SimpleStructApplication),
+    Path(Path),
     Identifier(Identifier),
     Number(Number),
     PrefixOperation(SimplePrefixOperation),

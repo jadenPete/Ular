@@ -8,7 +8,7 @@ use crate::{
         program::{
             Block, Call, ElseClause, ElseIfClause, Expression, FunctionDefinition, Identifier, If,
             InfixOperation, InfixOperator, LogicalInfixOperator, Number, NumericInfixOperator,
-            Parameter, PrefixOperation, PrefixOperator, Program, Select, Statement,
+            Parameter, Path, PrefixOperation, PrefixOperator, Program, Select, Statement,
             StructApplication, StructApplicationField, StructDefinition, StructDefinitionField,
             Unit, UniversalInfixOperator, VariableDefinition,
         },
@@ -16,14 +16,13 @@ use crate::{
     },
     phase::Phase,
 };
-
 use nom::{
     branch::alt,
     combinator::{consumed, eof, map, opt},
     error::{ErrorKind, ParseError},
     multi::{many0, many1, separated_list0, separated_list1},
-    sequence::{delimited, tuple},
-    IResult, InputIter, Parser, Slice,
+    sequence::{delimited, preceded, terminated, tuple},
+    IResult, InputIter, Offset, Parser, Slice,
 };
 use program::Node;
 
@@ -77,15 +76,9 @@ fn parse_program(input: Tokens) -> IResult<Tokens, Program> {
 
 fn parse_statement(input: Tokens) -> IResult<Tokens, Statement> {
     alt((
-        map(parse_struct_definition, |definition| {
-            Statement::StructDefinition(definition)
-        }),
-        map(parse_variable_definition, |definition| {
-            Statement::VariableDefinition(definition)
-        }),
-        map(parse_function_definition, |definition| {
-            Statement::FunctionDefinition(definition)
-        }),
+        map(parse_struct_definition, Statement::StructDefinition),
+        map(parse_variable_definition, Statement::VariableDefinition),
+        map(parse_function_definition, Statement::FunctionDefinition),
         map(
             tuple((parse_expression, parse_token(Token::Semicolon))),
             |(expression, _)| Statement::Expression(expression),
@@ -98,31 +91,110 @@ fn parse_statement(input: Tokens) -> IResult<Tokens, Statement> {
 }
 
 fn parse_struct_definition(input: Tokens) -> IResult<Tokens, StructDefinition> {
-    map(
-        positioned(tuple((
-            parse_token(Token::StructKeyword),
-            parse_identifier,
-            parse_token(Token::LeftCurlyBracket),
-            separated_list1(parse_token(Token::Comma), parse_struct_definition_field),
-            parse_token(Token::RightCurlyBracket),
-        ))),
-        |(position, (_, name, _, fields, _))| StructDefinition {
+    let (advanced, _) = parse_token(Token::StructKeyword)(input)?;
+    let (advanced, name) = parse_identifier(advanced)?;
+    let (advanced, _) = parse_token(Token::LeftCurlyBracket)(advanced)?;
+    let (advanced, fields) = many1(map(
+        tuple((parse_struct_definition_field, parse_token(Token::Semicolon))),
+        |(field, _)| field,
+    ))(advanced)?;
+
+    let (advanced, methods) = many0(parse_struct_method(&name.value))(advanced)?;
+    let (advanced, _) = parse_token(Token::RightCurlyBracket)(advanced)?;
+    let position = input.slice(..input.offset(&advanced)).get_position();
+
+    Ok((
+        advanced,
+        StructDefinition {
             name,
             fields,
+            methods,
+            position,
+        },
+    ))
+}
+
+fn parse_struct_definition_field(input: Tokens) -> IResult<Tokens, StructDefinitionField> {
+    map(
+        positioned(tuple((
+            parse_identifier,
+            parse_token(Token::TypeAnnotation),
+            parse_type,
+        ))),
+        |(position, (name, _, type_))| StructDefinitionField {
+            name,
+            type_,
             position,
         },
     )(input)
 }
 
-fn parse_struct_definition_field(input: Tokens) -> IResult<Tokens, StructDefinitionField> {
-    map(
-        tuple((
-            parse_identifier,
-            parse_token(Token::TypeAnnotation),
-            parse_type,
-        )),
-        |(name, _, type_)| StructDefinitionField { name, type_ },
-    )(input)
+fn parse_struct_method(
+    struct_name: &str,
+) -> impl for<'a> FnMut(Tokens<'a>) -> IResult<Tokens<'a>, FunctionDefinition> + '_ {
+    move |tokens| {
+        map(
+            positioned(tuple((
+                parse_token(Token::FnKeyword),
+                parse_identifier,
+                parse_token(Token::LeftParenthesis),
+                alt((
+                    map(
+                        terminated(
+                            opt(tuple((
+                                positioned(parse_token(Token::Identifier(String::from("self")))),
+                                many0(preceded(parse_token(Token::Comma), parse_parameter)),
+                            ))),
+                            parse_token(Token::RightParenthesis),
+                        ),
+                        |parameters| match parameters {
+                            Some(((head_position, _), tail)) => std::iter::once(Parameter {
+                                name: Identifier {
+                                    value: String::from("self"),
+                                    position: head_position.clone(),
+                                },
+
+                                type_: Type::Identifier(String::from(struct_name)),
+                                position: head_position,
+                            })
+                            .chain(tail)
+                            .collect(),
+
+                            None => Vec::new(),
+                        },
+                    ),
+                    terminated(
+                        separated_list0(parse_token(Token::Comma), parse_parameter),
+                        /*
+                         * If we don't duplicate the parsing of the right parenthesis, then
+                         * something like this will fail to parse:
+                         * ```
+                         * fn foo(self: Foo) {}
+                         * ```
+                         *
+                         * This is because the first branch of the `alt` will parse successfully, but
+                         * when the right parenthesis fails to parse (due to `self` being followed by
+                         * `: Foo`, not `)`, the parser won't be smart enough to backtrack and
+                         * re-parse `self: Foo` as an ordinary parameter.
+                         */
+                        parse_token(Token::RightParenthesis),
+                    ),
+                )),
+                opt(map(
+                    tuple((parse_token(Token::TypeAnnotation), parse_type)),
+                    |(_, return_type)| return_type,
+                )),
+                parse_block,
+            ))),
+            |(position, (_, name, _, parameters, return_type, body))| FunctionDefinition {
+                name,
+                parameters,
+                return_type,
+                body,
+                position,
+            },
+        )(tokens)
+    }
 }
 
 fn parse_variable_definition(input: Tokens) -> IResult<Tokens, VariableDefinition> {
@@ -218,9 +290,7 @@ fn parse_primary_type(input: Tokens) -> IResult<Tokens, Type> {
         map(parse_identifier, |identifier| {
             Type::Identifier(identifier.value)
         }),
-        map(parse_numeric_type, |numeric_type| {
-            Type::Numeric(numeric_type)
-        }),
+        map(parse_numeric_type, Type::Numeric),
         map(parse_token(Token::BoolType), |_| Type::Bool),
         map(parse_token(Token::UnitType), |_| Type::Unit),
     ))(input)
@@ -528,12 +598,9 @@ fn parse_if(input: Tokens) -> IResult<Tokens, Expression> {
 
 fn parse_primary(input: Tokens) -> IResult<Tokens, Expression> {
     alt((
-        map(parse_struct_application, |application| {
-            Expression::StructApplication(application)
-        }),
-        map(parse_identifier, |identifier| {
-            Expression::Identifier(identifier)
-        }),
+        map(parse_struct_application, Expression::StructApplication),
+        map(parse_path, Expression::Path),
+        map(parse_identifier, Expression::Identifier),
         map(parse_number, Expression::Number),
         map(positioned(parse_token(Token::UnitType)), |(position, _)| {
             Expression::Unit(Unit { position })
@@ -543,9 +610,7 @@ fn parse_primary(input: Tokens) -> IResult<Tokens, Expression> {
             parse_expression,
             parse_token(Token::RightParenthesis),
         ),
-        map(parse_sequential_block, |block| {
-            Expression::SequentialBlock(block)
-        }),
+        map(parse_sequential_block, Expression::SequentialBlock),
     ))(input)
 }
 
@@ -573,6 +638,21 @@ fn parse_struct_application_field(input: Tokens) -> IResult<Tokens, StructApplic
             parse_expression,
         )),
         |(name, _, value)| StructApplicationField { name, value },
+    )(input)
+}
+
+fn parse_path(input: Tokens) -> IResult<Tokens, Path> {
+    map(
+        positioned(tuple((
+            parse_identifier,
+            parse_token(Token::PathSeparator),
+            parse_identifier,
+        ))),
+        |(position, (left_hand_side, _, right_hand_side))| Path {
+            left_hand_side,
+            right_hand_side,
+            position,
+        },
     )(input)
 }
 

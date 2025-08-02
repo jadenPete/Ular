@@ -1,7 +1,7 @@
 use crate::{
     error_reporting::Position,
     parser::{
-        program::{Identifier, InfixOperator, Node, StructDefinition},
+        program::{Identifier, InfixOperator, Node, StructDefinitionField},
         type_::{FunctionType, NumericType, Type},
     },
     simplifier::simple_program::SimplePrefixOperator,
@@ -20,11 +20,19 @@ pub struct TypedProgram {
 
 #[derive(Clone, Debug, Node)]
 pub enum TypedStatement {
-    StructDefinition(StructDefinition),
+    StructDefinition(TypedStructDefinition),
     VariableDefinition(TypedVariableDefinition),
     FunctionDefinition(TypedFunctionDefinition),
     Expression(TypedExpression),
     NoOp { position: Position },
+}
+
+#[derive(Clone, Debug, Node)]
+pub struct TypedStructDefinition {
+    pub name: Identifier,
+    pub fields: Vec<StructDefinitionField>,
+    pub methods: Vec<TypedFunctionDefinition>,
+    pub position: Position,
 }
 
 #[derive(Clone, Debug, Node)]
@@ -56,6 +64,7 @@ pub enum TypedExpression {
     Select(TypedSelect),
     Call(TypedCall),
     StructApplication(TypedStructApplication),
+    Path(TypedPath),
     Identifier(TypedIdentifier),
     Number(TypedNumber),
     PrefixOperation(TypedPrefixOperation),
@@ -132,6 +141,14 @@ impl Typed for TypedStructApplication {
     fn get_type(&self) -> Type {
         Type::Identifier(self.name.value.clone())
     }
+}
+
+#[derive(Clone, Debug, Node, Typed)]
+pub struct TypedPath {
+    pub left_hand_side: Identifier,
+    pub method_index: usize,
+    pub type_: Type,
+    pub position: Position,
 }
 
 #[derive(Clone, Debug)]

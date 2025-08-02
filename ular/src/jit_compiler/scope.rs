@@ -2,10 +2,17 @@ use crate::{
     data_structures::number_map::NumberMap,
     dependency_analyzer::analyzed_program::AnalyzedExpressionRef,
     error_reporting::{CompilationError, CompilationErrorMessage, InternalError},
-    jit_compiler::{built_in_values::BuiltInValues, module::UlarModule, value::UlarValue},
+    jit_compiler::{
+        built_in_values::BuiltInValues,
+        module::UlarModule,
+        value::{UlarFunction, UlarValue},
+    },
 };
 use inkwell::{
-    builder::Builder, context::Context, execution_engine::ExecutionEngine, values::PointerValue,
+    builder::Builder,
+    context::Context,
+    execution_engine::ExecutionEngine,
+    values::{FunctionValue, PointerValue},
 };
 use std::{
     cmp::Eq,
@@ -14,7 +21,6 @@ use std::{
 
 pub struct JitCompilerScope<'a, 'context> {
     parent: Option<&'a JitCompilerScope<'a, 'context>>,
-    function_values: &'a [UlarValue<'context>],
     parameter_values: Option<&'a [UlarValue<'context>]>,
     next_local_name: LocalName,
     expression_values: NumberMap<UlarValue<'context>>,
@@ -35,6 +41,7 @@ impl<'a, 'context> JitCompilerScope<'a, 'context> {
         &self,
         reference: &AnalyzedExpressionRef,
         local_name: LocalName,
+        scope_context: &JitCompilerScopeContext<'context>,
         context: &'context Context,
         builder: &Builder<'context>,
         built_in_values: &mut BuiltInValues<'context>,
@@ -50,11 +57,12 @@ impl<'a, 'context> JitCompilerScope<'a, 'context> {
                 .get_expression(*index)
                 .ok_or(InternalError::JitCompilerUnknownExpression { index: *index }),
 
-            AnalyzedExpressionRef::Function { index, .. } => match self.function_values.get(*index)
-            {
-                Some(value) => Ok(*value),
-                None => Err(InternalError::JitCompilerUnknownFunction { index: *index }),
-            },
+            AnalyzedExpressionRef::Function { index, .. } => {
+                match scope_context.function_values.get(*index) {
+                    Some(value) => Ok(UlarValue::Function(UlarFunction::DirectReference(*value))),
+                    None => Err(InternalError::JitCompilerUnknownFunction { index: *index }),
+                }
+            }
 
             AnalyzedExpressionRef::Parameter { index, .. } => self
                 .parameter_values
@@ -67,6 +75,24 @@ impl<'a, 'context> JitCompilerScope<'a, 'context> {
                     .inkwell_type(context)
                     .const_int(number.value as u64, number.type_.is_signed()),
             )),
+
+            AnalyzedExpressionRef::StructMethod {
+                struct_index,
+                method_index,
+                ..
+            } => {
+                match scope_context
+                    .struct_method_values
+                    .get(*struct_index)
+                    .and_then(|method_values| method_values.get(*method_index))
+                {
+                    Some(value) => Ok(UlarValue::Function(UlarFunction::DirectReference(*value))),
+                    None => Err(InternalError::JitCompilerUnknownStructMethod {
+                        struct_index: *struct_index,
+                        method_index: *method_index,
+                    }),
+                }
+            }
 
             AnalyzedExpressionRef::Unit(_) => Ok(UlarValue::Unit),
         }
@@ -110,7 +136,6 @@ impl<'a, 'context> JitCompilerScope<'a, 'context> {
     ) -> Self {
         Self {
             parent: Some(parent),
-            function_values: parent.function_values,
             parameter_values,
             next_local_name: parent.next_local_name,
             expression_values: NumberMap::new(offset),
@@ -119,19 +144,22 @@ impl<'a, 'context> JitCompilerScope<'a, 'context> {
     }
 
     pub fn new_without_parent(
-        function_values: &'a [UlarValue<'context>],
         parameter_values: Option<&'a [UlarValue<'context>]>,
         worker: PointerValue<'context>,
     ) -> Self {
         Self {
             parent: None,
-            function_values,
             parameter_values,
             next_local_name: LocalName(0),
             expression_values: NumberMap::new(0),
             worker,
         }
     }
+}
+
+pub struct JitCompilerScopeContext<'a> {
+    pub function_values: Vec<FunctionValue<'a>>,
+    pub struct_method_values: Vec<Vec<FunctionValue<'a>>>,
 }
 
 #[derive(Clone, Copy, Eq, Hash, PartialEq)]

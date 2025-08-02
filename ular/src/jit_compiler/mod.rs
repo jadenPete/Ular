@@ -9,17 +9,16 @@ use std::collections::HashMap;
 use crate::{
     data_structures::graph::DirectedGraph,
     dependency_analyzer::analyzed_program::{
-        AnalyzedBlock, AnalyzedCall, AnalyzedExpression, AnalyzedExpressionRef,
-        AnalyzedFunctionDefinition, AnalyzedIf, AnalyzedInfixOperation, AnalyzedPrefixOperation,
-        AnalyzedProgram, AnalyzedSelect, AnalyzedStructApplication, AnalyzedStructDefinition,
-        AnalyzedType, AnalyzerTyped,
+        AnalyzedBlock, AnalyzedCall, AnalyzedExpression, AnalyzedFunctionDefinition, AnalyzedIf,
+        AnalyzedInfixOperation, AnalyzedPrefixOperation, AnalyzedProgram, AnalyzedSelect,
+        AnalyzedStructApplication, AnalyzedStructDefinition, AnalyzedType, AnalyzerTyped,
     },
     error_reporting::{CompilationError, CompilationErrorMessage, InternalError, Position},
     jit_compiler::{
         built_in_values::BuiltInValues,
         fork_function_cache::ForkFunctionCache,
         module::UlarModule,
-        scope::JitCompilerScope,
+        scope::{JitCompilerScope, JitCompilerScopeContext},
         value::{UlarFunction, UlarStruct, UlarValue},
     },
     parser::program::{
@@ -127,6 +126,7 @@ impl<'context> CompilableCall<'_> {
             .get(
                 &self.0.function,
                 function_name,
+                compiler.scope_context,
                 compiler.context,
                 builder,
                 compiler.built_in_values,
@@ -143,6 +143,7 @@ impl<'context> CompilableCall<'_> {
             arguments.push(scope.get(
                 argument_reference,
                 name,
+                compiler.scope_context,
                 compiler.context,
                 builder,
                 compiler.built_in_values,
@@ -360,6 +361,7 @@ impl<'context> ForkedExpression<'context> for ForkedCall<'_, 'context> {
         if_none_builder
             .build_unconditional_branch(end_block)
             .unwrap();
+
         builder.position_at_end(end_block);
 
         let result_name = scope.get_local_name();
@@ -392,6 +394,7 @@ impl<'context> InlineExpression<'context> for CompilableIf<'_> {
         let condition = scope.get(
             &self.0.condition,
             condition_name,
+            compiler.scope_context,
             compiler.context,
             builder,
             compiler.built_in_values,
@@ -639,6 +642,7 @@ impl<'context> InlineExpression<'context> for CompilableInfixOperation<'_> {
         let left_value = scope.get(
             &self.0.left,
             left_name,
+            compiler.scope_context,
             compiler.context,
             builder,
             compiler.built_in_values,
@@ -650,6 +654,7 @@ impl<'context> InlineExpression<'context> for CompilableInfixOperation<'_> {
         let right_value = scope.get(
             &self.0.right,
             right_name,
+            compiler.scope_context,
             compiler.context,
             builder,
             compiler.built_in_values,
@@ -698,6 +703,7 @@ impl<'context> InlineExpression<'context> for CompilablePrefixOperation<'_> {
         let expression = scope.get(
             &self.0.expression,
             expression_name,
+            compiler.scope_context,
             compiler.context,
             builder,
             compiler.built_in_values,
@@ -750,6 +756,7 @@ impl<'context> InlineExpression<'context> for CompilableSelect<'_> {
         let struct_value = scope.get(
             &self.0.left_hand_side,
             struct_value_name,
+            compiler.scope_context,
             compiler.context,
             builder,
             compiler.built_in_values,
@@ -827,6 +834,7 @@ impl<'context> InlineExpression<'context> for CompilableStructApplication<'_> {
                     scope.get(
                         &field.value,
                         field_value_name,
+                        compiler.scope_context,
                         compiler.context,
                         builder,
                         compiler.built_in_values,
@@ -878,6 +886,7 @@ struct JitFunctionCompiler<'a, 'context> {
     execution_engine: &'a ExecutionEngine<'context>,
     fork_function_cache: &'a mut ForkFunctionCache<'context>,
     module: &'a mut UlarModule<'context>,
+    scope_context: &'a JitCompilerScopeContext<'context>,
     struct_types: &'a [(&'a AnalyzedStructDefinition, StructType<'context>)],
     function: FunctionValue<'context>,
 }
@@ -907,6 +916,7 @@ impl<'context> JitFunctionCompiler<'_, 'context> {
                     child_scope.get(
                         result_reference,
                         result_name,
+                        self.scope_context,
                         self.context,
                         builder,
                         self.built_in_values,
@@ -1021,27 +1031,10 @@ impl<'context> JitFunctionCompiler<'_, 'context> {
 
     fn compile_function_definition(
         &mut self,
-        builder: &Builder<'context>,
         scope: &mut JitCompilerScope<'_, 'context>,
-        i: usize,
         definition: &AnalyzedFunctionDefinition,
+        function: FunctionValue<'context>,
     ) -> Result<(), CompilationError> {
-        let local_name = scope.get_local_name();
-        let ular_function = UlarFunction::try_from(scope.get(
-            &AnalyzedExpressionRef::Function {
-                index: i,
-                type_: AnalyzedType::Function(definition.type_.clone()),
-                position: definition.get_position(),
-            },
-            local_name,
-            self.context,
-            builder,
-            self.built_in_values,
-            self.execution_engine,
-            self.module,
-        )?)?;
-
-        let function = ular_function.try_into()?;
         let entry_block = self.context.append_basic_block(function, "entry");
         let worker_parameter = function.get_first_param().unwrap().into_pointer_value();
         let mut parameter_values = Vec::new();
@@ -1068,6 +1061,7 @@ impl<'context> JitFunctionCompiler<'_, 'context> {
             execution_engine: self.execution_engine,
             fork_function_cache: self.fork_function_cache,
             module: self.module,
+            scope_context: self.scope_context,
             struct_types: self.struct_types,
             function,
         };
@@ -1093,6 +1087,7 @@ impl<'context> JitFunctionCompiler<'_, 'context> {
                 BasicValueEnum::try_from(function_scope.get(
                     result_reference,
                     result_name,
+                    self.scope_context,
                     self.context,
                     &function_builder,
                     self.built_in_values,
@@ -1186,38 +1181,89 @@ fn compile_main_function<'a>(
 
     builder.position_at_end(main_entry_block);
 
-    let mut function_values = Vec::new();
+    let struct_method_values = program
+        .structs
+        .iter()
+        .map(|struct_definition| {
+            struct_definition
+                .methods
+                .iter()
+                .map(|method_definition| {
+                    let function_type =
+                        method_definition
+                            .type_
+                            .inkwell_type(context)
+                            .ok_or_else(|| CompilationError {
+                                message: CompilationErrorMessage::UnitPassedAsValue,
+                                position: Some(method_definition.get_position()),
+                            })?;
 
-    for definition in &program.functions {
-        let function_type =
-            definition
-                .type_
-                .inkwell_type(context)
-                .ok_or_else(|| CompilationError {
-                    message: CompilationErrorMessage::UnitPassedAsValue,
-                    position: Some(definition.get_position()),
-                })?;
+                    let function_name = format!(
+                        "{}_{}",
+                        struct_definition.name.value, method_definition.name.value
+                    );
 
-        let function = module
-            .underlying
-            .add_function(&definition.name.value, function_type, None);
+                    Ok(module
+                        .underlying
+                        .add_function(&function_name, function_type, None))
+                })
+                .collect::<Result<_, _>>()
+        })
+        .collect::<Result<_, _>>()?;
 
-        function_values.push(UlarValue::Function(UlarFunction::DirectReference(function)));
-    }
+    let function_values = program
+        .functions
+        .iter()
+        .map(|definition| {
+            let function_type =
+                definition
+                    .type_
+                    .inkwell_type(context)
+                    .ok_or_else(|| CompilationError {
+                        message: CompilationErrorMessage::UnitPassedAsValue,
+                        position: Some(definition.get_position()),
+                    })?;
 
-    let mut scope = JitCompilerScope::new_without_parent(&function_values, None, worker);
+            Ok(module
+                .underlying
+                .add_function(&definition.name.value, function_type, None))
+        })
+        .collect::<Result<_, _>>()?;
+
+    let scope_context = JitCompilerScopeContext {
+        function_values,
+        struct_method_values,
+    };
+
+    let mut scope = JitCompilerScope::new_without_parent(None, worker);
     let mut function_compiler = JitFunctionCompiler {
         built_in_values,
         context,
         execution_engine,
         fork_function_cache,
         module,
+        scope_context: &scope_context,
         struct_types: &struct_types,
         function: main_function,
     };
 
-    for (i, definition) in program.functions.iter().enumerate() {
-        function_compiler.compile_function_definition(builder, &mut scope, i, definition)?;
+    for (struct_definition, method_values) in program
+        .structs
+        .iter()
+        .zip(&scope_context.struct_method_values)
+    {
+        for (method_definition, method_value) in struct_definition.methods.iter().zip(method_values)
+        {
+            function_compiler.compile_function_definition(
+                &mut scope,
+                method_definition,
+                *method_value,
+            )?;
+        }
+    }
+
+    for (definition, value) in program.functions.iter().zip(&scope_context.function_values) {
+        function_compiler.compile_function_definition(&mut scope, definition, *value)?;
     }
 
     function_compiler.compile_expression_graph(builder, &mut scope, &program.expression_graph)?;

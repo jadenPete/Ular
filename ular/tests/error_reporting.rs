@@ -7,8 +7,8 @@ fn tabs_are_supported() -> anyhow::Result<()> {
     let output = evaluate_program(
         "\
 struct Point {
-	x: i32,
-	y: i32
+	x: i32;
+	y: i32;
 }
 
 point = Point {

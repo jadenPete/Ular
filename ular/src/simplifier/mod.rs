@@ -6,7 +6,7 @@ use crate::{
         program::{
             Block, Call, Expression, FunctionDefinition, If, InfixOperation, InfixOperator, Node,
             Number, NumericInfixOperator, PrefixOperation, PrefixOperator, Program, Select,
-            Statement, StructApplication, VariableDefinition,
+            Statement, StructApplication, StructDefinition, VariableDefinition,
         },
         type_::Type,
     },
@@ -15,7 +15,7 @@ use crate::{
         SimpleBlock, SimpleCall, SimpleExpression, SimpleFunctionDefinition, SimpleIf,
         SimpleInfixOperation, SimplePrefixOperation, SimplePrefixOperator, SimpleProgram,
         SimpleSelect, SimpleStatement, SimpleStructApplication, SimpleStructApplicationField,
-        SimpleVariableDefinition,
+        SimpleStructDefinition, SimpleVariableDefinition,
     },
 };
 
@@ -64,6 +64,7 @@ fn simplify_expression(expression: &Expression) -> SimpleExpression {
             SimpleExpression::StructApplication(simplify_struct_application(struct_application))
         }
 
+        Expression::Path(path) => SimpleExpression::Path(path.clone()),
         Expression::Identifier(identifier) => SimpleExpression::Identifier(identifier.clone()),
         Expression::Number(number) => SimpleExpression::Number(number.clone()),
         Expression::PrefixOperation(prefix_operation) => {
@@ -208,7 +209,7 @@ fn simplify_statement(statement: &Statement) -> SimpleStatement {
         }
 
         Statement::StructDefinition(definition) => {
-            SimpleStatement::StructDefinition(definition.clone())
+            SimpleStatement::StructDefinition(simplify_struct_definition(definition))
         }
 
         Statement::FunctionDefinition(definition) => {
@@ -237,6 +238,20 @@ fn simplify_struct_application(struct_application: &StructApplication) -> Simple
             })
             .collect(),
         position: struct_application.get_position(),
+    }
+}
+
+fn simplify_struct_definition(definition: &StructDefinition) -> SimpleStructDefinition {
+    SimpleStructDefinition {
+        name: definition.name.clone(),
+        fields: definition.fields.clone(),
+        methods: definition
+            .methods
+            .iter()
+            .map(simplify_function_definition)
+            .collect(),
+
+        position: definition.get_position(),
     }
 }
 

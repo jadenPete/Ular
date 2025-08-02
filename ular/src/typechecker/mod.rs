@@ -6,7 +6,7 @@ use crate::{
     error_reporting::{CompilationError, CompilationErrorMessage},
     parser::{
         program::{
-            Identifier, InfixOperator, Node, Number, NumericInfixOperator, StructDefinition, Unit,
+            Identifier, InfixOperator, Node, Number, NumericInfixOperator, Path, Unit,
             UniversalInfixOperator,
         },
         type_::{FunctionType, NumericType, Type},
@@ -15,16 +15,18 @@ use crate::{
     simplifier::simple_program::{
         SimpleBlock, SimpleCall, SimpleExpression, SimpleFunctionDefinition, SimpleIf,
         SimpleInfixOperation, SimplePrefixOperation, SimplePrefixOperator, SimpleProgram,
-        SimpleSelect, SimpleStatement, SimpleStructApplication, SimpleVariableDefinition,
+        SimpleSelect, SimpleStatement, SimpleStructApplication, SimpleStructDefinition,
+        SimpleVariableDefinition,
     },
     typechecker::{
         built_in_values::BuiltInValues,
         scope::TypecheckerScope,
         typed_program::{
             Typed, TypedBlock, TypedCall, TypedExpression, TypedFunctionDefinition,
-            TypedIdentifier, TypedIf, TypedInfixOperation, TypedNumber, TypedPrefixOperation,
-            TypedProgram, TypedSelect, TypedStatement, TypedStructApplication,
-            TypedStructApplicationField, TypedUnit, TypedVariableDefinition,
+            TypedIdentifier, TypedIf, TypedInfixOperation, TypedNumber, TypedPath,
+            TypedPrefixOperation, TypedProgram, TypedSelect, TypedStatement,
+            TypedStructApplication, TypedStructApplicationField, TypedStructDefinition, TypedUnit,
+            TypedVariableDefinition,
         },
     },
 };
@@ -34,7 +36,7 @@ struct Typechecker<'a> {
     scope: TypecheckerScope<'a>,
 }
 
-impl Typechecker<'_> {
+impl<'a> Typechecker<'a> {
     fn typecheck_block(
         &self,
         block: &SimpleBlock,
@@ -135,6 +137,7 @@ impl Typechecker<'_> {
                 ))
             }
 
+            SimpleExpression::Path(path) => Ok(TypedExpression::Path(self.typecheck_path(path)?)),
             SimpleExpression::Identifier(identifier) => Ok(TypedExpression::Identifier(
                 self.typecheck_identifier(identifier)?,
             )),
@@ -401,6 +404,38 @@ impl Typechecker<'_> {
         }
     }
 
+    fn typecheck_path(&self, path: &Path) -> Result<TypedPath, CompilationError> {
+        let struct_definition = self
+            .scope
+            .get_struct_definition(&path.left_hand_side.value)
+            .ok_or_else(|| CompilationError {
+                message: CompilationErrorMessage::UnknownType {
+                    name: path.left_hand_side.value.clone(),
+                },
+
+                position: Some(path.left_hand_side.get_position()),
+            })?;
+
+        let method_index = *struct_definition
+            .method_indices
+            .get::<str>(&path.right_hand_side.value)
+            .ok_or_else(|| CompilationError {
+                message: CompilationErrorMessage::UnknownMethod {
+                    type_: struct_definition.underlying.name.value.clone(),
+                    method: path.right_hand_side.value.clone(),
+                },
+
+                position: Some(path.right_hand_side.get_position()),
+            })?;
+
+        Ok(TypedPath {
+            left_hand_side: path.left_hand_side.clone(),
+            method_index,
+            type_: struct_definition.underlying.methods[method_index].reference_type(),
+            position: path.get_position(),
+        })
+    }
+
     fn typecheck_prefix_operation(
         &self,
         prefix_operation: &SimplePrefixOperation,
@@ -453,12 +488,12 @@ impl Typechecker<'_> {
                 position: Some(select.get_position()),
             })?;
 
-        let (field_index, field) = struct_definition
-            .fields
-            .iter()
-            .enumerate()
-            .find(|(_, field)| field.name.value == select.right_hand_side.value)
+        let field_index = *struct_definition
+            .field_indices
+            .get::<str>(&select.right_hand_side.value)
             .ok_or_else(unknown_field_error)?;
+
+        let field = &struct_definition.underlying.fields[field_index];
 
         Ok(TypedSelect {
             left_hand_side: Box::new(typechecked_left),
@@ -473,9 +508,9 @@ impl Typechecker<'_> {
         statement: &SimpleStatement,
     ) -> Result<TypedStatement, CompilationError> {
         match statement {
-            SimpleStatement::StructDefinition(definition) => {
-                Ok(TypedStatement::StructDefinition(definition.clone()))
-            }
+            SimpleStatement::StructDefinition(definition) => Ok(TypedStatement::StructDefinition(
+                self.typecheck_struct_definition(definition)?,
+            )),
 
             SimpleStatement::VariableDefinition(definition) => Ok(
                 TypedStatement::VariableDefinition(self.typecheck_variable_definition(definition)?),
@@ -497,26 +532,17 @@ impl Typechecker<'_> {
 
     fn typecheck_statements_with_hoisting(
         &mut self,
-        statements: &[SimpleStatement],
+        statements: &'a [SimpleStatement],
     ) -> Result<Vec<TypedStatement>, CompilationError> {
         for statement in statements {
             match statement {
                 SimpleStatement::StructDefinition(definition) => {
-                    self.scope.declare_struct(definition.clone())?;
+                    self.scope.declare_struct(definition)?;
                 }
 
                 SimpleStatement::FunctionDefinition(definition) => {
-                    let type_ = Type::Function(FunctionType {
-                        parameters: definition
-                            .parameters
-                            .iter()
-                            .map(|parameter| parameter.type_.clone())
-                            .collect(),
-
-                        return_type: Box::new(definition.return_type.clone()),
-                    });
-
-                    self.scope.declare_variable(&definition.name, type_)?;
+                    self.scope
+                        .declare_variable(&definition.name, definition.reference_type())?;
                 }
 
                 _ => {}
@@ -525,7 +551,7 @@ impl Typechecker<'_> {
 
         for statement in statements {
             if let SimpleStatement::StructDefinition(definition) = statement {
-                self.validate_struct_definition(definition)?;
+                self.validate_struct_definition_fields(definition)?;
             }
         }
 
@@ -540,15 +566,27 @@ impl Typechecker<'_> {
          * and erroring when one is detected.
          */
         for (i, statement) in statements.iter().enumerate() {
-            if let SimpleStatement::FunctionDefinition(definition) = statement {
-                result[i] = Some(TypedStatement::FunctionDefinition(
-                    self.typecheck_function_definition(definition)?,
-                ));
+            match statement {
+                SimpleStatement::StructDefinition(definition) => {
+                    result[i] = Some(TypedStatement::StructDefinition(
+                        self.typecheck_struct_definition(definition)?,
+                    ));
+                }
+
+                SimpleStatement::FunctionDefinition(definition) => {
+                    result[i] = Some(TypedStatement::FunctionDefinition(
+                        self.typecheck_function_definition(definition)?,
+                    ));
+                }
+
+                _ => {}
             }
         }
 
         for (i, statement) in statements.iter().enumerate() {
-            if let SimpleStatement::FunctionDefinition(_) = statement {
+            if let SimpleStatement::StructDefinition(_) | SimpleStatement::FunctionDefinition(_) =
+                statement
+            {
             } else {
                 result[i] = Some(self.typecheck_statement(statement)?);
             }
@@ -626,6 +664,23 @@ impl Typechecker<'_> {
         })
     }
 
+    fn typecheck_struct_definition(
+        &self,
+        definition: &SimpleStructDefinition,
+    ) -> Result<TypedStructDefinition, CompilationError> {
+        Ok(TypedStructDefinition {
+            name: definition.name.clone(),
+            fields: definition.fields.clone(),
+            methods: definition
+                .methods
+                .iter()
+                .map(|method| self.typecheck_function_definition(method))
+                .collect::<Result<_, _>>()?,
+
+            position: definition.get_position(),
+        })
+    }
+
     fn typecheck_variable_definition(
         &mut self,
         definition: &SimpleVariableDefinition,
@@ -642,9 +697,9 @@ impl Typechecker<'_> {
         })
     }
 
-    fn validate_struct_definition(
+    fn validate_struct_definition_fields(
         &self,
-        definition: &StructDefinition,
+        definition: &SimpleStructDefinition,
     ) -> Result<(), CompilationError> {
         for field in &definition.fields {
             self.validate_type(&field.type_)?;

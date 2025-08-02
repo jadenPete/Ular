@@ -351,6 +351,7 @@ fn lex_token(input: PositionedSource) -> IResult<PositionedSource, PositionedTok
             lex_static_token("/", Token::Over),
             lex_static_token("+", Token::Plus),
             lex_static_token("*", Token::Times),
+            lex_static_token("::", Token::PathSeparator),
             lex_static_token(";", Token::Semicolon),
             lex_static_token(":", Token::TypeAnnotation),
             lex_number,

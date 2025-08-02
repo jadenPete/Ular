@@ -1,17 +1,24 @@
 use crate::{
     error_reporting::{CompilationError, CompilationErrorMessage},
     parser::{
-        program::{Identifier, Node, StructDefinition},
+        program::{Identifier, Node},
         type_::Type,
     },
+    simplifier::simple_program::SimpleStructDefinition,
     typechecker::built_in_values::BuiltInValues,
 };
 use std::collections::HashMap;
 
+pub struct IndexableStructDefinition<'a> {
+    pub underlying: &'a SimpleStructDefinition,
+    pub field_indices: HashMap<&'a str, usize>,
+    pub method_indices: HashMap<&'a str, usize>,
+}
+
 pub struct TypecheckerScope<'a> {
     built_in_values: &'a BuiltInValues,
     parent: Option<&'a TypecheckerScope<'a>>,
-    structs: HashMap<String, StructDefinition>,
+    structs: HashMap<&'a str, IndexableStructDefinition<'a>>,
     variable_types: HashMap<String, Type>,
 }
 
@@ -34,17 +41,34 @@ impl<'a> TypecheckerScope<'a> {
         }
     }
 
-    pub fn declare_struct(&mut self, definition: StructDefinition) -> Result<(), CompilationError> {
-        match self
-            .structs
-            .insert(definition.name.value.clone(), definition)
-        {
-            Some(existing) => Err(CompilationError {
+    pub fn declare_struct(
+        &mut self,
+        definition: &'a SimpleStructDefinition,
+    ) -> Result<(), CompilationError> {
+        let indexable = IndexableStructDefinition {
+            underlying: definition,
+            field_indices: definition
+                .fields
+                .iter()
+                .enumerate()
+                .map::<(&str, usize), _>(|(i, field)| (&field.name.value, i))
+                .collect(),
+
+            method_indices: definition
+                .methods
+                .iter()
+                .enumerate()
+                .map::<(&str, usize), _>(|(i, method)| (&method.name.value, i))
+                .collect(),
+        };
+
+        match self.structs.insert(&definition.name.value, indexable) {
+            Some(_) => Err(CompilationError {
                 message: CompilationErrorMessage::StructAlreadyDefined {
-                    name: existing.name.value.clone(),
+                    name: definition.name.value.clone(),
                 },
 
-                position: Some(existing.name.get_position()),
+                position: Some(definition.name.get_position()),
             }),
 
             None => Ok(()),
@@ -69,7 +93,7 @@ impl<'a> TypecheckerScope<'a> {
         }
     }
 
-    pub fn get_struct_definition(&self, name: &str) -> Option<&StructDefinition> {
+    pub fn get_struct_definition(&self, name: &str) -> Option<&IndexableStructDefinition> {
         self.structs.get(name).or_else(|| {
             self.parent
                 .and_then(|parent| parent.get_struct_definition(name))

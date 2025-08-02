@@ -8,7 +8,8 @@ use crate::{
             AnalyzedBlock, AnalyzedCall, AnalyzedExpression, AnalyzedExpressionRef,
             AnalyzedFunctionDefinition, AnalyzedIf, AnalyzedInfixOperation, AnalyzedNumber,
             AnalyzedParameter, AnalyzedPrefixOperation, AnalyzedProgram, AnalyzedSelect,
-            AnalyzedStructApplication, AnalyzedStructApplicationField, AnalyzedType, AnalyzedUnit,
+            AnalyzedStructApplication, AnalyzedStructApplicationField, AnalyzedStructDefinition,
+            AnalyzedStructDefinitionField, AnalyzedType, AnalyzedUnit,
         },
         scope::{AnalyzerScope, AnalyzerScopeContext},
     },
@@ -17,8 +18,8 @@ use crate::{
     phase::Phase,
     typechecker::typed_program::{
         TypedBlock, TypedCall, TypedExpression, TypedFunctionDefinition, TypedIdentifier, TypedIf,
-        TypedInfixOperation, TypedNumber, TypedPrefixOperation, TypedProgram, TypedSelect,
-        TypedStatement, TypedStructApplication, TypedUnit,
+        TypedInfixOperation, TypedNumber, TypedPath, TypedPrefixOperation, TypedProgram,
+        TypedSelect, TypedStatement, TypedStructApplication, TypedStructDefinition, TypedUnit,
     },
 };
 
@@ -96,6 +97,7 @@ impl<'a> Analyzer<'a> {
                 self.analyze_struct_application(struct_application)
             }
 
+            TypedExpression::Path(path) => self.analyze_path(path),
             TypedExpression::Identifier(identifier) => self.analyze_identifier(identifier),
             TypedExpression::Number(number) => {
                 Ok(AnalyzedExpressionRef::Number(self.analyze_number(number)))
@@ -141,9 +143,8 @@ impl<'a> Analyzer<'a> {
 
     fn analyze_function_definition(
         &mut self,
-        i: usize,
         definition: &TypedFunctionDefinition,
-    ) -> Result<(), CompilationError> {
+    ) -> Result<AnalyzedFunctionDefinition, CompilationError> {
         let mut analyzed_parameters = Vec::with_capacity(definition.parameters.len());
 
         for parameter in &definition.parameters {
@@ -181,18 +182,13 @@ impl<'a> Analyzer<'a> {
             result: result_reference,
         };
 
-        self.functions.set_function(
-            i,
-            AnalyzedFunctionDefinition {
-                name: definition.name.clone(),
-                parameters: analyzed_parameters,
-                body: analyzed_body,
-                type_: self.scope.analyze_function_type(&definition.type_)?,
-                position: definition.get_position(),
-            },
-        );
-
-        Ok(())
+        Ok(AnalyzedFunctionDefinition {
+            name: definition.name.clone(),
+            parameters: analyzed_parameters,
+            body: analyzed_body,
+            type_: self.scope.analyze_function_type(&definition.type_)?,
+            position: definition.get_position(),
+        })
     }
 
     fn analyze_identifier(
@@ -268,6 +264,26 @@ impl<'a> Analyzer<'a> {
         }
     }
 
+    fn analyze_path(&self, path: &TypedPath) -> Result<AnalyzedExpressionRef, CompilationError> {
+        let struct_index = self
+            .scope
+            .get_struct_index(&path.left_hand_side.value)
+            .ok_or_else(|| CompilationError {
+                message: CompilationErrorMessage::InternalError(InternalError::UnknownType {
+                    name: path.left_hand_side.value.clone(),
+                }),
+
+                position: Some(path.left_hand_side.get_position()),
+            })?;
+
+        Ok(AnalyzedExpressionRef::StructMethod {
+            struct_index,
+            method_index: path.method_index,
+            type_: self.scope.analyze_type(&path.type_)?,
+            position: path.get_position(),
+        })
+    }
+
     fn analyze_prefix_operation(
         &mut self,
         prefix_operation: &TypedPrefixOperation,
@@ -315,8 +331,11 @@ impl<'a> Analyzer<'a> {
         statement: &TypedStatement,
     ) -> Result<Option<AnalyzedExpressionRef>, CompilationError> {
         match statement {
-            // `analyze_statements_with_hoisting` should've already analyzed the struct definitions
-            TypedStatement::StructDefinition(_) => Ok(None),
+            /*
+             * `analyze_statements_with_hoisting` should've already analyzed the struct and function
+             * definitions
+             */
+            TypedStatement::StructDefinition(_) | TypedStatement::FunctionDefinition(_) => Ok(None),
             TypedStatement::VariableDefinition(definition) => {
                 let analyzed = self.analyze_expression(&definition.value)?;
 
@@ -325,11 +344,6 @@ impl<'a> Analyzer<'a> {
 
                 Ok(Some(analyzed))
             }
-
-            TypedStatement::FunctionDefinition(definition) => Err(CompilationError {
-                message: CompilationErrorMessage::NestedFunctionsNotSupported,
-                position: Some(definition.get_position()),
-            }),
 
             TypedStatement::Expression(expression) => {
                 Ok(Some(self.analyze_expression(expression)?))
@@ -385,6 +399,11 @@ impl<'a> Analyzer<'a> {
             }
         }
 
+        /*
+         * Analyze the struct methods and functions first, so they don't yet have access to
+         * global variables. The typechecker should've already prevented this, but it never hurts to
+         * check again.
+         */
         for (i, definition) in statements
             .iter()
             .filter_map(|statement| match statement {
@@ -393,14 +412,12 @@ impl<'a> Analyzer<'a> {
             })
             .enumerate()
         {
+            let analyzed_definition = self.analyze_struct_definition(definition)?;
+
             self.scope
-                .define_struct(struct_indices[i], definition, self.scope_context)?;
+                .define_struct(struct_indices[i], analyzed_definition, self.scope_context);
         }
 
-        /*
-         * Analyze the functions first, so they don't yet have access to global variables. The
-         * typechecker should've already prevented this, but it never hurts to check again.
-         */
         for (i, definition) in statements
             .iter()
             .filter_map(|statement| match statement {
@@ -409,13 +426,18 @@ impl<'a> Analyzer<'a> {
             })
             .enumerate()
         {
-            self.analyze_function_definition(function_indices[i], definition)?
+            let analyzed_definition = self.analyze_function_definition(definition)?;
+
+            self.functions
+                .set_function(function_indices[i], analyzed_definition);
         }
 
         let mut last_index = None;
 
         for statement in statements {
-            if let TypedStatement::FunctionDefinition(_) = statement {
+            if let TypedStatement::StructDefinition(_) | TypedStatement::FunctionDefinition(_) =
+                statement
+            {
             } else {
                 let next_index = match self.analyze_statement(statement)? {
                     Some(AnalyzedExpressionRef::Expression { index, .. }) => Some(index),
@@ -463,9 +485,10 @@ impl<'a> Analyzer<'a> {
             .scope
             .get_struct_index(&struct_application.name.value)
             .ok_or_else(|| CompilationError {
-                message: CompilationErrorMessage::UnknownType {
+                message: CompilationErrorMessage::InternalError(InternalError::UnknownType {
                     name: struct_application.name.value.clone(),
-                },
+                }),
+
                 position: Some(struct_application.name.get_position()),
             })?;
 
@@ -479,6 +502,33 @@ impl<'a> Analyzer<'a> {
                 position: struct_application.get_position(),
             }),
         ))
+    }
+
+    fn analyze_struct_definition(
+        &mut self,
+        definition: &TypedStructDefinition,
+    ) -> Result<AnalyzedStructDefinition, CompilationError> {
+        Ok(AnalyzedStructDefinition {
+            name: definition.name.clone(),
+            fields: definition
+                .fields
+                .iter()
+                .map(|field| {
+                    Ok(AnalyzedStructDefinitionField {
+                        name: field.name.clone(),
+                        type_: self.scope.analyze_type(&field.type_)?,
+                    })
+                })
+                .collect::<Result<_, _>>()?,
+
+            methods: definition
+                .methods
+                .iter()
+                .map(|method| self.analyze_function_definition(method))
+                .collect::<Result<_, _>>()?,
+
+            position: definition.position.clone(),
+        })
     }
 
     fn analyze_unit(&self, unit: &TypedUnit) -> AnalyzedUnit {

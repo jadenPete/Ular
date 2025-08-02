@@ -7,8 +7,8 @@ fn struct_definition_works() -> anyhow::Result<()> {
     evaluate_program(
         "\
 struct Point {
-    x: i32,
-    y: i32
+    x: i32;
+    y: i32;
 }
 ",
         true,
@@ -52,8 +52,8 @@ Error: Unknown type `Point`.
     let output2 = evaluate_program(
         "\
 struct Point {
-    x: i32,
-    y: i32
+    x: i32;
+    y: i32;
 }
 
 Point {
@@ -81,9 +81,9 @@ Error: Missing field when constructing a value of type `Point`: `y`
     let output3 = evaluate_program(
         "\
 struct Point {
-    x: i32,
-    y: i32,
-    z: i32
+    x: i32;
+    y: i32;
+    z: i32;
 }
 
 Point {
@@ -111,8 +111,8 @@ Error: Missing fields when constructing a value of type `Point`: `y`, `z`
     let output4 = evaluate_program(
         "\
 struct Point {
-    x: i32,
-    y: i32
+    x: i32;
+    y: i32;
 }
 
 Point {
@@ -146,7 +146,7 @@ fn struct_application_works() -> anyhow::Result<()> {
     evaluate_program(
         "\
 struct Person {
-    age: u8
+    age: u8;
 }
 
 Person {
@@ -177,7 +177,7 @@ Error: Type `i32` has no field named `a`.
     let output2 = evaluate_program(
         "\
 struct Person {
-    age: u8
+    age: u8;
 }
 
 Person {
@@ -208,8 +208,8 @@ fn select_works() -> anyhow::Result<()> {
     let output = evaluate_program(
         "\
 struct Point {
-    x: i32,
-    y: i32
+    x: i32;
+    y: i32;
 }
 
 point = Point {
@@ -236,7 +236,7 @@ fn nested_structs_supported() -> anyhow::Result<()> {
         "\
 fn increment(n: i32): i32 {
     struct Wrapper {
-        value: i32
+        value: i32;
     }
 
     wrapper = Wrapper {
@@ -263,7 +263,7 @@ fn structs_cannot_evade_scope() -> anyhow::Result<()> {
 fn flip(n: u8): u8 {
     wrapper = if n > 0u8 {
         struct Wrapper {
-            value: u8
+            value: u8;
         }
 
         Wrapper {
@@ -271,7 +271,7 @@ fn flip(n: u8): u8 {
         }
     } else {
         struct Wrapper {
-            value: u8
+            value: u8;
         }
 
         Wrapper {
@@ -307,7 +307,7 @@ fn identifier_types_validated() -> anyhow::Result<()> {
     let output1 = evaluate_program(
         "\
 struct Person {
-    profession: Profession
+    profession: Profession;
 }
 ",
         false,
@@ -327,8 +327,8 @@ fn identifier_types_work() -> anyhow::Result<()> {
     let output = evaluate_program(
         "\
 struct Point {
-    x: i32,
-    y: i32
+    x: i32;
+    y: i32;
 }
 
 fn get_origin(): Point {

@@ -1,12 +1,11 @@
 use crate::{
     data_structures::number_map::NumberMap,
     dependency_analyzer::analyzed_program::{
-        AnalyzedExpressionRef, AnalyzedFunctionType, AnalyzedStructDefinition,
-        AnalyzedStructDefinitionField, AnalyzedType,
+        AnalyzedExpressionRef, AnalyzedFunctionType, AnalyzedStructDefinition, AnalyzedType,
     },
     error_reporting::{CompilationError, CompilationErrorMessage, InternalError},
     parser::{
-        program::{Identifier, Node, StructDefinition},
+        program::{Identifier, Node},
         type_::{FunctionType, Type},
     },
     typechecker::{built_in_values::BuiltInValues, typed_program::TypedIdentifier},
@@ -94,34 +93,16 @@ impl<'a> AnalyzerScope<'a> {
     pub fn define_struct(
         &mut self,
         i: usize,
-        definition: &StructDefinition,
+        definition: AnalyzedStructDefinition,
         context: &mut AnalyzerScopeContext,
-    ) -> Result<(), CompilationError> {
-        let analyzed_struct = AnalyzedStructDefinition {
-            name: definition.name.clone(),
-            fields: definition
-                .fields
-                .iter()
-                .map(|field| {
-                    Ok(AnalyzedStructDefinitionField {
-                        name: field.name.clone(),
-                        type_: self.analyze_type(&field.type_)?,
-                    })
-                })
-                .collect::<Result<_, _>>()?,
-
-            position: definition.position.clone(),
-        };
-
-        context.structs.insert(i, analyzed_struct);
-
-        Ok(())
+    ) {
+        context.structs.insert(i, definition);
     }
 
     pub fn get_struct_index(&self, name: &str) -> Option<usize> {
         self.struct_indices
             .get(name)
-            .cloned()
+            .copied()
             .or_else(|| self.parent.and_then(|parent| parent.get_struct_index(name)))
     }
 
