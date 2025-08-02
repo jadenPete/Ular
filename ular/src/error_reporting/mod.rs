@@ -11,6 +11,10 @@ pub struct CompilationError {
 }
 
 pub enum CompilationErrorMessage {
+    DuplicateField {
+        field: String,
+    },
+
     ExpectedFunctionResult {
         function_name: String,
         return_type: String,
@@ -80,6 +84,10 @@ pub enum CompilationErrorMessage {
 impl Display for CompilationErrorMessage {
     fn fmt(&self, formatter: &mut Formatter) -> std::fmt::Result {
         match self {
+            Self::DuplicateField { field } => {
+                write!(formatter, "The field `{}` was specified more than once.", field)
+            }
+
             Self::ExpectedFunctionResult { function_name, return_type } => {
                 write!(
                     formatter,

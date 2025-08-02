@@ -30,7 +30,7 @@ use crate::{
         },
     },
 };
-use std::collections::HashMap;
+use std::collections::HashSet;
 
 struct Typechecker<'a> {
     scope: TypecheckerScope<'a>,
@@ -614,24 +614,36 @@ impl<'a> Typechecker<'a> {
 
         let mut typechecked_fields = Vec::with_capacity(struct_application.fields.len());
         let mut remaining_fields = struct_definition
+            .underlying
             .fields
             .iter()
-            .map(|field| (&field.name.value, &field.type_))
-            .collect::<HashMap<_, _>>();
+            .map::<&str, _>(|field| &field.name.value)
+            .collect::<HashSet<_>>();
 
         for field in &struct_application.fields {
-            let expected_type =
-                remaining_fields
-                    .remove(&field.name.value)
-                    .ok_or_else(|| CompilationError {
-                        message: CompilationErrorMessage::UnknownField {
-                            type_: struct_definition.name.value.clone(),
-                            field: field.name.value.clone(),
-                        },
+            let field_index = *struct_definition
+                .field_indices
+                .get::<str>(&field.name.value)
+                .ok_or_else(|| CompilationError {
+                    message: CompilationErrorMessage::UnknownField {
+                        type_: struct_definition.underlying.name.value.clone(),
+                        field: field.name.value.clone(),
+                    },
 
-                        position: Some(field.name.get_position()),
-                    })?;
+                    position: Some(field.name.get_position()),
+                })?;
 
+            if !remaining_fields.remove::<str>(&field.name.value) {
+                return Err(CompilationError {
+                    message: CompilationErrorMessage::DuplicateField {
+                        field: field.name.value.clone(),
+                    },
+
+                    position: Some(field.name.get_position()),
+                });
+            }
+
+            let expected_type = &struct_definition.underlying.fields[field_index].type_;
             let typechecked_field = self.typecheck_expression(&field.value, Some(expected_type))?;
 
             assert_type(&typechecked_field, expected_type)?;
@@ -642,14 +654,17 @@ impl<'a> Typechecker<'a> {
             });
         }
 
-        let mut missing_fields = remaining_fields.into_keys().cloned().collect::<Vec<_>>();
+        let mut missing_fields = remaining_fields
+            .iter()
+            .map(|field_name| String::from(*field_name))
+            .collect::<Vec<_>>();
 
         missing_fields.sort();
 
         if !missing_fields.is_empty() {
             return Err(CompilationError {
                 message: CompilationErrorMessage::MissingFields {
-                    type_: struct_definition.name.value.clone(),
+                    type_: struct_definition.underlying.name.value.clone(),
                     fields: missing_fields,
                 },
 
