@@ -47,6 +47,14 @@ pub enum CompilationErrorMessage {
         name: String,
     },
 
+    StructFieldAlreadyDefined {
+        field_name: String,
+    },
+
+    StructMethodAlreadyDefined {
+        method_name: String,
+    },
+
     StructEvadesScope {
         struct_name: String,
     },
@@ -173,7 +181,7 @@ impl Display for CompilationErrorMessage {
             }
 
             Self::StructAlreadyDefined { name } => {
-                write!(formatter, "A struct with name `{}` is already defined.", name)
+                write!(formatter, "A struct with name `{}` was already defined.", name)
             }
 
             Self::StructEvadesScope { struct_name } => {
@@ -183,6 +191,14 @@ impl Display for CompilationErrorMessage {
                     struct_name,
                     struct_name,
                 )
+            }
+
+            Self::StructFieldAlreadyDefined { field_name } => {
+                write!(formatter, "A field with name `{}` was already defined.", field_name)
+            }
+
+            Self::StructMethodAlreadyDefined { method_name } => {
+                write!(formatter, "A method with name `{}` was already defined.", method_name)
             }
 
             Self::TypeMismatch {
@@ -213,7 +229,7 @@ impl Display for CompilationErrorMessage {
             }
 
             Self::VariableAlreadyDefined { name } => {
-                write!(formatter, "A variable with name `{}` is already defined.", name)
+                write!(formatter, "A variable with name `{}` was already defined.", name)
             }
         }
     }
@@ -377,7 +393,7 @@ impl Display for InternalError {
             Self::VariableAlreadyDefined { name } => {
                 write!(
                     formatter,
-                    "A variable with name `{}` is already defined. This should've been caught by the typechecker.",
+                    "A variable with name `{}` was already defined. This should've been caught by the typechecker.",
                     name,
                 )
             }

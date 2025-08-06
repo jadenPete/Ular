@@ -537,7 +537,7 @@ impl<'a> Typechecker<'a> {
         for statement in statements {
             match statement {
                 SimpleStatement::StructDefinition(definition) => {
-                    self.scope.declare_struct(definition)?;
+                    self.scope.declare_and_validate_struct(definition)?;
                 }
 
                 SimpleStatement::FunctionDefinition(definition) => {

@@ -487,3 +487,70 @@ struct Person {
 
     Ok(())
 }
+
+#[test]
+fn structs_cannot_have_duplicate_fields() -> anyhow::Result<()> {
+    let output = evaluate_program(
+        "\
+struct Person {
+	age: u8;
+	age: u8;
+}
+",
+        false,
+    )?;
+
+    assert_eq!(
+        output,
+        "\
+Error: A field with name `age` was already defined.
+
+ 1 │ struct Person {
+ 2 │ 	age: u8;
+ 3 │ 	age: u8;
+   │ 	^^^^^^^
+ 4 │ }
+
+",
+    );
+
+    Ok(())
+}
+
+#[test]
+fn structs_cannot_have_duplicate_methods() -> anyhow::Result<()> {
+    let output = evaluate_program(
+        "\
+struct Person {
+	age: u8;
+
+	fn is_adult(self): bool {
+		self.age >= 18u8
+	}
+
+	fn is_adult(self): bool {
+		self.age >= 18u8
+	}
+}
+",
+        false,
+    )?;
+
+    assert_eq!(
+        output,
+        "\
+Error: A method with name `is_adult` was already defined.
+
+  6 │ 	}
+  7 │ 
+  8 │ 	fn is_adult(self): bool {
+    │ 	^^^^^^^^^^^^^^^^^^^^^^^^^
+  9 │ 		self.age >= 18u8
+ 10 │ 	}
+ 11 │ }
+
+",
+    );
+
+    Ok(())
+}

@@ -41,25 +41,46 @@ impl<'a> TypecheckerScope<'a> {
         }
     }
 
-    pub fn declare_struct(
+    pub fn declare_and_validate_struct(
         &mut self,
         definition: &'a SimpleStructDefinition,
     ) -> Result<(), CompilationError> {
+        let mut field_indices = HashMap::<&str, usize>::new();
+
+        for (i, field) in definition.fields.iter().enumerate() {
+            if field_indices.contains_key::<str>(&field.name.value) {
+                return Err(CompilationError {
+                    message: CompilationErrorMessage::StructFieldAlreadyDefined {
+                        field_name: field.name.value.clone(),
+                    },
+
+                    position: Some(field.get_position()),
+                });
+            }
+
+            field_indices.insert(&field.name.value, i);
+        }
+
+        let mut method_indices = HashMap::<&str, usize>::new();
+
+        for (i, method) in definition.methods.iter().enumerate() {
+            if method_indices.contains_key::<str>(&method.name.value) {
+                return Err(CompilationError {
+                    message: CompilationErrorMessage::StructMethodAlreadyDefined {
+                        method_name: method.name.value.clone(),
+                    },
+
+                    position: Some(method.get_position()),
+                });
+            }
+
+            method_indices.insert(&method.name.value, i);
+        }
+
         let indexable = IndexableStructDefinition {
             underlying: definition,
-            field_indices: definition
-                .fields
-                .iter()
-                .enumerate()
-                .map::<(&str, usize), _>(|(i, field)| (&field.name.value, i))
-                .collect(),
-
-            method_indices: definition
-                .methods
-                .iter()
-                .enumerate()
-                .map::<(&str, usize), _>(|(i, method)| (&method.name.value, i))
-                .collect(),
+            field_indices,
+            method_indices,
         };
 
         match self.structs.insert(&definition.name.value, indexable) {
