@@ -352,3 +352,138 @@ seq {
 
     Ok(())
 }
+
+#[test]
+fn struct_methods_work() -> anyhow::Result<()> {
+    let output = evaluate_program(
+        "\
+struct Point {
+    x: i32;
+    y: i32;
+
+    fn add(self: Point, other: Point): Point {
+        Point {
+            x: self.x + other.x,
+            y: self.y + other.y
+        }
+    }
+}
+
+point1 = Point { x: 1, y: 2 };
+point2 = Point::add(point1, Point { x: -2, y: 5 });
+
+seq {
+    println_i32(point2.x);
+    println_i32(point2.y);
+};
+",
+        true,
+    )?;
+
+    assert_eq!(output, "-1\n7\n");
+
+    Ok(())
+}
+
+#[test]
+fn struct_static_methods_work() -> anyhow::Result<()> {
+    let output = evaluate_program(
+        "\
+struct Point {
+    x: i32;
+    y: i32;
+
+    fn get_origin(): Point {
+        Point { x: 0, y: 0 }
+    }
+}
+
+origin = Point::get_origin();
+
+seq {
+    println_i32(origin.x);
+    println_i32(origin.y);
+};
+",
+        true,
+    )?;
+
+    assert_eq!(output, "0\n0\n");
+
+    Ok(())
+}
+
+#[test]
+fn struct_method_self_parameters_work() -> anyhow::Result<()> {
+    let output = evaluate_program(
+        "\
+struct Person {
+    age: u8;
+
+    fn is_adult(self): bool {
+        self.age >= 18u8
+    }
+}
+
+seq {
+    println_bool(Person::is_adult(Person { age: 17 }));
+    println_bool(Person::is_adult(Person { age: 22 }));
+};
+",
+        true,
+    )?;
+
+    assert_eq!(output, "false\ntrue\n");
+
+    Ok(())
+}
+
+#[test]
+fn nonexistent_struct_methods_cannot_be_called() -> anyhow::Result<()> {
+    let output = evaluate_program(
+        "\
+struct Person {
+    age: u8;
+}
+
+seq {
+    println_bool(Person::is_awesome(Person { age: 22 }));
+};
+",
+        false,
+    )?;
+
+    assert_eq!(
+        output,
+        "\
+Error: Type `Person` has no method named `is_awesome`.
+
+ 4 │ 
+ 5 │ seq {
+ 6 │     println_bool(Person::is_awesome(Person { age: 22 }));
+   │                          ^^^^^^^^^^
+ 7 │ };
+
+",
+    );
+
+    Ok(())
+}
+
+#[test]
+fn struct_method_self_parameters_must_be_first() -> anyhow::Result<()> {
+    evaluate_program(
+        "\
+struct Person {
+    age: u8;
+
+    fn is_elder(other: Person, self): bool {
+        self.age > other.age
+    }
+}
+",
+        false,
+    )?;
+
+    Ok(())
+}
