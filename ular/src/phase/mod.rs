@@ -1,4 +1,4 @@
-use log::debug;
+use log::warn;
 use std::fmt::Debug;
 
 pub trait Phase<Input, Output: Debug, Error> {
@@ -18,8 +18,8 @@ pub trait Phase<Input, Output: Debug, Error> {
                 .iter()
                 .any(|other_name| other_name.as_ref() == name)
             {
-                debug!("Output of the {} phase:", name);
-                debug!("{:#?}", output);
+                warn!("Output of the {} phase:", name);
+                warn!("{:#?}", output);
             }
         }
 

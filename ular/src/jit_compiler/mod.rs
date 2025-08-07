@@ -4,8 +4,6 @@ mod module;
 mod scope;
 mod value;
 
-use std::collections::HashMap;
-
 use crate::{
     data_structures::graph::DirectedGraph,
     dependency_analyzer::analyzed_program::{
@@ -36,7 +34,8 @@ use inkwell::{
     values::{BasicValueEnum, FunctionValue, IntValue, PointerValue},
     AddressSpace, IntPredicate, OptimizationLevel,
 };
-use log::debug;
+use log::warn;
+use std::collections::HashMap;
 use ular_scheduler::VALUE_BUFFER_WORD_SIZE;
 
 const MAIN_HARNESS_FUNCTION_NAME: &str = "main_harness";
@@ -809,7 +808,7 @@ impl<'context> InlineExpression<'context> for CompilableStructApplication<'_> {
         let struct_pointer_name = scope.get_local_name();
         let struct_pointer = builder
             .build_direct_call(
-                compiler.built_in_values._alloc.build_function(
+                compiler.built_in_values._mmtk_alloc.build_function(
                     compiler.context,
                     compiler.execution_engine,
                     compiler.module,
@@ -1330,6 +1329,15 @@ fn compile_main_harness_function<'a>(
     let end_block = context.append_basic_block(main_harness_function, "end");
 
     builder.position_at_end(entry_block);
+    builder
+        .build_call(
+            built_in_values
+                ._mmtk_init
+                .get_inkwell_function(context, execution_engine, module),
+            &[],
+            "",
+        )
+        .unwrap();
 
     let worker_pool = builder
         .build_call(
@@ -1357,6 +1365,18 @@ fn compile_main_harness_function<'a>(
         .unwrap()
         .try_as_basic_value()
         .unwrap_left();
+
+    builder
+        .build_call(
+            built_in_values._mmtk_bind_mutator.get_inkwell_function(
+                context,
+                execution_engine,
+                module,
+            ),
+            &[worker.into()],
+            "",
+        )
+        .unwrap();
 
     builder
         .build_invoke(main_function, &[worker], end_block, catch_block, "")
@@ -1530,8 +1550,8 @@ fn compile_program<'a>(
     );
 
     if print_to_stderr {
-        debug!("Output of the jit_compiler phase:");
-        debug!("{}", module.underlying.print_to_string().to_string());
+        warn!("Output of the jit_compiler phase:");
+        warn!("{}", module.underlying.print_to_string().to_string());
     }
 
     Ok(unsafe {

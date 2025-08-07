@@ -65,6 +65,7 @@ fn benchmark_heartbeat(bencher: Bencher, benchmark: Benchmark) {
     let thread_pool = WorkerPool::new(Configuration {
         thread_count: NonZero::new(num_cpus::get()).unwrap_or(nonzero!(1_usize)),
         heartbeat_interval: Duration::from_micros(100),
+        background_thread_initializer: None,
     });
 
     extern "C" fn node_left_sum(worker: &mut Worker, node: &Node) -> u64 {

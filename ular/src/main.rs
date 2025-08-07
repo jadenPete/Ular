@@ -3,6 +3,7 @@ mod dependency_analyzer;
 mod error_reporting;
 mod jit_compiler;
 mod lexer;
+mod mmtk;
 mod parser;
 mod phase;
 mod simplifier;
@@ -34,7 +35,11 @@ fn main() -> std::io::Result<ExitCode> {
     let arguments = Arguments::parse();
 
     TermLogger::init(
-        LevelFilter::Debug,
+        if cfg!(debug_assertions) {
+            LevelFilter::Info
+        } else {
+            LevelFilter::Warn
+        },
         ConfigBuilder::new()
             .set_target_level(LevelFilter::Off)
             .set_thread_level(LevelFilter::Off)

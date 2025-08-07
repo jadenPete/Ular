@@ -15,6 +15,7 @@ pub fn evaluate_program(program: &str, expect_success: bool) -> anyhow::Result<S
     let mut process = Command::new(ular_executable)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
+        .stderr(Stdio::null())
         .spawn()?;
 
     process

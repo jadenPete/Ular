@@ -19,9 +19,12 @@ use std::{
     time::Duration,
 };
 
+type WorkerInitializer = Box<dyn Fn(&Worker) + Send + Sync>;
+
 pub struct Configuration {
     pub thread_count: NonZero<usize>,
     pub heartbeat_interval: Duration,
+    pub background_thread_initializer: Option<WorkerInitializer>,
 }
 
 impl Default for Configuration {
@@ -29,6 +32,7 @@ impl Default for Configuration {
         Self {
             thread_count: NonZero::new(num_cpus::get()).unwrap_or(nonzero!(1_usize)),
             heartbeat_interval: Duration::from_micros(100),
+            background_thread_initializer: None,
         }
     }
 }
@@ -73,10 +77,12 @@ impl WorkerPool {
     pub fn new(configuration: Configuration) -> Self {
         let context = Arc::new(WorkerContext::new());
         let thread_count = configuration.thread_count.into();
+        let background_thread_initializer = Arc::new(configuration.background_thread_initializer);
         let worker_threads = (0..thread_count)
             .map(|_| {
                 let cloned_context = Arc::clone(&context);
                 let heartbeat_value = Arc::new(AtomicBool::new(false));
+                let cloned_initializer = Arc::clone(&background_thread_initializer);
 
                 std::thread::spawn(move || {
                     cloned_context
@@ -87,6 +93,10 @@ impl WorkerPool {
 
                     let mut worker = Worker::new(cloned_context, heartbeat_value);
 
+                    if let Some(initializer) = cloned_initializer.as_deref() {
+                        initializer(&worker);
+                    }
+
                     worker.execute_background_thread()
                 })
             })
@@ -94,7 +104,7 @@ impl WorkerPool {
 
         let cloned_context = Arc::clone(&context);
         let heartbeat_thread = std::thread::spawn(move || {
-            execute_heartbeat_thread(&configuration, &cloned_context);
+            execute_heartbeat_thread(&cloned_context, configuration.heartbeat_interval);
         });
 
         Self {
@@ -397,9 +407,9 @@ impl<A> ValueBuffer<A> {
     }
 }
 
-fn execute_heartbeat_thread(configuration: &Configuration, context: &WorkerContext) {
+fn execute_heartbeat_thread(context: &WorkerContext, heartbeat_interval: Duration) {
     while !context.is_stopping.load(Ordering::Relaxed) {
-        std::thread::sleep(configuration.heartbeat_interval);
+        std::thread::sleep(heartbeat_interval);
 
         for heartbeat_value in context.heartbeat_values.lock().unwrap().iter() {
             heartbeat_value.store(true, Ordering::Relaxed);
