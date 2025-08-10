@@ -5,6 +5,7 @@ edition = "2021"
 
 [dependencies]
 clap = { version = "4.5.29", features = ["derive"] }
+dashmap = { git = "https://github.com/g-plane/dashmap", branch = "explicit-lifetime" }
 either = "1.13.0"
 enum-iterator = "2.1.0"
 inkwell = { version = "0.5.0", features = ["llvm18-0"] }

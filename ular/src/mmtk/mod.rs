@@ -1,5 +1,6 @@
-pub mod built_in_functions;
+pub mod runtime;
 
+use crate::mmtk::runtime::{is_mutator, number_of_mutators, with_mutator, with_mutators};
 use mmtk::{
     util::{
         copy::{CopySemantics, GCWorkerCopyContext},
@@ -13,6 +14,7 @@ use mmtk::{
     },
     Mutator,
 };
+use std::ptr::NonNull;
 
 /// This is the offset from the allocation result to the object reference for the object. For bindings
 /// that this offset is not a constant, you can implement the calculation in the method
@@ -24,7 +26,7 @@ pub const OBJECT_REF_OFFSET: usize = 0;
 pub const OBJECT_HEADER_OFFSET: usize = 0;
 
 #[derive(Default)]
-struct UlarVM;
+pub struct UlarVM;
 
 impl VMBinding for UlarVM {
     type VMActivePlan = UlarActivePlan;
@@ -36,28 +38,44 @@ impl VMBinding for UlarVM {
     type VMSlot = SimpleSlot;
 }
 
-struct UlarActivePlan;
+/// The purpose of this struct is to implement [ActivePlan] from MMTk.
+///
+/// This tells MMTk how to create and track mutator threads, threads that can manipulate objects. See
+/// [crate::mmtk::runtime] to understand how this is implemented.
+pub struct UlarActivePlan;
 
 impl ActivePlan<UlarVM> for UlarActivePlan {
-    fn is_mutator(_tls: VMThread) -> bool {
-        // FIXME: Properly check if the thread is a mutator
-        true
+    fn is_mutator(thread: VMThread) -> bool {
+        is_mutator(thread)
     }
 
-    fn mutator(_tls: VMMutatorThread) -> &'static mut Mutator<UlarVM> {
-        unimplemented!()
+    fn mutator(thread: VMMutatorThread) -> &'static mut Mutator<UlarVM> {
+        with_mutator(thread, |mutator| {
+            let mut mutator_pointer = NonNull::from(mutator);
+
+            // SAFETY: This is totally unsafe and MMTk really shouldn't be so demanding in expecting a
+            // `'static mut Mutator`, but it is what it is. Let's just hope that whoever is calling
+            // this function knows what they're doing.
+            unsafe { mutator_pointer.as_mut() }
+        })
     }
 
     fn mutators<'a>() -> Box<dyn Iterator<Item = &'a mut Mutator<UlarVM>> + 'a> {
-        unimplemented!()
+        // SAFETY: This is also totally unsafe, and I don't think it's possible to implement it safely
+        with_mutators(|mutators| unsafe {
+            std::mem::transmute::<
+                Box<dyn Iterator<Item = &Mutator<UlarVM>>>,
+                Box<dyn Iterator<Item = &'a mut Mutator<UlarVM>>>,
+            >(mutators)
+        })
     }
 
     fn number_of_mutators() -> usize {
-        unimplemented!()
+        number_of_mutators()
     }
 }
 
-struct UlarCollection;
+pub struct UlarCollection;
 
 impl Collection<UlarVM> for UlarCollection {
     fn block_for_gc(_tls: VMMutatorThread) {
@@ -80,7 +98,7 @@ impl Collection<UlarVM> for UlarCollection {
     }
 }
 
-struct UlarObjectModel;
+pub struct UlarObjectModel;
 
 impl ObjectModel<UlarVM> for UlarObjectModel {
     // Global metadata
@@ -155,7 +173,7 @@ impl ObjectModel<UlarVM> for UlarObjectModel {
     }
 }
 
-struct UlarReferenceGlue;
+pub struct UlarReferenceGlue;
 
 impl ReferenceGlue<UlarVM> for UlarReferenceGlue {
     type FinalizableType = ObjectReference;
@@ -177,7 +195,7 @@ impl ReferenceGlue<UlarVM> for UlarReferenceGlue {
     }
 }
 
-struct UlarScanning;
+pub struct UlarScanning;
 
 impl Scanning<UlarVM> for UlarScanning {
     fn notify_initial_thread_scan_complete(_partial_scan: bool, _tls: VMWorkerThread) {

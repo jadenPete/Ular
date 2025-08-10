@@ -5,7 +5,7 @@ use crate::{
         scope::LocalName,
         value::{UlarFunction, UlarValue},
     },
-    mmtk::built_in_functions::{mmtk_alloc, mmtk_bind_mutator, mmtk_init},
+    mmtk::runtime::{mmtk_alloc, mmtk_bind_mutator, mmtk_init},
     parser::type_::NumericType,
 };
 use inkwell::{
