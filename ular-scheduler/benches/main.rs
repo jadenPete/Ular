@@ -6,7 +6,9 @@ use std::{
     num::NonZero,
     time::Duration,
 };
-use ular_scheduler::{Configuration, Job, ValueBuffer, Worker, WorkerPool, option::FfiOption};
+use ular_scheduler::{
+    Configuration, Job, StandardThreadSpawner, ValueBuffer, Worker, WorkerPool, option::FfiOption,
+};
 
 #[derive(Clone, Copy)]
 struct Benchmark {
@@ -62,10 +64,9 @@ fn benchmark_chili(bencher: Bencher, benchmark: Benchmark) {
 
 #[divan::bench(args = benchmarks(), threads = false)]
 fn benchmark_heartbeat(bencher: Bencher, benchmark: Benchmark) {
-    let thread_pool = WorkerPool::new(Configuration {
+    let thread_pool = WorkerPool::new::<StandardThreadSpawner>(Configuration {
         thread_count: NonZero::new(num_cpus::get()).unwrap_or(nonzero!(1_usize)),
         heartbeat_interval: Duration::from_micros(100),
-        background_thread_initializer: None,
     });
 
     extern "C" fn node_left_sum(worker: &mut Worker, node: &Node) -> u64 {

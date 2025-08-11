@@ -19,12 +19,9 @@ use std::{
     time::Duration,
 };
 
-type WorkerInitializer = Box<dyn Fn(&Worker) + Send + Sync>;
-
 pub struct Configuration {
     pub thread_count: NonZero<usize>,
     pub heartbeat_interval: Duration,
-    pub background_thread_initializer: Option<WorkerInitializer>,
 }
 
 impl Default for Configuration {
@@ -32,8 +29,19 @@ impl Default for Configuration {
         Self {
             thread_count: NonZero::new(num_cpus::get()).unwrap_or(nonzero!(1_usize)),
             heartbeat_interval: Duration::from_micros(100),
-            background_thread_initializer: None,
         }
+    }
+}
+
+pub trait ThreadSpawner {
+    fn spawn_thread<A: FnOnce() + Send + 'static>(callback: A) -> JoinHandle<()>;
+}
+
+pub struct StandardThreadSpawner;
+
+impl ThreadSpawner for StandardThreadSpawner {
+    fn spawn_thread<A: FnOnce() + Send + 'static>(callback: A) -> JoinHandle<()> {
+        std::thread::spawn(callback)
     }
 }
 
@@ -74,17 +82,15 @@ impl WorkerPool {
         Ok(())
     }
 
-    pub fn new(configuration: Configuration) -> Self {
+    pub fn new<A: ThreadSpawner>(configuration: Configuration) -> Self {
         let context = Arc::new(WorkerContext::new());
         let thread_count = configuration.thread_count.into();
-        let background_thread_initializer = Arc::new(configuration.background_thread_initializer);
         let worker_threads = (0..thread_count)
             .map(|_| {
                 let cloned_context = Arc::clone(&context);
                 let heartbeat_value = Arc::new(AtomicBool::new(false));
-                let cloned_initializer = Arc::clone(&background_thread_initializer);
 
-                std::thread::spawn(move || {
+                A::spawn_thread(move || {
                     cloned_context
                         .heartbeat_values
                         .lock()
@@ -92,10 +98,6 @@ impl WorkerPool {
                         .push(Arc::clone(&heartbeat_value));
 
                     let mut worker = Worker::new(cloned_context, heartbeat_value);
-
-                    if let Some(initializer) = cloned_initializer.as_deref() {
-                        initializer(&worker);
-                    }
 
                     worker.execute_background_thread()
                 })

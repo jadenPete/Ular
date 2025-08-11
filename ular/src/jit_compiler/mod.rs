@@ -1368,12 +1368,10 @@ fn compile_main_harness_function<'a>(
 
     builder
         .build_call(
-            built_in_values._mmtk_bind_mutator.get_inkwell_function(
-                context,
-                execution_engine,
-                module,
-            ),
-            &[worker.into()],
+            built_in_values
+                ._mmtk_bind_current_mutator
+                .get_inkwell_function(context, execution_engine, module),
+            &[],
             "",
         )
         .unwrap();

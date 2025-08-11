@@ -5,7 +5,7 @@ use crate::{
         scope::LocalName,
         value::{UlarFunction, UlarValue},
     },
-    mmtk::runtime::{mmtk_alloc, mmtk_bind_mutator, mmtk_init},
+    mmtk::runtime::{mmtk_alloc, mmtk_bind_current_mutator, mmtk_bind_mutator, mmtk_init},
     parser::type_::NumericType,
 };
 use inkwell::{
@@ -25,7 +25,7 @@ use std::{
     ops::Div,
     ptr::null,
 };
-use ular_scheduler::{Job, Worker, WorkerPool, VALUE_BUFFER_WORD_SIZE};
+use ular_scheduler::{Job, ThreadSpawner, Worker, WorkerPool, VALUE_BUFFER_WORD_SIZE};
 
 extern "C" {
     fn __cxa_allocate_exception(size: usize) -> *mut *mut c_char;
@@ -241,7 +241,7 @@ pub struct BuiltInValues<'a> {
     pub _job_new: BuiltInMappedFunction<'a>,
     pub _job_type: StructType<'a>,
     pub _mmtk_alloc: BuiltInMappedFunction<'a>,
-    pub _mmtk_bind_mutator: BuiltInMappedFunction<'a>,
+    pub _mmtk_bind_current_mutator: BuiltInMappedFunction<'a>,
     pub _mmtk_init: BuiltInMappedFunction<'a>,
     pub _print_c_string: BuiltInMappedFunction<'a>,
     pub _value_buffer_option_type: StructType<'a>,
@@ -515,12 +515,10 @@ impl<'a> BuiltInValues<'a> {
             mmtk_alloc as usize,
         );
 
-        let _mmtk_bind_mutator = BuiltInMappedFunction::new(
-            String::from("_mmtk_bind_mutator"),
-            context
-                .void_type()
-                .fn_type(&[context.ptr_type(AddressSpace::default()).into()], false),
-            mmtk_bind_mutator as usize,
+        let _mmtk_bind_current_mutator = BuiltInMappedFunction::new(
+            String::from("_mmtk_bind_current_mutator"),
+            context.void_type().fn_type(&[], false),
+            mmtk_bind_current_mutator as usize,
         );
 
         let _mmtk_init = BuiltInMappedFunction::new(
@@ -632,7 +630,7 @@ impl<'a> BuiltInValues<'a> {
             _job_new,
             _job_type,
             _mmtk_alloc,
-            _mmtk_bind_mutator,
+            _mmtk_bind_current_mutator,
             _mmtk_init,
             _print_c_string,
             _value_buffer_option_type,
@@ -645,6 +643,18 @@ impl<'a> BuiltInValues<'a> {
             _worker_tick,
             _worker_try_join,
         }
+    }
+}
+
+pub struct UlarThreadSpawner {}
+
+impl ThreadSpawner for UlarThreadSpawner {
+    fn spawn_thread<A: FnOnce() + Send + 'static>(callback: A) -> std::thread::JoinHandle<()> {
+        let handle = std::thread::spawn(callback);
+
+        mmtk_bind_mutator(handle.thread().clone());
+
+        handle
     }
 }
 
@@ -672,10 +682,9 @@ pub unsafe extern "C" fn _print_c_string(string: *mut c_char) {
 }
 
 pub extern "C" fn _workerpool_new() -> *mut WorkerPool {
-    Box::into_raw(Box::new(WorkerPool::new(ular_scheduler::Configuration {
-        background_thread_initializer: Some(Box::new(mmtk_bind_mutator)),
-        ..ular_scheduler::Configuration::default()
-    })))
+    Box::into_raw(Box::new(WorkerPool::new::<UlarThreadSpawner>(
+        ular_scheduler::Configuration::default(),
+    )))
 }
 
 /// # Safety

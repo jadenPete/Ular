@@ -1,6 +1,9 @@
 pub mod runtime;
 
-use crate::mmtk::runtime::{is_mutator, number_of_mutators, with_mutator, with_mutators};
+use crate::mmtk::runtime::{
+    is_mutator, mmtk_pause_all_mutators, mmtk_resume_all_mutators, mmtk_spawn_gc_thread,
+    number_of_mutators, with_mutator, with_mutators,
+};
 use mmtk::{
     util::{
         copy::{CopySemantics, GCWorkerCopyContext},
@@ -75,26 +78,55 @@ impl ActivePlan<UlarVM> for UlarActivePlan {
     }
 }
 
+/// The purpose of this struct is to implement [Collection] from MMTk.
+///
+/// This tells MMTk how to pause and resume mutator threads—threads that can manipulate objects—for
+/// stop-the-world garbage collection.
+///
+/// # Collection in Ular
+///
+/// Threads can't be stopped and started at will, and even if they could, they need to be stopped at
+/// points where it's safe to to do so. To accomplish this, we employ a cooperative model of
+/// thread management. That means that the garbage collection thread, which will call the methods in
+/// [Collection], will signal to mutator threads that it wants them to stop, and those threads will
+/// periodically wait for such a signal (so-called *ticking*) before stopping.
+///
+/// There are a couple performance considerations here:
+/// 1. When we signal a thread to stop, we don't want that signaling to block other threads
+/// 2. We want threads to tick at the right frequency:
+///     - Clock cycles spent ticking could've been spent doing other work
+///     - Threads that tick less frequently may wait unnecessarily longer before stopping
+///
+/// We manage consideration #1 through complicated locking implemented in [crate::mmtk::runtime].
+///
+/// We manage consideration #2 by ticking before every object is allocated. This choice was made
+/// because:
+/// - It's performed frequently enough that we shouldn't have to wait *too* long
+/// - It's better than many of the obvious alternatives, e.g. ticking on every function call
+/// - It's easy to implement
+///
+/// The main concern is that we spend a long time doing work that doesn't necessitate allocation. If
+/// this proves to be an issue, we may reevaluate this strategy.
 pub struct UlarCollection;
 
 impl Collection<UlarVM> for UlarCollection {
     fn block_for_gc(_tls: VMMutatorThread) {
-        unimplemented!()
+        std::thread::park();
     }
 
     fn resume_mutators(_tls: VMWorkerThread) {
-        unimplemented!()
+        mmtk_resume_all_mutators();
     }
 
-    fn spawn_gc_thread(_tls: VMThread, _ctx: GCThreadContext<UlarVM>) {
-        unimplemented!()
+    fn spawn_gc_thread(_tls: VMThread, context: GCThreadContext<UlarVM>) {
+        mmtk_spawn_gc_thread(context);
     }
 
     fn stop_all_mutators<A: FnMut(&'static mut Mutator<UlarVM>)>(
         _tls: VMWorkerThread,
-        _mutator_visitor: A,
+        mutator_visitor: A,
     ) {
-        unimplemented!()
+        mmtk_pause_all_mutators(mutator_visitor);
     }
 }
 
