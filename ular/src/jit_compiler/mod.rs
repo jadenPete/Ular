@@ -1572,7 +1572,6 @@ pub fn compile_and_execute_program(
 
     let mut built_in_values = BuiltInValues::new(&context, &execution_engine);
     let mut fork_function_cache = ForkFunctionCache::new();
-
     let main_function = compile_program(
         &context,
         &mut built_in_values,

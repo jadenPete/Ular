@@ -11,7 +11,7 @@ use either::Left;
 use inkwell::{
     builder::Builder,
     context::Context,
-    types::{FunctionType, StructType},
+    types::{BasicTypeEnum, FunctionType, StructType},
     values::{BasicMetadataValueEnum, BasicValueEnum, FunctionValue, PointerValue},
     AddressSpace,
 };
@@ -96,7 +96,7 @@ impl<'a> ForkFunctionCache<'a> {
             }
 
             for &parameter_type in parameter_types {
-                context_field_types.push(parameter_type);
+                context_field_types.push(parameter_type.try_into().unwrap());
             }
 
             let context_type = context.struct_type(&context_field_types, false);
@@ -156,7 +156,11 @@ impl<'a> ForkFunctionCache<'a> {
                     .unwrap();
 
                 let value = builder
-                    .build_load(*parameter_type, pointer, &format!("{}_value", i))
+                    .build_load(
+                        BasicTypeEnum::try_from(*parameter_type).unwrap(),
+                        pointer,
+                        &format!("{}_value", i),
+                    )
                     .unwrap()
                     .into();
 

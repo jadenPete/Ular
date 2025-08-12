@@ -8,7 +8,7 @@ clap = { version = "4.5.29", features = ["derive"] }
 dashmap = { git = "https://github.com/g-plane/dashmap", branch = "explicit-lifetime" }
 either = "1.13.0"
 enum-iterator = "2.1.0"
-inkwell = { version = "0.5.0", features = ["llvm18-0"] }
+inkwell = { version = "0.6.0", features = ["llvm18-1"] }
 log = "0.4.25"
 mmtk = "0.31.0"
 nom = "7.1.3"
