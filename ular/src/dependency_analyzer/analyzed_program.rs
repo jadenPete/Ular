@@ -65,7 +65,12 @@ impl AnalyzedType {
     pub fn inkwell_type<'a>(&self, context: &'a Context) -> Option<BasicTypeEnum<'a>> {
         match self {
             Self::Bool => Some(BasicTypeEnum::IntType(context.i8_type())),
-            Self::Struct(_) | Self::Function(_) => Some(BasicTypeEnum::PointerType(
+            Self::Struct(_) => Some(BasicTypeEnum::PointerType(
+                // https://llvm.org/docs/Statepoints.html#rewritestatepointsforgc
+                context.ptr_type(AddressSpace::from(1)),
+            )),
+
+            Self::Function(_) => Some(BasicTypeEnum::PointerType(
                 context.ptr_type(AddressSpace::default()),
             )),
 

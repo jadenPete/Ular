@@ -1,4 +1,8 @@
-use inkwell::{module::Module, types::BasicType, values::GlobalValue};
+use inkwell::{
+    module::{Linkage, Module},
+    types::{BasicType, FunctionType},
+    values::{FunctionValue, GlobalValue},
+};
 
 pub struct UlarModule<'a> {
     pub underlying: Module<'a>,
@@ -6,6 +10,18 @@ pub struct UlarModule<'a> {
 }
 
 impl<'a> UlarModule<'a> {
+    pub fn add_garbage_collecting_function(
+        &self,
+        name: &str,
+        type_: FunctionType<'a>,
+        linkage: Option<Linkage>,
+    ) -> FunctionValue<'a> {
+        let result = self.underlying.add_function(name, type_, linkage);
+
+        result.set_gc("statepoint-example");
+        result
+    }
+
     pub fn add_global<A: BasicType<'a>>(&mut self, type_: A) -> GlobalValue<'a> {
         let result = self
             .underlying

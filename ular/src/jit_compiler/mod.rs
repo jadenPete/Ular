@@ -1,5 +1,6 @@
 mod built_in_values;
 mod fork_function_cache;
+mod memory_manager;
 mod module;
 mod scope;
 mod value;
@@ -15,6 +16,7 @@ use crate::{
     jit_compiler::{
         built_in_values::BuiltInValues,
         fork_function_cache::ForkFunctionCache,
+        memory_manager::UlarMemoryManager,
         module::UlarModule,
         scope::{JitCompilerScope, JitCompilerScopeContext},
         value::{UlarFunction, UlarStruct, UlarValue},
@@ -30,6 +32,8 @@ use inkwell::{
     builder::Builder,
     context::Context,
     execution_engine::{ExecutionEngine, JitFunction},
+    passes::PassBuilderOptions,
+    targets::{CodeModel, RelocMode, Target, TargetMachine},
     types::{ArrayType, StructType},
     values::{BasicValueEnum, FunctionValue, IntValue, PointerValue},
     AddressSpace, IntPredicate, OptimizationLevel,
@@ -171,21 +175,6 @@ impl<'a, 'context: 'a> CompilableExpression<'a, 'context> for CompilableCall<'a>
         let fork_function_pointer = fork_function.function.as_global_value().as_pointer_value();
         let context = fork_function.build_context(builder, scope, &arguments)?;
 
-        let job_name = scope.get_local_name();
-        let job = builder
-            .build_call(
-                compiler.built_in_values._job_new.get_inkwell_function(
-                    compiler.context,
-                    compiler.execution_engine,
-                    compiler.module,
-                ),
-                &[],
-                &job_name.to_string(),
-            )
-            .unwrap()
-            .try_as_basic_value()
-            .unwrap_left();
-
         let job_pointer_name = scope.get_local_name();
         let job_pointer = builder
             .build_alloca(
@@ -194,7 +183,18 @@ impl<'a, 'context: 'a> CompilableExpression<'a, 'context> for CompilableCall<'a>
             )
             .unwrap();
 
-        builder.build_store(job_pointer, job).unwrap();
+        builder
+            .build_call(
+                compiler.built_in_values._job_new.get_inkwell_function(
+                    compiler.context,
+                    compiler.execution_engine,
+                    compiler.module,
+                ),
+                &[job_pointer.into()],
+                "",
+            )
+            .unwrap();
+
         builder
             .build_call(
                 compiler.built_in_values._worker_fork.get_inkwell_function(
@@ -1163,7 +1163,7 @@ fn compile_main_function<'a>(
     program: &AnalyzedProgram,
     struct_types: Vec<(&'a AnalyzedStructDefinition, StructType<'a>)>,
 ) -> Result<FunctionValue<'a>, CompilationError> {
-    let main_function = module.underlying.add_function(
+    let main_function = module.add_garbage_collecting_function(
         MAIN_FUNCTION_NAME,
         context
             .void_type()
@@ -1202,9 +1202,7 @@ fn compile_main_function<'a>(
                         struct_definition.name.value, method_definition.name.value
                     );
 
-                    Ok(module
-                        .underlying
-                        .add_function(&function_name, function_type, None))
+                    Ok(module.add_garbage_collecting_function(&function_name, function_type, None))
                 })
                 .collect::<Result<_, _>>()
         })
@@ -1223,9 +1221,7 @@ fn compile_main_function<'a>(
                         position: Some(definition.get_position()),
                     })?;
 
-            Ok(module
-                .underlying
-                .add_function(&definition.name.value, function_type, None))
+            Ok(module.add_garbage_collecting_function(&definition.name.value, function_type, None))
         })
         .collect::<Result<_, _>>()?;
 
@@ -1318,7 +1314,7 @@ fn compile_main_harness_function<'a>(
     execution_engine: &ExecutionEngine<'a>,
     main_function: FunctionValue<'a>,
 ) {
-    let main_harness_function = module.underlying.add_function(
+    let main_harness_function = module.add_garbage_collecting_function(
         MAIN_HARNESS_FUNCTION_NAME,
         context.i8_type().fn_type(&[], false),
         None,
@@ -1547,6 +1543,28 @@ fn compile_program<'a>(
         main_function,
     );
 
+    let target_triple = TargetMachine::get_default_triple();
+    let target = Target::from_triple(&target_triple).unwrap();
+    let target_machine = target
+        .create_target_machine(
+            &target_triple,
+            "generic",
+            "",
+            OptimizationLevel::None,
+            RelocMode::Default,
+            CodeModel::JITDefault,
+        )
+        .unwrap();
+
+    module
+        .underlying
+        .run_passes(
+            "rewrite-statepoints-for-gc",
+            &target_machine,
+            PassBuilderOptions::create(),
+        )
+        .unwrap();
+
     if print_to_stderr {
         warn!("Output of the jit_compiler phase:");
         warn!("{}", module.underlying.print_to_string().to_string());
@@ -1565,9 +1583,20 @@ pub fn compile_and_execute_program(
 ) -> Result<u8, CompilationError> {
     let context = Context::create();
     let mut module: UlarModule = context.create_module("main").into();
+
+    // SAFETY: `memory_manager` is passed directly to
+    // `Module::create_mcjit_execution_engine_with_memory_manager`, which we assume doesn't use the
+    // allocated code or data sections after `UlarMemoryManager::destroy` is called
+    let memory_manager = unsafe { UlarMemoryManager::new() };
     let execution_engine = module
         .underlying
-        .create_jit_execution_engine(OptimizationLevel::None)
+        .create_mcjit_execution_engine_with_memory_manager(
+            memory_manager,
+            OptimizationLevel::None,
+            CodeModel::JITDefault,
+            false,
+            true,
+        )
         .unwrap();
 
     let mut built_in_values = BuiltInValues::new(&context, &execution_engine);

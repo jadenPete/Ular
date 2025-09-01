@@ -9,6 +9,8 @@ dashmap = { git = "https://github.com/g-plane/dashmap", branch = "explicit-lifet
 either = "1.13.0"
 enum-iterator = "2.1.0"
 inkwell = { version = "0.6.0", features = ["llvm18-1"] }
+libc = "0.2.175"
+libunwind-rs = "0.3.1"
 log = "0.4.25"
 mmtk = "0.31.0"
 nom = "7.1.3"

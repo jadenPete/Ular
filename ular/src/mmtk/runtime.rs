@@ -1,26 +1,36 @@
-use crate::mmtk::{UlarActivePlan, UlarVM};
+use crate::mmtk::{
+    stack_map::{IndexableStackMap, StackMap, StackMapLocation},
+    UlarActivePlan, UlarVM,
+};
 use dashmap::DashMap;
 use mmtk::{
     util::{
         constants::MIN_OBJECT_SIZE, Address, ObjectReference, OpaquePointer, VMMutatorThread,
         VMThread,
     },
-    vm::{ActivePlan, GCThreadContext, VMBinding},
+    vm::{slot::SimpleSlot, ActivePlan, GCThreadContext, RootsWorkFactory, VMBinding},
     AllocationSemantics, MMTKBuilder, Mutator, MMTK,
 };
 use std::{
+    fmt::{Debug, Formatter},
     ptr::NonNull,
     sync::{
         atomic::{AtomicBool, AtomicUsize, Ordering},
-        Arc, LazyLock, Mutex, OnceLock, Weak,
+        Arc, LazyLock, Mutex, OnceLock, RwLock, Weak,
     },
     thread::Thread,
 };
+
+enum GarbageCollectionRoot {
+    Direct(Address),
+    Indirect(SimpleSlot),
+}
 
 struct SafepointState {
     mutator: Mutex<Option<VMMutatorThread>>,
     should_pause: AtomicBool,
     paused: AtomicBool,
+    roots: Mutex<Vec<GarbageCollectionRoot>>,
 }
 
 impl SafepointState {
@@ -29,6 +39,7 @@ impl SafepointState {
             mutator: Mutex::new(None),
             should_pause: AtomicBool::new(false),
             paused: AtomicBool::new(false),
+            roots: Mutex::new(Vec::new()),
         }
     }
 }
@@ -55,6 +66,8 @@ static MUTATORS: LazyLock<DashMap<usize, UlarMutator>> = LazyLock::new(DashMap::
 static SAFEPOINT_STATES: LazyLock<Mutex<Vec<Weak<SafepointState>>>> =
     LazyLock::new(|| Mutex::new(Vec::new()));
 
+static STACK_MAP: OnceLock<RwLock<IndexableStackMap>> = OnceLock::new();
+
 thread_local! {
     static SAFEPOINT_STATE: LazyLock<Arc<SafepointState>> = LazyLock::new(|| {
         let mut safepoint_states = SAFEPOINT_STATES.lock().unwrap();
@@ -64,6 +77,14 @@ thread_local! {
 
         current_state
     });
+}
+
+pub struct StackMapAlreadySetError;
+
+impl Debug for StackMapAlreadySetError {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(formatter, "The stack map was already set.")
+    }
 }
 
 fn get_mmtk() -> &'static MMTK<UlarVM> {
@@ -159,6 +180,8 @@ pub extern "C" fn mmtk_init() {
 fn mmtk_maybe_pause_at_safepoint() {
     SAFEPOINT_STATE.with(|safepoint_state| {
         if safepoint_state.should_pause.load(Ordering::Relaxed) {
+            scan_current_thread_roots();
+
             safepoint_state.paused.store(true, Ordering::Relaxed);
 
             std::thread::park();
@@ -167,6 +190,35 @@ fn mmtk_maybe_pause_at_safepoint() {
             safepoint_state.paused.store(false, Ordering::Relaxed);
         }
     })
+}
+
+pub fn mmtk_register_roots(mut factory: impl RootsWorkFactory<SimpleSlot>) {
+    let safepoint_states = SAFEPOINT_STATES.lock().unwrap();
+    let mut direct_roots = Vec::new();
+    let mut indirect_roots = Vec::new();
+
+    for state in safepoint_states.iter() {
+        if let Some(state) = state.upgrade() {
+            let roots = state.roots.lock().unwrap();
+
+            for root in roots.iter() {
+                match root {
+                    GarbageCollectionRoot::Direct(address) => {
+                        if let Some(reference) = ObjectReference::from_raw_address(*address) {
+                            direct_roots.push(reference);
+                        }
+                    }
+
+                    GarbageCollectionRoot::Indirect(slot) => {
+                        indirect_roots.push(*slot);
+                    }
+                };
+            }
+        }
+    }
+
+    factory.create_process_roots_work(indirect_roots);
+    factory.create_process_pinning_roots_work(direct_roots);
 }
 
 pub fn mmtk_resume_all_mutators() {
@@ -191,6 +243,12 @@ pub fn mmtk_spawn_gc_thread(context: GCThreadContext<UlarVM>) {
             worker.run(thread, get_mmtk());
         }),
     };
+}
+
+pub fn mmtk_set_stack_map(stack_map: StackMap) -> Result<(), StackMapAlreadySetError> {
+    STACK_MAP
+        .set(RwLock::new(IndexableStackMap::from_stack_map(&stack_map)))
+        .map_err(|_| StackMapAlreadySetError)
 }
 
 pub fn mmtk_pause_all_mutators<A: FnMut(&'static mut Mutator<UlarVM>)>(mut mutator_visitor: A) {
@@ -227,6 +285,92 @@ pub fn mmtk_pause_all_mutators<A: FnMut(&'static mut Mutator<UlarVM>)>(mut mutat
 
 pub fn number_of_mutators() -> usize {
     MUTATORS.len()
+}
+
+fn scan_current_thread_roots() {
+    let stack_map = STACK_MAP
+        .get()
+        .expect("Expected the memory manager to set the stack map.")
+        .read()
+        .unwrap();
+
+    SAFEPOINT_STATE.with(|safepoint_state| {
+        let mut roots = safepoint_state.roots.lock().unwrap();
+
+        roots.clear();
+
+        let mut scan_at_function =
+            |cursor: &mut libunwind_rs::Cursor| -> Result<(), libunwind_rs::Error> {
+                let instruction_pointer = cursor.ip()? as u64;
+                let record =
+                    if let Some(record) = stack_map.records_by_address.get(&instruction_pointer) {
+                        record
+                    } else {
+                        return Ok(());
+                    };
+
+                for location in &record.locations {
+                    let root = match location {
+                        StackMapLocation::ConstIndex(i) => {
+                            let constant_value = stack_map.constants[*i as usize].0 as usize;
+
+                            // SAFETY: We assume the pointers inserted into the stack map are valid
+                            GarbageCollectionRoot::Direct(unsafe {
+                                Address::from_usize(constant_value)
+                            })
+                        }
+
+                        StackMapLocation::Constant(value) => {
+                            // SAFETY: We assume the pointers inserted into the stack map are valid
+                            GarbageCollectionRoot::Direct(unsafe {
+                                Address::from_usize(*value as usize)
+                            })
+                        }
+
+                        StackMapLocation::Direct { register, offset } => {
+                            let register_value = cursor.register(i32::from(*register))?;
+
+                            // SAFETY: We assume the pointers inserted into the stack map are valid
+                            GarbageCollectionRoot::Direct(unsafe {
+                                Address::from_usize(register_value + *offset as usize)
+                            })
+                        }
+
+                        StackMapLocation::Indirect { register, offset } => {
+                            let register_value = cursor.register(i32::from(*register))?;
+                            let pointer_pointer =
+                                (register_value + *offset as usize) as *const *const usize;
+
+                            GarbageCollectionRoot::Indirect(SimpleSlot::from_address(
+                                Address::from_ptr(pointer_pointer),
+                            ))
+                        }
+
+                        StackMapLocation::Register(i) => {
+                            let register_value = cursor.register(i32::from(*i))?;
+
+                            // SAFETY: We assume the pointers inserted into the stack map are valid
+                            GarbageCollectionRoot::Direct(unsafe {
+                                Address::from_usize(register_value)
+                            })
+                        }
+                    };
+
+                    roots.push(root);
+                }
+
+                Ok(())
+            };
+
+        libunwind_rs::Cursor::local(|mut cursor| loop {
+            scan_at_function(&mut cursor)?;
+
+            if !cursor.step()? {
+                break Ok(());
+            }
+        })
+        .unwrap();
+    });
 }
 
 fn with_current_mutator<A, B: FnOnce(&Mutator<UlarVM>) -> A>(callback: B) -> A {

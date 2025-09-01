@@ -503,14 +503,21 @@ impl<'a> BuiltInValues<'a> {
 
         let _job_new = BuiltInMappedFunction::new(
             String::from("_job_new"),
-            _job_type.fn_type(&[], false),
-            Job::<(), ()>::new as usize,
+            /*
+             * TODO: Return the job directly once this issue is fixed:
+             * https://github.com/llvm/llvm-project/issues/156254
+             */
+            context
+                .void_type()
+                .fn_type(&[context.ptr_type(AddressSpace::default()).into()], false),
+            _job_new as usize,
         );
 
         let _mmtk_alloc = BuiltInMappedFunction::new(
             String::from("_mmtk_alloc"),
             context
-                .ptr_type(AddressSpace::default())
+                // https://llvm.org/docs/Statepoints.html#rewritestatepointsforgc
+                .ptr_type(AddressSpace::from(1))
                 .fn_type(&[pointer_sized_int_type, pointer_sized_int_type], false),
             mmtk_alloc as usize,
         );
@@ -672,6 +679,10 @@ pub extern "C" fn _divide_number<A: Display + Div<Output = A> + Zero>(x: A, y: A
     } else {
         x / y
     }
+}
+
+pub unsafe extern "C" fn _job_new(job: *mut Job<(), ()>) {
+    *job = Job::new();
 }
 
 /// # Safety
