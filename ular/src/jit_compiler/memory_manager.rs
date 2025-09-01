@@ -2,10 +2,11 @@ use std::ffi::c_void;
 
 use crate::mmtk::{
     runtime::mmtk_set_stack_map,
-    stack_map::{Parseable, StackMap},
+    stack_map::{IndexableStackMap, Parseable, StackMap},
 };
 use inkwell::memory_manager::McjitMemoryManager;
 use libc::{c_uint, uintptr_t};
+use log::warn;
 
 #[derive(Debug)]
 struct StackMapSection {
@@ -20,6 +21,7 @@ pub struct UlarMemoryManager {
     code_buffer_offset: usize,
     data_buffer: *mut u8,
     data_buffer_offset: usize,
+    print_stack_map: bool,
     stack_map_section: Option<StackMapSection>,
 }
 
@@ -29,7 +31,7 @@ impl UlarMemoryManager {
     /// After calling [UlarMemoryManager::destroy], none of the pointers returned by
     /// [UlarMemoryManager::allocate_code_section] or [UlarMemoryManager::allocate_data_section] must
     /// be read from or written to.
-    pub unsafe fn new() -> Self {
+    pub unsafe fn new(print_stack_map: bool) -> Self {
         let capacity = 1024 * 128;
 
         // SAFETY: All of the requirements of calling `mmap` have been satisfied
@@ -62,6 +64,7 @@ impl UlarMemoryManager {
             code_buffer_offset: 0,
             data_buffer,
             data_buffer_offset: 0,
+            print_stack_map,
             stack_map_section: None,
         }
     }
@@ -79,8 +82,13 @@ impl UlarMemoryManager {
             unsafe { std::slice::from_raw_parts_mut(section.pointer, section.size) };
 
         let (stack_map, _) = StackMap::parse(section_slice);
+        let indexable_stack_map = IndexableStackMap::from_stack_map(&stack_map);
 
-        mmtk_set_stack_map(stack_map).unwrap();
+        if self.print_stack_map {
+            warn!("Stack map:\n{:#?}", indexable_stack_map);
+        }
+
+        mmtk_set_stack_map(indexable_stack_map).unwrap();
     }
 }
 

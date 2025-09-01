@@ -15,6 +15,7 @@ impl<const SIZE: usize, Integer: FromBytes<Bytes = [u8; SIZE]>> Parseable for In
     }
 }
 
+#[derive(Debug)]
 pub struct IndexableStackMap {
     pub constants: Vec<StackMapConstant>,
     pub records_by_address: HashMap<u64, StackMapRecord>,
@@ -77,7 +78,7 @@ impl Parseable for StackMap {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct StackMapConstant(pub u64);
 
 impl Parseable for StackMapConstant {
@@ -112,7 +113,7 @@ impl Parseable for StackMapFunction {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum StackMapLocation {
     Register(u16),
     Direct { register: u16, offset: i32 },
@@ -147,7 +148,7 @@ impl Parseable for StackMapLocation {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct StackMapRecord {
     pub instruction_offset: u32,
     pub locations: Vec<StackMapLocation>,

@@ -1,5 +1,5 @@
 use crate::mmtk::{
-    stack_map::{IndexableStackMap, StackMap, StackMapLocation},
+    stack_map::{IndexableStackMap, StackMapLocation},
     UlarActivePlan, UlarVM,
 };
 use dashmap::DashMap;
@@ -245,9 +245,9 @@ pub fn mmtk_spawn_gc_thread(context: GCThreadContext<UlarVM>) {
     };
 }
 
-pub fn mmtk_set_stack_map(stack_map: StackMap) -> Result<(), StackMapAlreadySetError> {
+pub fn mmtk_set_stack_map(stack_map: IndexableStackMap) -> Result<(), StackMapAlreadySetError> {
     STACK_MAP
-        .set(RwLock::new(IndexableStackMap::from_stack_map(&stack_map)))
+        .set(RwLock::new(stack_map))
         .map_err(|_| StackMapAlreadySetError)
 }
 

@@ -6,6 +6,7 @@ mod scope;
 mod value;
 
 use crate::{
+    arguments::Arguments,
     data_structures::graph::DirectedGraph,
     dependency_analyzer::analyzed_program::{
         AnalyzedBlock, AnalyzedCall, AnalyzedExpression, AnalyzedFunctionDefinition, AnalyzedIf,
@@ -1566,8 +1567,10 @@ fn compile_program<'a>(
         .unwrap();
 
     if print_to_stderr {
-        warn!("Output of the jit_compiler phase:");
-        warn!("{}", module.underlying.print_to_string().to_string());
+        warn!(
+            "Output of the jit_compiler phase:\n{}",
+            module.underlying.print_to_string().to_string()
+        );
     }
 
     Ok(unsafe {
@@ -1579,7 +1582,7 @@ fn compile_program<'a>(
 
 pub fn compile_and_execute_program(
     program: &AnalyzedProgram,
-    print_to_stderr: bool,
+    arguments: &Arguments,
 ) -> Result<u8, CompilationError> {
     let context = Context::create();
     let mut module: UlarModule = context.create_module("main").into();
@@ -1587,7 +1590,7 @@ pub fn compile_and_execute_program(
     // SAFETY: `memory_manager` is passed directly to
     // `Module::create_mcjit_execution_engine_with_memory_manager`, which we assume doesn't use the
     // allocated code or data sections after `UlarMemoryManager::destroy` is called
-    let memory_manager = unsafe { UlarMemoryManager::new() };
+    let memory_manager = unsafe { UlarMemoryManager::new(arguments.print_stack_map) };
     let execution_engine = module
         .underlying
         .create_mcjit_execution_engine_with_memory_manager(
@@ -1608,7 +1611,10 @@ pub fn compile_and_execute_program(
         &mut module,
         &execution_engine,
         program,
-        print_to_stderr,
+        arguments
+            .debug_phase
+            .iter()
+            .any(|phase| phase == "jit_compiler"),
     )?;
 
     Ok(unsafe { main_function.call() })

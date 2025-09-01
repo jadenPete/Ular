@@ -1,3 +1,4 @@
+mod arguments;
 mod data_structures;
 mod dependency_analyzer;
 mod error_reporting;
@@ -10,6 +11,7 @@ mod simplifier;
 mod typechecker;
 
 use crate::{
+    arguments::Arguments,
     dependency_analyzer::AnalyzerPhase,
     jit_compiler::compile_and_execute_program,
     lexer::{token::Tokens, LexerPhase},
@@ -23,13 +25,6 @@ use error_reporting::{report_error, CompilationError};
 use log::LevelFilter;
 use simplelog::{ColorChoice, ConfigBuilder, TermLogger, TerminalMode};
 use std::{fmt::Display, io::Read, process::ExitCode};
-
-#[derive(Parser)]
-struct Arguments {
-    /// The name of a phase whose output to print. This can be supplied multiple times. Accepted values are "lexer", "parser", "simplifier", "typechecker", or "jit_compiler"
-    #[arg(long)]
-    debug_phase: Vec<String>,
-}
 
 fn main() -> std::io::Result<ExitCode> {
     let arguments = Arguments::parse();
@@ -79,13 +74,7 @@ fn main() -> std::io::Result<ExitCode> {
     );
 
     let return_code = unwrap_phase_result(
-        compile_and_execute_program(
-            &analyzed_ast,
-            arguments
-                .debug_phase
-                .iter()
-                .any(|name| name == "jit_compiler"),
-        ),
+        compile_and_execute_program(&analyzed_ast, &arguments),
         &buffer,
     );
 
