@@ -2,7 +2,7 @@ pub mod program;
 pub mod type_;
 
 use crate::{
-    error_reporting::Position,
+    error_reporting::{CompilationError, CompilationErrorMessage, Position},
     lexer::token::{PositionedToken, Token, Tokens},
     parser::{
         program::{
@@ -28,16 +28,30 @@ use program::Node;
 
 pub struct ParserPhase;
 
-impl<'a> Phase<Tokens<'a>, Program, nom::Err<nom::error::Error<Tokens<'a>>>> for ParserPhase {
+impl Phase<Tokens<'_>> for ParserPhase {
+    type Output = Program;
+
     fn name() -> String {
         String::from("parser")
     }
 
-    fn execute(
-        &self,
-        tokens: Tokens<'a>,
-    ) -> Result<Program, nom::Err<nom::error::Error<Tokens<'a>>>> {
-        parse_program(tokens).map(|(_, program)| program)
+    fn execute(&self, tokens: Tokens) -> Result<Program, CompilationError> {
+        match parse_program(tokens) {
+            Ok((_, program)) => Ok(program),
+            Err(error) => {
+                let underlying = match error {
+                    // We shouldn't see `Incomplete` errors, since the input we provide isn't streamed
+                    nom::Err::Incomplete(underlying) => panic!("{:?}", underlying),
+                    nom::Err::Error(underlying) => underlying,
+                    nom::Err::Failure(underlying) => underlying,
+                };
+
+                Err(CompilationError {
+                    message: CompilationErrorMessage::ParserError(underlying.code),
+                    position: Some(underlying.input.position()),
+                })
+            }
+        }
     }
 }
 
@@ -60,7 +74,7 @@ fn positioned<'a, O, F: Parser<Tokens<'a>, O, nom::error::Error<Tokens<'a>>>>(
     parser: F,
 ) -> impl FnMut(Tokens<'a>) -> IResult<Tokens<'a>, (Position, O)> {
     map(consumed(parser), |(consumed, output)| {
-        (consumed.get_position(), output)
+        (consumed.position(), output)
     })
 }
 
@@ -101,7 +115,7 @@ fn parse_struct_definition(input: Tokens) -> IResult<Tokens, StructDefinition> {
 
     let (advanced, methods) = many0(parse_struct_method(&name.value))(advanced)?;
     let (advanced, _) = parse_token(Token::RightCurlyBracket)(advanced)?;
-    let position = input.slice(..input.offset(&advanced)).get_position();
+    let position = input.slice(..input.offset(&advanced)).position();
 
     Ok((
         advanced,

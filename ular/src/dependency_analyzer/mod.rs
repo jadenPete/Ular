@@ -674,7 +674,9 @@ impl AnalyzerFunctions {
 
 pub struct AnalyzerPhase;
 
-impl Phase<&TypedProgram, AnalyzedProgram, CompilationError> for AnalyzerPhase {
+impl Phase<&TypedProgram> for AnalyzerPhase {
+    type Output = AnalyzedProgram;
+
     fn name() -> String {
         String::from("analyzer")
     }

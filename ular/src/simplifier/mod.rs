@@ -1,7 +1,7 @@
 pub mod simple_program;
 
 use crate::{
-    error_reporting::Position,
+    error_reporting::{CompilationError, Position},
     parser::{
         program::{
             Block, Call, Expression, FunctionDefinition, If, InfixOperation, InfixOperator, Node,
@@ -21,12 +21,14 @@ use crate::{
 
 pub struct SimplifierPhase;
 
-impl Phase<&Program, SimpleProgram, ()> for SimplifierPhase {
+impl Phase<&Program> for SimplifierPhase {
+    type Output = SimpleProgram;
+
     fn name() -> String {
         String::from("simplifier")
     }
 
-    fn execute(&self, program: &Program) -> Result<SimpleProgram, ()> {
+    fn execute(&self, program: &Program) -> Result<SimpleProgram, CompilationError> {
         Ok(simplify_program(program))
     }
 }

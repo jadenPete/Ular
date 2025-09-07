@@ -1,7 +1,7 @@
 use crate::error_reporting::Position;
 use nom::{InputIter, InputLength, Needed, Offset, Slice};
 use std::{
-    fmt::{Debug, Formatter},
+    fmt::Debug,
     iter::Enumerate,
     ops::{Index, RangeFrom, RangeTo},
     slice::SliceIndex,
@@ -142,7 +142,7 @@ pub struct Tokens<'a> {
 }
 
 impl Tokens<'_> {
-    pub fn get_position(&self) -> Position {
+    pub fn position(&self) -> Position {
         Position(match (self.tokens.first(), self.tokens.last()) {
             (Some(first_token), Some(last_token)) => {
                 first_token.position.0.start..last_token.position.0.end
@@ -154,12 +154,6 @@ impl Tokens<'_> {
              */
             _ => 0..self.source.len(),
         })
-    }
-}
-
-impl Debug for Tokens<'_> {
-    fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(formatter, "{}", &self.source[self.get_position().0])
     }
 }
 

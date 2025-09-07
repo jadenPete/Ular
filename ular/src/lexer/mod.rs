@@ -1,7 +1,7 @@
 pub mod token;
 
 use crate::{
-    error_reporting::Position,
+    error_reporting::{CompilationError, CompilationErrorMessage, Position},
     lexer::token::{PositionedToken, Token},
     phase::Phase,
 };
@@ -30,10 +30,14 @@ struct PositionedSource<'a> {
 }
 
 impl PositionedSource<'_> {
+    fn position(&self) -> Position {
+        Position(self.index..self.index + self.source.len())
+    }
+
     fn to_positioned_token(self, token: Token) -> PositionedToken {
         PositionedToken {
             token,
-            position: Position(self.index..self.index + self.source.len()),
+            position: self.position(),
         }
     }
 }
@@ -225,16 +229,30 @@ impl InputTakeAtPosition for PositionedSource<'_> {
 
 pub struct LexerPhase;
 
-impl<'a> Phase<&'a str, Vec<PositionedToken>, nom::Err<nom::error::Error<&'a str>>> for LexerPhase {
+impl Phase<&str> for LexerPhase {
+    type Output = Vec<PositionedToken>;
+
     fn name() -> String {
         String::from("lexer")
     }
 
-    fn execute(
-        &self,
-        input: &'a str,
-    ) -> Result<Vec<PositionedToken>, nom::Err<nom::error::Error<&'a str>>> {
-        lex_tokens(input).map(move |(_, tokens)| tokens)
+    fn execute(&self, input: &str) -> Result<Vec<PositionedToken>, CompilationError> {
+        match lex_tokens(input) {
+            Ok((_, tokens)) => Ok(tokens),
+            Err(error) => {
+                let underlying = match error {
+                    // We shouldn't see `Incomplete` errors, since the input we provide isn't streamed
+                    nom::Err::Incomplete(underlying) => panic!("{:?}", underlying),
+                    nom::Err::Error(underlying) => underlying,
+                    nom::Err::Failure(underlying) => underlying,
+                };
+
+                Err(CompilationError {
+                    message: CompilationErrorMessage::LexerError(underlying.code),
+                    position: Some(underlying.input.position()),
+                })
+            }
+        }
     }
 }
 
@@ -372,17 +390,9 @@ fn lex_tokens_underlying(
     )(input)
 }
 
-fn lex_tokens(input: &str) -> IResult<&str, Vec<PositionedToken>> {
-    let (input, result) = lex_tokens_underlying(PositionedSource {
+fn lex_tokens(input: &str) -> IResult<PositionedSource, Vec<PositionedToken>> {
+    lex_tokens_underlying(PositionedSource {
         source: input,
         index: 0,
     })
-    .map_err(|error| {
-        error.map(|error| nom::error::Error {
-            input: error.input.source,
-            code: error.code,
-        })
-    })?;
-
-    Ok((input.source, result))
 }

@@ -30,6 +30,7 @@ pub enum CompilationErrorMessage {
     },
 
     InternalError(InternalError),
+    LexerError(nom::error::ErrorKind),
     MissingFields {
         type_: String,
         fields: Vec<String>,
@@ -43,6 +44,7 @@ pub enum CompilationErrorMessage {
         maximum: i128,
     },
 
+    ParserError(nom::error::ErrorKind),
     StructAlreadyDefined {
         name: String,
     },
@@ -128,6 +130,7 @@ impl Display for CompilationErrorMessage {
             }
 
             Self::InternalError(error) => write!(formatter, "{}", error),
+            Self::LexerError(error) => write!(formatter, "Lexing error: {}", error.description()),
             Self::MissingFields { type_, fields } => {
                 let field_word = if fields.len() == 1 { "field" } else { "fields" };
 
@@ -180,6 +183,7 @@ impl Display for CompilationErrorMessage {
                 write!(formatter, "The default numeric type is i32, but {} isn't between {} and {}. Consider using a different type.", value, minimum, maximum)
             }
 
+            Self::ParserError(error) => write!(formatter, "Parsing error: {}", error.description()),
             Self::StructAlreadyDefined { name } => {
                 write!(formatter, "A struct with name `{}` was already defined.", name)
             }

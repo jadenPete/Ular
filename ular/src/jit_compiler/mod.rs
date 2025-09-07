@@ -6,7 +6,6 @@ mod scope;
 mod value;
 
 use crate::{
-    arguments::Arguments,
     data_structures::graph::DirectedGraph,
     dependency_analyzer::analyzed_program::{
         AnalyzedBlock, AnalyzedCall, AnalyzedExpression, AnalyzedFunctionDefinition, AnalyzedIf,
@@ -25,6 +24,7 @@ use crate::{
     parser::program::{
         InfixOperator, LogicalInfixOperator, Node, NumericInfixOperator, UniversalInfixOperator,
     },
+    phase::Phase,
     simplifier::simple_program::SimplePrefixOperator,
 };
 use built_in_values::BuiltInFunction;
@@ -39,8 +39,10 @@ use inkwell::{
     values::{BasicValueEnum, FunctionValue, IntValue, PointerValue},
     AddressSpace, IntPredicate, OptimizationLevel,
 };
-use log::warn;
-use std::collections::HashMap;
+use std::{
+    collections::HashMap,
+    fmt::{Debug, Formatter},
+};
 use ular_scheduler::VALUE_BUFFER_WORD_SIZE;
 
 const MAIN_HARNESS_FUNCTION_NAME: &str = "main_harness";
@@ -62,6 +64,20 @@ trait CompilableExpression<'a, 'context> {
         builder: &Builder<'context>,
         scope: &mut JitCompilerScope<'_, 'context>,
     ) -> Result<UlarValue<'context>, CompilationError>;
+}
+
+pub struct ExecutorPhase;
+
+impl Phase<&CompiledProgram<'_>> for ExecutorPhase {
+    type Output = u8;
+
+    fn execute(&self, program: &CompiledProgram) -> Result<u8, CompilationError> {
+        Ok(unsafe { program.main_harness_function.call() })
+    }
+
+    fn name() -> String {
+        String::from("executor")
+    }
 }
 
 trait ForkedExpression<'a> {
@@ -880,6 +896,69 @@ impl<'context> InlineExpression<'context> for CompilableStructApplication<'_> {
     }
 }
 
+pub struct CompiledProgram<'a> {
+    module: UlarModule<'a>,
+    main_harness_function: JitFunction<'a, unsafe extern "C" fn() -> u8>,
+}
+
+impl Debug for CompiledProgram<'_> {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(
+            formatter,
+            "{}",
+            self.module.underlying.print_to_string().to_str().unwrap()
+        )
+    }
+}
+
+pub struct JitCompilerPhase<'a> {
+    pub context: &'a Context,
+    pub print_stack_map: bool,
+}
+
+impl<'a> Phase<&AnalyzedProgram> for JitCompilerPhase<'a> {
+    type Output = CompiledProgram<'a>;
+
+    fn execute(&self, program: &AnalyzedProgram) -> Result<CompiledProgram<'a>, CompilationError> {
+        let mut module: UlarModule = self.context.create_module("main").into();
+
+        // SAFETY: `memory_manager` is passed directly to
+        // `Module::create_mcjit_execution_engine_with_memory_manager`, which we assume doesn't use
+        // the allocated code or data sections after `UlarMemoryManager::destroy` is called
+        let memory_manager = unsafe { UlarMemoryManager::new(self.print_stack_map) };
+        let execution_engine = module
+            .underlying
+            .create_mcjit_execution_engine_with_memory_manager(
+                memory_manager,
+                OptimizationLevel::None,
+                CodeModel::JITDefault,
+                false,
+                true,
+            )
+            .unwrap();
+
+        let mut built_in_values = BuiltInValues::new(self.context, &execution_engine);
+        let mut fork_function_cache = ForkFunctionCache::new();
+        let main_harness_function = compile_program(
+            self.context,
+            &mut built_in_values,
+            &mut fork_function_cache,
+            &mut module,
+            &execution_engine,
+            program,
+        )?;
+
+        Ok(CompiledProgram {
+            module,
+            main_harness_function,
+        })
+    }
+
+    fn name() -> String {
+        String::from("jit_compiler")
+    }
+}
+
 struct JitFunctionCompiler<'a, 'context> {
     built_in_values: &'a mut BuiltInValues<'context>,
     context: &'context Context,
@@ -1162,7 +1241,7 @@ fn compile_main_function<'a>(
     module: &mut UlarModule<'a>,
     execution_engine: &ExecutionEngine<'a>,
     program: &AnalyzedProgram,
-    struct_types: Vec<(&'a AnalyzedStructDefinition, StructType<'a>)>,
+    struct_types: Vec<(&AnalyzedStructDefinition, StructType<'a>)>,
 ) -> Result<FunctionValue<'a>, CompilationError> {
     let main_function = module.add_garbage_collecting_function(
         MAIN_FUNCTION_NAME,
@@ -1495,8 +1574,7 @@ fn compile_program<'a>(
     fork_function_cache: &mut ForkFunctionCache<'a>,
     module: &mut UlarModule<'a>,
     execution_engine: &ExecutionEngine<'a>,
-    program: &'a AnalyzedProgram,
-    print_to_stderr: bool,
+    program: &AnalyzedProgram,
 ) -> Result<JitFunction<'a, MainFunction>, CompilationError> {
     let builder = context.create_builder();
     let struct_types = program
@@ -1566,58 +1644,11 @@ fn compile_program<'a>(
         )
         .unwrap();
 
-    if print_to_stderr {
-        warn!(
-            "Output of the jit_compiler phase:\n{}",
-            module.underlying.print_to_string().to_string()
-        );
-    }
-
     Ok(unsafe {
         execution_engine
             .get_function(MAIN_HARNESS_FUNCTION_NAME)
             .unwrap()
     })
-}
-
-pub fn compile_and_execute_program(
-    program: &AnalyzedProgram,
-    arguments: &Arguments,
-) -> Result<u8, CompilationError> {
-    let context = Context::create();
-    let mut module: UlarModule = context.create_module("main").into();
-
-    // SAFETY: `memory_manager` is passed directly to
-    // `Module::create_mcjit_execution_engine_with_memory_manager`, which we assume doesn't use the
-    // allocated code or data sections after `UlarMemoryManager::destroy` is called
-    let memory_manager = unsafe { UlarMemoryManager::new(arguments.print_stack_map) };
-    let execution_engine = module
-        .underlying
-        .create_mcjit_execution_engine_with_memory_manager(
-            memory_manager,
-            OptimizationLevel::None,
-            CodeModel::JITDefault,
-            false,
-            true,
-        )
-        .unwrap();
-
-    let mut built_in_values = BuiltInValues::new(&context, &execution_engine);
-    let mut fork_function_cache = ForkFunctionCache::new();
-    let main_function = compile_program(
-        &context,
-        &mut built_in_values,
-        &mut fork_function_cache,
-        &mut module,
-        &execution_engine,
-        program,
-        arguments
-            .debug_phase
-            .iter()
-            .any(|phase| phase == "jit_compiler"),
-    )?;
-
-    Ok(unsafe { main_function.call() })
 }
 
 fn get_value_buffer_type(context: &Context) -> ArrayType {

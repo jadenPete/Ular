@@ -14,7 +14,7 @@ pub trait Node {
 ///
 /// It follows the following grammar, defined in a modified
 /// [extended Backus–Naur form](https://en.wikipedia.org/wiki/Extended_Backus%E2%80%93Naur_form):
-/// ```
+/// ```ebnf
 /// program = statement*;
 /// statement = struct_definition | variable_definition | function_definition | expression ';' | ';';
 /// struct_definition =

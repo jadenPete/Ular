@@ -741,7 +741,9 @@ impl<'a> Typechecker<'a> {
 
 pub struct TypecheckerPhase;
 
-impl Phase<&SimpleProgram, TypedProgram, CompilationError> for TypecheckerPhase {
+impl Phase<&SimpleProgram> for TypecheckerPhase {
+    type Output = TypedProgram;
+
     fn name() -> String {
         String::from("typechecker")
     }
