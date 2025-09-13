@@ -1,0 +1,10 @@
+mod boolean;
+mod common;
+mod error_reporting;
+mod function;
+mod if_expression;
+mod integration;
+mod number;
+mod print;
+mod structs;
+mod typechecking;
