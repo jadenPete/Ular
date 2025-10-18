@@ -180,16 +180,22 @@ pub extern "C" fn mmtk_init() {
 fn mmtk_maybe_pause_at_safepoint() {
     SAFEPOINT_STATE.with(|safepoint_state| {
         if safepoint_state.should_pause.load(Ordering::Relaxed) {
-            scan_current_thread_roots();
-
-            safepoint_state.paused.store(true, Ordering::Relaxed);
-
-            std::thread::park();
-
-            // When this statement is executed, we will have woken up
-            safepoint_state.paused.store(false, Ordering::Relaxed);
+            mmtk_pause_at_safepoint();
         }
     })
+}
+
+pub fn mmtk_pause_at_safepoint() {
+    SAFEPOINT_STATE.with(|safepoint_state| {
+        scan_current_thread_roots();
+
+        safepoint_state.paused.store(true, Ordering::Relaxed);
+
+        std::thread::park();
+
+        // When this statement is executed, we will have woken up
+        safepoint_state.paused.store(false, Ordering::Relaxed);
+    });
 }
 
 pub fn mmtk_register_roots(mut factory: impl RootsWorkFactory<SimpleSlot>) {

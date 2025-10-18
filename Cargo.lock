@@ -63,9 +63,9 @@ dependencies = [
 
 [[package]]
 name = "anyhow"
-version = "1.0.97"
+version = "1.0.100"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dcfed56ad506cb2c684a14971b8861fdc3baaaae314b9e5f9bb532cbe3ba7a4f"
+checksum = "a23eb6b1614318a8071c9b2521f36b424b2c83db5eb3a0fead4a6c0809af6e61"
 
 [[package]]
 name = "atomic"
@@ -391,6 +391,12 @@ name = "downcast-rs"
 version = "2.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ea8a8b81cacc08888170eef4d13b775126db426d0b348bee9d18c2c1eaf123cf"
+
+[[package]]
+name = "dyn-clone"
+version = "1.0.20"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d0881ea181b1df73ff77ffaaf9c7544ecc11e82fba9b5f27b262a3c73a332555"
 
 [[package]]
 name = "either"
@@ -1441,6 +1447,7 @@ dependencies = [
  "anyhow",
  "clap",
  "dashmap",
+ "dyn-clone",
  "either",
  "enum-iterator",
  "inkwell",
@@ -1453,6 +1460,7 @@ dependencies = [
  "simplelog",
  "ular-derive",
  "ular-scheduler",
+ "ular-test-common",
 ]
 
 [[package]]
@@ -1474,6 +1482,13 @@ dependencies = [
  "intrusive-collections",
  "nonzero_ext",
  "num_cpus",
+]
+
+[[package]]
+name = "ular-test-common"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
 ]
 
 [[package]]

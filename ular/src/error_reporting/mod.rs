@@ -1,15 +1,24 @@
 use std::{
-    fmt::{Display, Formatter},
-    ops::Range,
+    error::Error, fmt::{Debug, Display, Formatter}, ops::Range
 };
 
 const CONTEXT_LINES: usize = 2;
 
+#[derive(Debug)]
 pub struct CompilationError {
     pub message: CompilationErrorMessage,
     pub position: Option<Position>,
 }
 
+impl Display for CompilationError {
+    fn fmt(&self, formatter: &mut Formatter) -> std::fmt::Result {
+        write!(formatter, "{}", self.message)
+    }
+}
+
+impl Error for CompilationError {}
+
+#[derive(Debug)]
 pub enum CompilationErrorMessage {
     DuplicateField {
         field: String,
@@ -239,6 +248,7 @@ impl Display for CompilationErrorMessage {
     }
 }
 
+#[derive(Debug)]
 pub enum InternalError {
     AnalyzerStructNotDefined {
         index: usize,

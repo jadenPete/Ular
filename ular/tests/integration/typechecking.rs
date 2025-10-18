@@ -1,4 +1,4 @@
-use crate::common::evaluate_program;
+use ular_test_common::evaluate_program;
 
 #[test]
 fn function_arguments_are_typechecked() -> anyhow::Result<()> {

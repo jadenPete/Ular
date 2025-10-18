@@ -2,6 +2,7 @@ use clap::Parser;
 use inkwell::context::Context;
 use log::LevelFilter;
 use simplelog::{ColorChoice, ConfigBuilder, TermLogger, TerminalMode};
+use std::collections::HashMap;
 use std::{io::Read, process::ExitCode};
 use ular::arguments::Arguments;
 use ular::error_reporting::report_error;
@@ -31,7 +32,7 @@ fn main() -> std::io::Result<ExitCode> {
     std::io::stdin().read_to_string(&mut buffer)?;
 
     let context = Context::create();
-    let return_code = run_phases(&context, &buffer, &arguments)
+    let return_code = run_phases(&context, &buffer, &arguments, HashMap::new())
         .unwrap_or_else(|error| report_error(error, &buffer));
 
     Ok(ExitCode::from(return_code))

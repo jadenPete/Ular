@@ -1,4 +1,4 @@
-use crate::common::evaluate_program;
+use ular_test_common::evaluate_program;
 
 #[test]
 fn functions_work() -> anyhow::Result<()> {

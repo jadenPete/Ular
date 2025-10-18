@@ -8,6 +8,7 @@ use crate::{
     mmtk::runtime::{mmtk_alloc, mmtk_bind_current_mutator, mmtk_bind_mutator, mmtk_init},
     parser::type_::NumericType,
 };
+use dyn_clone::DynClone;
 use inkwell::{
     builder::Builder,
     context::Context,
@@ -36,7 +37,7 @@ extern "C" {
     ) -> !;
 }
 
-pub trait BuiltInValue<'a> {
+pub trait BuiltInValue<'a>: DynClone {
     fn get_value(
         &mut self,
         local_name: LocalName,
@@ -47,13 +48,16 @@ pub trait BuiltInValue<'a> {
     ) -> UlarValue<'a>;
 }
 
+dyn_clone::clone_trait_object!(BuiltInValue<'_>);
+
+#[derive(Clone)]
 pub struct BuiltInBool<'a> {
     value: u64,
     computed_value: Option<UlarValue<'a>>,
 }
 
 impl BuiltInBool<'_> {
-    fn new(value: u64) -> Self {
+    pub fn new(value: u64) -> Self {
         Self {
             value,
             computed_value: None,
@@ -126,7 +130,7 @@ pub trait BuiltInFunction<'a> {
     }
 }
 
-impl<'a, A: BuiltInFunction<'a>> BuiltInValue<'a> for A {
+impl<'a, A: BuiltInFunction<'a> + DynClone> BuiltInValue<'a> for A {
     fn get_value(
         &mut self,
         _local_name: LocalName,
@@ -143,6 +147,7 @@ impl<'a, A: BuiltInFunction<'a>> BuiltInValue<'a> for A {
     }
 }
 
+#[derive(Clone)]
 pub struct BuiltInLinkedFunction<'a> {
     name: String,
     signature: FunctionType<'a>,
@@ -150,7 +155,7 @@ pub struct BuiltInLinkedFunction<'a> {
 }
 
 impl<'a> BuiltInLinkedFunction<'a> {
-    fn new(name: String, signature: FunctionType<'a>) -> Self {
+    pub fn new(name: String, signature: FunctionType<'a>) -> Self {
         Self {
             name,
             signature,
@@ -180,6 +185,7 @@ impl<'a> BuiltInFunction<'a> for BuiltInLinkedFunction<'a> {
     }
 }
 
+#[derive(Clone)]
 pub struct BuiltInMappedFunction<'a> {
     name: String,
     signature: FunctionType<'a>,
@@ -188,7 +194,7 @@ pub struct BuiltInMappedFunction<'a> {
 }
 
 impl<'a> BuiltInMappedFunction<'a> {
-    fn new(name: String, signature: FunctionType<'a>, address: usize) -> Self {
+    pub fn new(name: String, signature: FunctionType<'a>, address: usize) -> Self {
         Self {
             name,
             signature,
@@ -290,8 +296,12 @@ impl<'a> BuiltInValues<'a> {
         }
     }
 
-    pub fn new(context: &'a Context, execution_engine: &ExecutionEngine<'a>) -> Self {
-        let mut referencable_values = HashMap::<String, Box<dyn BuiltInValue>>::new();
+    pub fn new(
+        context: &'a Context,
+        execution_engine: &ExecutionEngine<'a>,
+        additional_values: HashMap<String, Box<dyn BuiltInValue<'a> + 'a>>,
+    ) -> Self {
+        let mut referencable_values = additional_values;
 
         referencable_values.insert(String::from("true"), Box::new(BuiltInBool::new(1)));
         referencable_values.insert(String::from("false"), Box::new(BuiltInBool::new(0)));
@@ -653,7 +663,7 @@ impl<'a> BuiltInValues<'a> {
     }
 }
 
-pub struct UlarThreadSpawner {}
+struct UlarThreadSpawner {}
 
 impl ThreadSpawner for UlarThreadSpawner {
     fn spawn_thread<A: FnOnce() + Send + 'static>(callback: A) -> std::thread::JoinHandle<()> {
@@ -665,15 +675,15 @@ impl ThreadSpawner for UlarThreadSpawner {
     }
 }
 
-pub extern "C" fn println_bool(_worker: &Worker, value: u8) {
+extern "C" fn println_bool(_worker: &Worker, value: u8) {
     println!("{}", value == 1);
 }
 
-pub extern "C" fn println_display<A: Display>(_worker: &Worker, value: A) {
+extern "C" fn println_display<A: Display>(_worker: &Worker, value: A) {
     println!("{}", value);
 }
 
-pub extern "C" fn _divide_number<A: Display + Div<Output = A> + Zero>(x: A, y: A) -> A {
+extern "C" fn _divide_number<A: Display + Div<Output = A> + Zero>(x: A, y: A) -> A {
     if y.is_zero() {
         throw_exception(CString::new(format!("Attempted to divide {} by zero.", x)).unwrap())
     } else {
@@ -681,18 +691,21 @@ pub extern "C" fn _divide_number<A: Display + Div<Output = A> + Zero>(x: A, y: A
     }
 }
 
-pub unsafe extern "C" fn _job_new(job: *mut Job<(), ()>) {
+/// # Safety
+///
+/// This function should only be called with a pointer that's safe to write to.
+unsafe extern "C" fn _job_new(job: *mut Job<(), ()>) {
     *job = Job::new();
 }
 
 /// # Safety
 ///
 /// This function should only be called with a pointer that's safe to pass to [CString::from_raw].
-pub unsafe extern "C" fn _print_c_string(string: *mut c_char) {
+unsafe extern "C" fn _print_c_string(string: *mut c_char) {
     println!("{}", CString::from_raw(string).to_str().unwrap());
 }
 
-pub extern "C" fn _workerpool_new() -> *mut WorkerPool {
+extern "C" fn _workerpool_new() -> *mut WorkerPool {
     Box::into_raw(Box::new(WorkerPool::new::<UlarThreadSpawner>(
         ular_scheduler::Configuration::default(),
     )))
@@ -701,7 +714,7 @@ pub extern "C" fn _workerpool_new() -> *mut WorkerPool {
 /// # Safety
 ///
 /// This function should only be called with a pointer that's safe to pass to [Box::from_raw].
-pub unsafe extern "C" fn _workerpool_join(worker_pool: *mut WorkerPool) {
+unsafe extern "C" fn _workerpool_join(worker_pool: *mut WorkerPool) {
     if let Err(error) = Box::from_raw(worker_pool).join() {
         throw_exception(CString::new(format!("Failed to join worker pool: {:?}", error)).unwrap())
     }
@@ -710,14 +723,14 @@ pub unsafe extern "C" fn _workerpool_join(worker_pool: *mut WorkerPool) {
 /// # Safety
 ///
 /// This function should only be called with a pointer that's safe to pass to [Box::from_raw].
-pub unsafe extern "C" fn _worker_free(worker: *mut Worker) {
+unsafe extern "C" fn _worker_free(worker: *mut Worker) {
     drop(Box::from_raw(worker));
 }
 
 /// # Safety
 ///
 /// This function should only be called with a pointer that's confertable to a `&WorkerPool`.
-pub unsafe extern "C" fn _workerpool_worker(worker_pool: *const WorkerPool) -> *mut Worker {
+unsafe extern "C" fn _workerpool_worker(worker_pool: *const WorkerPool) -> *mut Worker {
     Box::into_raw(Box::new(worker_pool.as_ref().unwrap().worker()))
 }
 

@@ -1,6 +1,6 @@
 use clap::Parser;
 
-#[derive(Parser)]
+#[derive(Default, Parser)]
 pub struct Arguments {
     /// The name of a phase whose output to print. This can be supplied multiple times. Accepted values are "lexer", "parser", "simplifier", "typechecker", or "jit_compiler"
     #[arg(long)]

@@ -146,9 +146,9 @@ impl<'a> AnalyzerScope<'a> {
         }
     }
 
-    pub fn without_parent() -> Self {
+    pub fn without_parent(built_in_values: &'a BuiltInValues) -> Self {
         Self {
-            built_in_values: BuiltInValues::global(),
+            built_in_values,
             parent: None,
             struct_indices: HashMap::new(),
             variables: HashMap::new(),

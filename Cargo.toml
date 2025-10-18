@@ -1,5 +1,5 @@
 [workspace]
-members = ["ular", "ular-derive", "ular-scheduler"]
+members = ["ular", "ular/tests/common", "ular-derive", "ular-scheduler"]
 resolver = "2"
 
 [patch.crates-io]

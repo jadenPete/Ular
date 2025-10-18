@@ -3,9 +3,14 @@ name = "ular"
 version = "0.1.0"
 edition = "2021"
 
+[[test]]
+name = "garbage_collection_root_scanning_works"
+path = "tests/garbage_collection/root_scanning_works.rs"
+
 [dependencies]
 clap = { version = "4.5.29", features = ["derive"] }
 dashmap = { git = "https://github.com/g-plane/dashmap", branch = "explicit-lifetime" }
+dyn-clone = "1.0.20"
 either = "1.13.0"
 enum-iterator = "2.1.0"
 inkwell = { version = "0.6.0", features = ["llvm18-1"] }
@@ -18,6 +23,7 @@ num = "0.4.3"
 simplelog = "0.12.2"
 ular-derive = { path = "../ular-derive" }
 ular-scheduler = { path = "../ular-scheduler" }
+ular-test-common = { path = "tests/common" }
 
 [dev-dependencies]
 anyhow = "1.0.97"

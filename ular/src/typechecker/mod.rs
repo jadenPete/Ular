@@ -30,7 +30,7 @@ use crate::{
         },
     },
 };
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 struct Typechecker<'a> {
     scope: TypecheckerScope<'a>,
@@ -739,7 +739,9 @@ impl<'a> Typechecker<'a> {
     }
 }
 
-pub struct TypecheckerPhase;
+pub struct TypecheckerPhase {
+    pub additional_values: HashMap<String, Type>,
+}
 
 impl Phase<&SimpleProgram> for TypecheckerPhase {
     type Output = TypedProgram;
@@ -749,8 +751,9 @@ impl Phase<&SimpleProgram> for TypecheckerPhase {
     }
 
     fn execute(&self, program: &SimpleProgram) -> Result<TypedProgram, CompilationError> {
+        let build_in_values = BuiltInValues::new(self.additional_values.clone());
         let mut typechecker = Typechecker {
-            scope: TypecheckerScope::without_parent(BuiltInValues::global()),
+            scope: TypecheckerScope::without_parent(&build_in_values),
         };
 
         Ok(TypedProgram {

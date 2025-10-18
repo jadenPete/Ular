@@ -16,12 +16,17 @@ use crate::{
     error_reporting::{CompilationError, CompilationErrorMessage, InternalError, Position},
     parser::{program::Node, type_::Type},
     phase::Phase,
-    typechecker::typed_program::{
-        TypedBlock, TypedCall, TypedExpression, TypedFunctionDefinition, TypedIdentifier, TypedIf,
-        TypedInfixOperation, TypedNumber, TypedPath, TypedPrefixOperation, TypedProgram,
-        TypedSelect, TypedStatement, TypedStructApplication, TypedStructDefinition, TypedUnit,
+    typechecker::{
+        built_in_values::BuiltInValues,
+        typed_program::{
+            TypedBlock, TypedCall, TypedExpression, TypedFunctionDefinition, TypedIdentifier,
+            TypedIf, TypedInfixOperation, TypedNumber, TypedPath, TypedPrefixOperation,
+            TypedProgram, TypedSelect, TypedStatement, TypedStructApplication,
+            TypedStructDefinition, TypedUnit,
+        },
     },
 };
+use std::collections::HashMap;
 
 struct Analyzer<'a> {
     scope_context: &'a mut AnalyzerScopeContext,
@@ -554,12 +559,13 @@ impl<'a> Analyzer<'a> {
     }
 
     fn without_parent(
+        built_in_values: &'a BuiltInValues,
         scope_context: &'a mut AnalyzerScopeContext,
         functions: &'a mut AnalyzerFunctions,
     ) -> Self {
         Self {
             scope_context,
-            scope: AnalyzerScope::without_parent(),
+            scope: AnalyzerScope::without_parent(built_in_values),
             functions,
             expression_graph: AnalyzerExpressionGraph::without_parent(),
         }
@@ -672,7 +678,9 @@ impl AnalyzerFunctions {
     }
 }
 
-pub struct AnalyzerPhase;
+pub struct AnalyzerPhase {
+    pub additional_values: HashMap<String, Type>,
+}
 
 impl Phase<&TypedProgram> for AnalyzerPhase {
     type Output = AnalyzedProgram;
@@ -682,9 +690,14 @@ impl Phase<&TypedProgram> for AnalyzerPhase {
     }
 
     fn execute(&self, program: &TypedProgram) -> Result<AnalyzedProgram, CompilationError> {
+        let built_in_values = BuiltInValues::new(self.additional_values.clone());
         let mut functions = AnalyzerFunctions::new();
         let mut analyzer_scope_context = AnalyzerScopeContext::new();
-        let mut analyzer = Analyzer::without_parent(&mut analyzer_scope_context, &mut functions);
+        let mut analyzer = Analyzer::without_parent(
+            &built_in_values,
+            &mut analyzer_scope_context,
+            &mut functions,
+        );
 
         analyzer.analyze_statements_with_hoisting(&program.statements, false)?;
 

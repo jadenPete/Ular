@@ -1,4 +1,4 @@
-mod built_in_values;
+pub mod built_in_values;
 mod fork_function_cache;
 mod memory_manager;
 mod module;
@@ -14,7 +14,7 @@ use crate::{
     },
     error_reporting::{CompilationError, CompilationErrorMessage, InternalError, Position},
     jit_compiler::{
-        built_in_values::BuiltInValues,
+        built_in_values::{BuiltInValue, BuiltInValues},
         fork_function_cache::ForkFunctionCache,
         memory_manager::UlarMemoryManager,
         module::UlarModule,
@@ -914,6 +914,7 @@ impl Debug for CompiledProgram<'_> {
 pub struct JitCompilerPhase<'a> {
     pub context: &'a Context,
     pub print_stack_map: bool,
+    pub additional_values: HashMap<String, Box<dyn BuiltInValue<'a> + 'a>>,
 }
 
 impl<'a> Phase<&AnalyzedProgram> for JitCompilerPhase<'a> {
@@ -937,7 +938,12 @@ impl<'a> Phase<&AnalyzedProgram> for JitCompilerPhase<'a> {
             )
             .unwrap();
 
-        let mut built_in_values = BuiltInValues::new(self.context, &execution_engine);
+        let mut built_in_values = BuiltInValues::new(
+            self.context,
+            &execution_engine,
+            self.additional_values.clone(),
+        );
+
         let mut fork_function_cache = ForkFunctionCache::new();
         let main_harness_function = compile_program(
             self.context,
