@@ -1,8 +1,11 @@
 use std::ffi::c_void;
 
-use crate::mmtk::{
-    runtime::mmtk_set_stack_map,
-    stack_map::{IndexableStackMap, Parseable, StackMap},
+use crate::{
+    libunwind::{add_dynamic_eh_frame_section, remove_dynamic_eh_frame_section},
+    mmtk::{
+        runtime::mmtk_set_stack_map,
+        stack_map::{IndexableStackMap, Parseable, StackMap},
+    },
 };
 use inkwell::memory_manager::McjitMemoryManager;
 use libc::{c_uint, uintptr_t};
@@ -21,6 +24,7 @@ pub struct UlarMemoryManager {
     code_buffer_offset: usize,
     data_buffer: *mut u8,
     data_buffer_offset: usize,
+    eh_frame_section: Option<*mut u8>,
     print_stack_map: bool,
     stack_map_section: Option<StackMapSection>,
 }
@@ -64,6 +68,7 @@ impl UlarMemoryManager {
             code_buffer_offset: 0,
             data_buffer,
             data_buffer_offset: 0,
+            eh_frame_section: None,
             print_stack_map,
             stack_map_section: None,
         }
@@ -153,6 +158,10 @@ impl McjitMemoryManager for UlarMemoryManager {
 
         self.data_buffer_offset += size;
 
+        if section_name == ".eh_frame" {
+            self.eh_frame_section = Some(pointer);
+        }
+
         // The names of the stack map section as described in
         // https://llvm.org/docs/StackMaps.html#stack-map-section
         if section_name == "__llvm_stackmaps" || section_name == ".llvm_stackmaps" {
@@ -163,6 +172,10 @@ impl McjitMemoryManager for UlarMemoryManager {
     }
 
     fn destroy(&mut self) {
+        if let Some(eh_frame_section) = self.eh_frame_section {
+            unsafe { remove_dynamic_eh_frame_section(eh_frame_section as usize) };
+        }
+
         // SAFETY: As per the contract of `UlarMemoryManager::new`, neither `self.code_buffer` nor
         // `self.data_buffer` are in use
         unsafe {
@@ -172,6 +185,16 @@ impl McjitMemoryManager for UlarMemoryManager {
     }
 
     fn finalize_memory(&mut self) -> Result<(), String> {
+        if let Some(eh_frame_section) = self.eh_frame_section {
+            // Register the `.eh_frame` section, which contains information about call frames, with
+            // libunwind so we can do unwinding. This is used for root scanning during
+            // garbage collection, among other language features.
+            //
+            // For more information on this section, see:
+            // https://refspecs.linuxfoundation.org/LSB_3.0.0/LSB-Core-generic/LSB-Core-generic/ehframechpt.html
+            unsafe { add_dynamic_eh_frame_section(eh_frame_section as usize) };
+        }
+
         self.parse_stack_map();
 
         // SAFETY: All of the requirements of calling `mprotect` have been satisfied

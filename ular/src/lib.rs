@@ -4,6 +4,7 @@ mod dependency_analyzer;
 pub mod error_reporting;
 pub mod jit_compiler;
 mod lexer;
+mod libunwind;
 pub mod mmtk;
 pub mod parser;
 mod phase;

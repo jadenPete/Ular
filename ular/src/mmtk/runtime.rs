@@ -1,6 +1,9 @@
-use crate::mmtk::{
-    stack_map::{IndexableStackMap, StackMapLocation},
-    UlarActivePlan, UlarVM,
+use crate::{
+    libunwind,
+    mmtk::{
+        stack_map::{IndexableStackMap, StackMapLocation},
+        UlarActivePlan, UlarVM,
+    },
 };
 use dashmap::DashMap;
 use mmtk::{
@@ -306,7 +309,7 @@ fn scan_current_thread_roots() {
         roots.clear();
 
         let mut scan_at_function =
-            |cursor: &mut libunwind_rs::Cursor| -> Result<(), libunwind_rs::Error> {
+            |cursor: &mut libunwind::Cursor| -> Result<(), libunwind::Error> {
                 let instruction_pointer = cursor.ip()? as u64;
                 let record =
                     if let Some(record) = stack_map.records_by_address.get(&instruction_pointer) {
@@ -368,7 +371,7 @@ fn scan_current_thread_roots() {
                 Ok(())
             };
 
-        libunwind_rs::Cursor::local(|mut cursor| loop {
+        libunwind::Cursor::local(|mut cursor| loop {
             scan_at_function(&mut cursor)?;
 
             if !cursor.step()? {
