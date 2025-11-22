@@ -9,6 +9,8 @@ use std::fmt::{Debug, Formatter};
 #[derive(Debug)]
 pub struct ObjectDescriptor {
     pub inner_references: Vec<ObjectInnerReference>,
+    pub size: usize,
+    pub align: usize,
 }
 
 #[derive(Clone, Copy)]
@@ -50,6 +52,7 @@ impl ObjectDescriptorStore {
                 }
             })?);
 
+        let struct_type = &struct_types[struct_index];
         let definition = &program.structs[struct_index];
         let inner_references = definition
             .fields
@@ -62,7 +65,7 @@ impl ObjectDescriptorStore {
             .map(|(field_index, field_struct_index)| {
                 let offset = target_data
                     // Add 1 to offset for the object descriptor reference
-                    .offset_of_element(&struct_types[struct_index], field_index as u32 + 1)
+                    .offset_of_element(struct_type, field_index as u32 + 1)
                     .unwrap() as usize;
 
                 let field_descriptor = if field_struct_index == struct_index {
@@ -83,7 +86,13 @@ impl ObjectDescriptorStore {
             })
             .collect::<Result<Vec<_>, _>>()?;
 
-        let descriptor = ObjectDescriptor { inner_references };
+        let size = target_data.get_abi_size(struct_type) as usize;
+        let align = target_data.get_abi_alignment(struct_type) as usize;
+        let descriptor = ObjectDescriptor {
+            inner_references,
+            size,
+            align,
+        };
 
         self.descriptors.push(descriptor);
         self.references_by_struct_index

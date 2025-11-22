@@ -1,7 +1,9 @@
 use crate::{
     libunwind,
     mmtk::{
-        object_descriptor_store::{ObjectDescriptorReference, ObjectDescriptorStore},
+        object_descriptor_store::{
+            ObjectDescriptor, ObjectDescriptorReference, ObjectDescriptorStore,
+        },
         stack_map::{IndexableStackMap, StackMapLocation},
         UlarActivePlan, UlarVM,
     },
@@ -9,8 +11,9 @@ use crate::{
 use dashmap::DashMap;
 use mmtk::{
     util::{
-        constants::MIN_OBJECT_SIZE, Address, ObjectReference, OpaquePointer, VMMutatorThread,
-        VMThread,
+        constants::MIN_OBJECT_SIZE,
+        copy::{CopySemantics, GCWorkerCopyContext},
+        Address, ObjectReference, OpaquePointer, VMMutatorThread, VMThread,
     },
     vm::{slot::SimpleSlot, ActivePlan, GCThreadContext, RootsWorkFactory, SlotVisitor, VMBinding},
     AllocationSemantics, MMTKBuilder, Mutator, MMTK,
@@ -100,6 +103,21 @@ impl Debug for StackMapAlreadySetError {
     }
 }
 
+fn get_object_descriptor(object: ObjectReference) -> &'static ObjectDescriptor {
+    // SAFETY: All objects begin with a 32 bit object descriptor reference
+    let descriptor_reference = unsafe {
+        object
+            .to_header::<UlarVM>()
+            .load::<ObjectDescriptorReference>()
+    };
+
+    let object_descriptor_store = OBJECT_DESCRIPTOR_STORE
+        .get()
+        .expect("Expected the object descriptor store to be set");
+
+    object_descriptor_store.get_descriptor(descriptor_reference)
+}
+
 fn get_mmtk() -> &'static MMTK<UlarVM> {
     MMTK_INSTANCE
         .get()
@@ -176,6 +194,55 @@ pub extern "C" fn mmtk_alloc(size: usize, align: usize) -> Address {
 
         result
     })
+}
+
+pub fn mmtk_copy_object(
+    from: ObjectReference,
+    semantics: CopySemantics,
+    copy_context: &mut GCWorkerCopyContext<UlarVM>,
+) -> ObjectReference {
+    let descriptor = get_object_descriptor(from);
+    let to_address = copy_context.alloc_copy(from, descriptor.size, descriptor.align, 0, semantics);
+
+    // SAFETY:
+    // - `to_address` is guaranteed to be valid for writes of `descriptor.size` bytes
+    // - `to_address` is guaranteed to be aligned to `descriptor.align` bytes
+    // - `to_address` is guaranteed to not store an existing object, and therefore to not overlap with
+    //   the object referenced by `from`
+    unsafe { mmtk_copy_object_to(from, to_address) };
+
+    let to = ObjectReference::from_raw_address(to_address).unwrap();
+
+    copy_context.post_copy(to, descriptor.size, semantics);
+
+    to
+}
+
+/// Copy an object referenced by [from] to a region pointed to by [region].
+///
+/// # Safety
+///
+/// The following conditions must be satisfied:
+/// - [region] must be valid for writes of the size of the object referenced by [from]
+/// - [region] must be aligned to store objects of the type contained in [from]
+/// - [region] must not overlap with the object referenced by [from]
+pub unsafe fn mmtk_copy_object_to(from: ObjectReference, region: Address) -> Address {
+    let from_address = from.to_raw_address();
+    let size = mmtk_get_object_size(from);
+
+    unsafe {
+        std::ptr::copy_nonoverlapping(from_address.to_ptr::<u8>(), region.to_mut_ptr::<u8>(), size)
+    };
+
+    from_address + size
+}
+
+pub fn mmtk_get_object_align(object: ObjectReference) -> usize {
+    get_object_descriptor(object).align
+}
+
+pub fn mmtk_get_object_size(object: ObjectReference) -> usize {
+    get_object_descriptor(object).size
 }
 
 pub extern "C" fn mmtk_init() {
@@ -259,18 +326,7 @@ pub fn mmtk_resume_all_mutators() {
 }
 
 pub fn mmtk_scan_object<A: SlotVisitor<SimpleSlot>>(object: ObjectReference, slot_visitor: &mut A) {
-    // SAFETY: All objects begin with a 32 bit object descriptor reference
-    let descriptor_reference = unsafe {
-        object
-            .to_header::<UlarVM>()
-            .load::<ObjectDescriptorReference>()
-    };
-
-    let object_descriptor_store = OBJECT_DESCRIPTOR_STORE
-        .get()
-        .expect("Expected the object descriptor store to be set");
-
-    let descriptor = object_descriptor_store.get_descriptor(descriptor_reference);
+    let descriptor = get_object_descriptor(object);
 
     for inner_reference in &descriptor.inner_references {
         let address = object.to_raw_address().add(inner_reference.offset);

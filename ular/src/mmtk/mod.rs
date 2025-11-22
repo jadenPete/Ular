@@ -3,8 +3,9 @@ pub mod runtime;
 pub mod stack_map;
 
 use crate::mmtk::runtime::{
-    is_mutator, mmtk_pause_all_mutators, mmtk_register_roots, mmtk_resume_all_mutators,
-    mmtk_scan_object, mmtk_spawn_gc_thread, number_of_mutators, with_mutator, with_mutators,
+    is_mutator, mmtk_copy_object, mmtk_copy_object_to, mmtk_get_object_size,
+    mmtk_pause_all_mutators, mmtk_register_roots, mmtk_resume_all_mutators, mmtk_scan_object,
+    mmtk_spawn_gc_thread, number_of_mutators, with_mutator, with_mutators,
 };
 use mmtk::{
     util::{
@@ -20,15 +21,6 @@ use mmtk::{
     Mutator,
 };
 use std::ptr::NonNull;
-
-/// This is the offset from the allocation result to the object reference for the object. For bindings
-/// that this offset is not a constant, you can implement the calculation in the method
-/// `ref_to_object_start`, and remove this constant.
-pub const OBJECT_REF_OFFSET: usize = 0;
-
-/// This is the offset from the object reference to the object header. This value is used in
-/// `ref_to_header` where MMTk loads header metadata from.
-pub const OBJECT_HEADER_OFFSET: usize = 0;
 
 #[derive(Default)]
 pub struct UlarVM;
@@ -139,17 +131,50 @@ impl Collection<UlarVM> for UlarCollection {
     }
 }
 
+/// The purpose of this struct is to implement [ObjectModel] from MMTk.
+///
+/// This tells MMTk about how objects are laid out and how to perform operations like copying on them.
+///
+/// # Ular's Object Model
+///
+/// ## Object Layout
+///
+/// In Ular, objects are structured like so:
+///
+/// | Section | Size | Description |
+/// | ------- | ---- | ----------- |
+/// | Object descriptor reference | 4 bytes | An index locating the object's descriptor in the object descriptor store
+/// | Payload | ? | The object payload
+///
+/// For information on object descriptors and the object descriptor store, see the [UlarScanning].
+///
+/// Object references (of type [ObjectReference]) refer to objects, and store the address to the
+/// block of memory allocated for the object, beginning with the object descriptor reference. For that
+/// reason, [ref_to_object_start], which computes the address originally returned by MMTk when the
+/// object was allocated (start address), returns the object reference provided to it, unmodified.
+///
+/// That also explains why:
+/// - [get_reference_when_copied_to] returns the destination address provided to it
+/// - [OBJECT_REF_OFFSET_LOWER_BOUND], the minimum difference between an object reference and
+///   start address, is 0
+///
+/// ## Object Metadata
+///
+/// MMTk needs to store metadata about objects. This data can be stored in a header on the object,
+/// or in a side location managed by MMTk. For convenience, we choose to store most metadata in
+/// the side location, with one exception: the forwarding pointer.
+///
+/// This pointer is used by MMTk during a garbage collection cycle, when it's moving an object, to
+/// point to the new object. Because it's only set on dying objects, it's safe to override the
+/// object payload (which begins with the object descriptor reference) with it. For that reason,
+/// we store it at the start of the object.
 pub struct UlarObjectModel;
 
 impl ObjectModel<UlarVM> for UlarObjectModel {
     // Global metadata
-
     const GLOBAL_LOG_BIT_SPEC: VMGlobalLogBitSpec = VMGlobalLogBitSpec::side_first();
 
     // Local metadata
-
-    // Forwarding pointers have to be in the header. It is okay to overwrite the object payload with a forwarding pointer.
-    // FIXME: The bit offset needs to be set properly.
     const LOCAL_FORWARDING_POINTER_SPEC: VMLocalForwardingPointerSpec =
         VMLocalForwardingPointerSpec::in_header(0);
 
@@ -163,38 +188,40 @@ impl ObjectModel<UlarVM> for UlarObjectModel {
     const LOCAL_LOS_MARK_NURSERY_SPEC: VMLocalLOSMarkNurserySpec =
         VMLocalLOSMarkNurserySpec::side_after(Self::LOCAL_MARK_BIT_SPEC.as_spec());
 
-    const OBJECT_REF_OFFSET_LOWER_BOUND: isize = OBJECT_REF_OFFSET as isize;
+    const OBJECT_REF_OFFSET_LOWER_BOUND: isize = 0;
 
     fn copy(
-        _from: ObjectReference,
-        _semantics: CopySemantics,
-        _copy_context: &mut GCWorkerCopyContext<UlarVM>,
+        from: ObjectReference,
+        semantics: CopySemantics,
+        copy_context: &mut GCWorkerCopyContext<UlarVM>,
     ) -> ObjectReference {
-        unimplemented!()
+        mmtk_copy_object(from, semantics, copy_context)
     }
 
-    fn copy_to(_from: ObjectReference, _to: ObjectReference, _region: Address) -> Address {
-        unimplemented!()
+    fn copy_to(from: ObjectReference, _to: ObjectReference, region: Address) -> Address {
+        // SAFETY: I assume MMTk will call `copy_to` with arguments satisfying the conditions laid out
+        // in the documentation for `mmtk_copy_object_to`
+        unsafe { mmtk_copy_object_to(from, region) }
     }
 
-    fn get_current_size(_object: ObjectReference) -> usize {
-        unimplemented!()
+    fn get_current_size(object: ObjectReference) -> usize {
+        mmtk_get_object_size(object)
     }
 
     fn get_size_when_copied(object: ObjectReference) -> usize {
         Self::get_current_size(object)
     }
 
-    fn get_align_when_copied(_object: ObjectReference) -> usize {
-        unimplemented!()
+    fn get_align_when_copied(object: ObjectReference) -> usize {
+        mmtk_get_object_size(object)
     }
 
     fn get_align_offset_when_copied(_object: ObjectReference) -> usize {
-        unimplemented!()
+        0
     }
 
-    fn get_reference_when_copied_to(_from: ObjectReference, _to: Address) -> ObjectReference {
-        unimplemented!()
+    fn get_reference_when_copied_to(_from: ObjectReference, to: Address) -> ObjectReference {
+        ObjectReference::from_raw_address(to).unwrap()
     }
 
     fn get_type_descriptor(_reference: ObjectReference) -> &'static [i8] {
@@ -202,11 +229,11 @@ impl ObjectModel<UlarVM> for UlarObjectModel {
     }
 
     fn ref_to_object_start(object: ObjectReference) -> Address {
-        object.to_raw_address().sub(OBJECT_REF_OFFSET)
+        object.to_raw_address()
     }
 
     fn ref_to_header(object: ObjectReference) -> Address {
-        object.to_raw_address().sub(OBJECT_HEADER_OFFSET)
+        object.to_raw_address()
     }
 
     fn dump_object(_object: ObjectReference) {
