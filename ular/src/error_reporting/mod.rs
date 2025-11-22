@@ -1,5 +1,7 @@
 use std::{
-    error::Error, fmt::{Debug, Display, Formatter}, ops::Range
+    error::Error,
+    fmt::{Debug, Display, Formatter},
+    ops::Range,
 };
 
 const CONTEXT_LINES: usize = 2;
@@ -28,7 +30,7 @@ pub enum CompilationErrorMessage {
         function_name: String,
         return_type: String,
     },
-    
+
     ExpectedNumericType {
         actual_type: String,
     },
@@ -53,6 +55,7 @@ pub enum CompilationErrorMessage {
         maximum: i128,
     },
 
+    ObjectDescriptorStoreFull,
     ParserError(nom::error::ErrorKind),
     StructAlreadyDefined {
         name: String,
@@ -115,7 +118,7 @@ impl Display for CompilationErrorMessage {
                     return_type,
                 )
             }
-            
+
             Self::ExpectedNumericType { actual_type } => {
                 write!(
                     formatter,
@@ -190,6 +193,14 @@ impl Display for CompilationErrorMessage {
                 maximum,
             } => {
                 write!(formatter, "The default numeric type is i32, but {} isn't between {} and {}. Consider using a different type.", value, minimum, maximum)
+            }
+
+            Self::ObjectDescriptorStoreFull => {
+                write!(
+                    formatter,
+                    "Exceeded the maximum number of `struct` types ({}).",
+                    u32::MAX,
+                )
             }
 
             Self::ParserError(error) => write!(formatter, "Parsing error: {}", error.description()),
@@ -379,7 +390,10 @@ impl Display for InternalError {
                 )
             }
 
-            Self::JitCompilerUnknownStructMethod { struct_index, method_index } => {
+            Self::JitCompilerUnknownStructMethod {
+                struct_index,
+                method_index,
+            } => {
                 write!(
                     formatter,
                     "JIT compiler has no value for struct method with struct index {} and method index {}.",

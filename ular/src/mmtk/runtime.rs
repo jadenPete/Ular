@@ -1,6 +1,7 @@
 use crate::{
     libunwind,
     mmtk::{
+        object_descriptor_store::{ObjectDescriptorReference, ObjectDescriptorStore},
         stack_map::{IndexableStackMap, StackMapLocation},
         UlarActivePlan, UlarVM,
     },
@@ -11,7 +12,7 @@ use mmtk::{
         constants::MIN_OBJECT_SIZE, Address, ObjectReference, OpaquePointer, VMMutatorThread,
         VMThread,
     },
-    vm::{slot::SimpleSlot, ActivePlan, GCThreadContext, RootsWorkFactory, VMBinding},
+    vm::{slot::SimpleSlot, ActivePlan, GCThreadContext, RootsWorkFactory, SlotVisitor, VMBinding},
     AllocationSemantics, MMTKBuilder, Mutator, MMTK,
 };
 use std::{
@@ -66,6 +67,7 @@ static MMTK_INSTANCE: OnceLock<MMTK<UlarVM>> = OnceLock::new();
 /// therefore can't be converted to and from [VMMutatorThread]. So instead, we use our own counter to
 /// generate the keys for this map.
 static MUTATORS: LazyLock<DashMap<usize, UlarMutator>> = LazyLock::new(DashMap::new);
+static OBJECT_DESCRIPTOR_STORE: OnceLock<ObjectDescriptorStore> = OnceLock::new();
 static SAFEPOINT_STATES: LazyLock<Mutex<Vec<Weak<SafepointState>>>> =
     LazyLock::new(|| Mutex::new(Vec::new()));
 
@@ -80,6 +82,14 @@ thread_local! {
 
         current_state
     });
+}
+
+pub struct ObjectDescriptorStoreAlreadySetError;
+
+impl Debug for ObjectDescriptorStoreAlreadySetError {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(formatter, "The object descriptor store was already set.")
+    }
 }
 
 pub struct StackMapAlreadySetError;
@@ -134,9 +144,13 @@ pub fn mmtk_bind_mutator(thread: Thread) {
 pub extern "C" fn mmtk_alloc(size: usize, align: usize) -> Address {
     mmtk_maybe_pause_at_safepoint();
     with_current_mutator(|mutator| {
-        let adjusted_size = size.max(MIN_OBJECT_SIZE);
         let adjusted_align = align.max(UlarVM::MIN_ALIGNMENT);
+
+        // With bump allocators (like MMTK's NoGC plan), the allocation size must be a multiple of the
+        // requested alignment
+        let adjusted_size = size.max(MIN_OBJECT_SIZE).next_multiple_of(adjusted_align);
         let mut mutator_pointer = NonNull::from(mutator);
+
         // SAFETY: We're doing this to cast `mutator` from a `&Mutator<UlarVM>` to a
         // `&mut Mutator<UlarVM>`. Doing this in safe Rust would require lots of
         // complex synchronization (to avoid multiple mutable references to `&mut Ular<UlarVM>`),
@@ -242,6 +256,35 @@ pub fn mmtk_resume_all_mutators() {
     for entry in MUTATORS.iter() {
         entry.value().thread.unpark();
     }
+}
+
+pub fn mmtk_scan_object<A: SlotVisitor<SimpleSlot>>(object: ObjectReference, slot_visitor: &mut A) {
+    // SAFETY: All objects begin with a 32 bit object descriptor reference
+    let descriptor_reference = unsafe {
+        object
+            .to_header::<UlarVM>()
+            .load::<ObjectDescriptorReference>()
+    };
+
+    let object_descriptor_store = OBJECT_DESCRIPTOR_STORE
+        .get()
+        .expect("Expected the object descriptor store to be set");
+
+    let descriptor = object_descriptor_store.get_descriptor(descriptor_reference);
+
+    for inner_reference in &descriptor.inner_references {
+        let address = object.to_raw_address().add(inner_reference.offset);
+
+        slot_visitor.visit_slot(SimpleSlot::from_address(address));
+    }
+}
+
+pub fn mmtk_set_object_descriptor_store(
+    store: ObjectDescriptorStore,
+) -> Result<(), ObjectDescriptorStoreAlreadySetError> {
+    OBJECT_DESCRIPTOR_STORE
+        .set(store)
+        .map_err(|_| ObjectDescriptorStoreAlreadySetError)
 }
 
 pub fn mmtk_spawn_gc_thread(context: GCThreadContext<UlarVM>) {

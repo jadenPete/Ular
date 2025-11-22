@@ -21,6 +21,10 @@ use crate::{
         scope::{JitCompilerScope, JitCompilerScopeContext},
         value::{UlarFunction, UlarStruct, UlarValue},
     },
+    mmtk::{
+        object_descriptor_store::{ObjectDescriptorReference, ObjectDescriptorStore},
+        runtime::mmtk_set_object_descriptor_store,
+    },
     parser::program::{
         InfixOperator, LogicalInfixOperator, Node, NumericInfixOperator, UniversalInfixOperator,
     },
@@ -35,7 +39,7 @@ use inkwell::{
     execution_engine::{ExecutionEngine, JitFunction},
     passes::PassBuilderOptions,
     targets::{CodeModel, RelocMode, Target, TargetMachine},
-    types::{ArrayType, StructType},
+    types::{ArrayType, BasicType, StructType},
     values::{BasicValueEnum, FunctionValue, IntValue, PointerValue},
     AddressSpace, IntPredicate, OptimizationLevel,
 };
@@ -507,7 +511,10 @@ impl<'context> CompilableInfixOperation<'_> {
                 return Err(CompilationError {
                     message: CompilationErrorMessage::InternalError(
                         InternalError::JitCompilerExpectedNumericType {
-                            actual_type: format!("{}", type_.display(compiler.struct_types)),
+                            actual_type: format!(
+                                "{}",
+                                type_.display(|i| compiler.struct_information[i].definition)
+                            ),
                         },
                     ),
 
@@ -758,7 +765,10 @@ impl<'context> InlineExpression<'context> for CompilableSelect<'_> {
                 return Err(CompilationError {
                     message: CompilationErrorMessage::InternalError(
                         InternalError::JitCompilerExpectedStructType {
-                            actual_type: format!("{}", type_.display(compiler.struct_types)),
+                            actual_type: format!(
+                                "{}",
+                                type_.display(|i| compiler.struct_information[i].definition)
+                            ),
                         },
                     ),
 
@@ -767,7 +777,7 @@ impl<'context> InlineExpression<'context> for CompilableSelect<'_> {
             }
         };
 
-        let (struct_definition, struct_type) = compiler.struct_types[struct_index];
+        let struct_information = &compiler.struct_information[struct_index];
         let struct_value_name = scope.get_local_name();
         let struct_value = scope.get(
             &self.0.left_hand_side,
@@ -783,15 +793,16 @@ impl<'context> InlineExpression<'context> for CompilableSelect<'_> {
         let field_pointer_name = scope.get_local_name();
         let field_pointer = builder
             .build_struct_gep(
-                struct_type,
+                struct_information.inkwell_type,
                 UlarStruct::try_from(struct_value)?.pointer,
-                self.0.field_index as u32,
+                // Add 1 to offset for the object descriptor reference
+                self.0.field_index as u32 + 1,
                 &field_pointer_name.to_string(),
             )
             .unwrap();
 
         let field_name = scope.get_local_name();
-        let field_type = &struct_definition.fields[self.0.field_index].type_;
+        let field_type = &struct_information.definition.fields[self.0.field_index].type_;
         let field = builder
             .build_load(
                 field_type
@@ -819,9 +830,9 @@ impl<'context> InlineExpression<'context> for CompilableStructApplication<'_> {
         builder: &Builder<'context>,
         scope: &mut JitCompilerScope<'_, 'context>,
     ) -> Result<UlarValue<'context>, CompilationError> {
-        let (struct_definition, struct_type) = compiler.struct_types[self.0.struct_index];
-        let allocated_size = struct_type.size_of().unwrap();
-        let allocated_align = struct_type.get_alignment();
+        let struct_information = &compiler.struct_information[self.0.struct_index];
+        let allocated_size = struct_information.inkwell_type.size_of().unwrap();
+        let allocated_align = struct_information.inkwell_type.get_alignment();
         let struct_pointer_name = scope.get_local_name();
         let struct_pointer = builder
             .build_direct_call(
@@ -861,21 +872,43 @@ impl<'context> InlineExpression<'context> for CompilableStructApplication<'_> {
             })
             .collect::<Result<HashMap<_, _>, _>>()?;
 
-        for (i, field) in struct_definition.fields.iter().enumerate() {
+        let descriptor_reference_field_name = scope.get_local_name();
+        let descriptor_reference_field = unsafe {
+            builder.build_in_bounds_gep(
+                struct_information.inkwell_type,
+                struct_pointer,
+                &[
+                    compiler.context.i32_type().const_int(0, false),
+                    compiler.context.i32_type().const_int(0, false),
+                ],
+                &descriptor_reference_field_name.to_string(),
+            )
+        }
+        .unwrap();
+
+        builder
+            .build_store(
+                descriptor_reference_field,
+                compiler
+                    .context
+                    .i32_type()
+                    .const_int(struct_information.descriptor_reference.0.into(), false),
+            )
+            .unwrap();
+
+        for (i, field) in struct_information.definition.fields.iter().enumerate() {
             let field_pointer_name = scope.get_local_name();
 
             // SAFETY: `i` is a valid index of the struct we're building
             let field_pointer = unsafe {
-                builder.build_gep(
-                    field
-                        .type_
-                        .inkwell_type(compiler.context)
-                        .ok_or_else(|| CompilationError {
-                            message: CompilationErrorMessage::UnitPassedAsValue,
-                            position: Some(field.name.get_position()),
-                        })?,
+                builder.build_in_bounds_gep(
+                    struct_information.inkwell_type,
                     struct_pointer,
-                    &[compiler.context.i64_type().const_int(i as u64, false)],
+                    &[
+                        compiler.context.i32_type().const_int(0, false),
+                        // Add 1 to offset for the object descriptor reference
+                        compiler.context.i32_type().const_int(i as u64 + 1, false),
+                    ],
                     &field_pointer_name.to_string(),
                 )
             }
@@ -946,11 +979,11 @@ impl<'a> Phase<&AnalyzedProgram> for JitCompilerPhase<'a> {
 
         let mut fork_function_cache = ForkFunctionCache::new();
         let main_harness_function = compile_program(
-            self.context,
             &mut built_in_values,
+            self.context,
+            &execution_engine,
             &mut fork_function_cache,
             &mut module,
-            &execution_engine,
             program,
         )?;
 
@@ -972,7 +1005,7 @@ struct JitFunctionCompiler<'a, 'context> {
     fork_function_cache: &'a mut ForkFunctionCache<'context>,
     module: &'a mut UlarModule<'context>,
     scope_context: &'a JitCompilerScopeContext<'context>,
-    struct_types: &'a [(&'a AnalyzedStructDefinition, StructType<'context>)],
+    struct_information: &'a [StructInformation<'a, 'context>],
     function: FunctionValue<'context>,
 }
 
@@ -1147,7 +1180,7 @@ impl<'context> JitFunctionCompiler<'_, 'context> {
             fork_function_cache: self.fork_function_cache,
             module: self.module,
             scope_context: self.scope_context,
-            struct_types: self.struct_types,
+            struct_information: self.struct_information,
             function,
         };
 
@@ -1238,16 +1271,22 @@ impl<'context> JitFunctionCompiler<'_, 'context> {
     }
 }
 
+struct StructInformation<'a, 'context> {
+    definition: &'a AnalyzedStructDefinition,
+    inkwell_type: StructType<'context>,
+    descriptor_reference: ObjectDescriptorReference,
+}
+
 #[allow(clippy::too_many_arguments)]
 fn compile_main_function<'a>(
-    context: &'a Context,
     builder: &Builder<'a>,
     built_in_values: &mut BuiltInValues<'a>,
+    context: &'a Context,
+    execution_engine: &ExecutionEngine<'a>,
     fork_function_cache: &mut ForkFunctionCache<'a>,
     module: &mut UlarModule<'a>,
-    execution_engine: &ExecutionEngine<'a>,
+    struct_information: &[StructInformation<'_, 'a>],
     program: &AnalyzedProgram,
-    struct_types: Vec<(&AnalyzedStructDefinition, StructType<'a>)>,
 ) -> Result<FunctionValue<'a>, CompilationError> {
     let main_function = module.add_garbage_collecting_function(
         MAIN_FUNCTION_NAME,
@@ -1324,7 +1363,7 @@ fn compile_main_function<'a>(
         fork_function_cache,
         module,
         scope_context: &scope_context,
-        struct_types: &struct_types,
+        struct_information,
         function: main_function,
     };
 
@@ -1393,11 +1432,11 @@ fn compile_main_function<'a>(
 /// This function ensures that if `main` completes successfully, it returns 0.
 /// If an exception is thrown, it prints the exception and returns 1.
 fn compile_main_harness_function<'a>(
-    context: &'a Context,
     builder: &Builder<'a>,
     built_in_values: &mut BuiltInValues<'a>,
-    module: &mut UlarModule<'a>,
+    context: &'a Context,
     execution_engine: &ExecutionEngine<'a>,
+    module: &mut UlarModule<'a>,
     main_function: FunctionValue<'a>,
 ) {
     let main_harness_function = module.add_garbage_collecting_function(
@@ -1575,59 +1614,15 @@ fn compile_main_harness_function<'a>(
 }
 
 fn compile_program<'a>(
-    context: &'a Context,
     built_in_values: &mut BuiltInValues<'a>,
+    context: &'a Context,
+    execution_engine: &ExecutionEngine<'a>,
     fork_function_cache: &mut ForkFunctionCache<'a>,
     module: &mut UlarModule<'a>,
-    execution_engine: &ExecutionEngine<'a>,
     program: &AnalyzedProgram,
 ) -> Result<JitFunction<'a, MainFunction>, CompilationError> {
     let builder = context.create_builder();
-    let struct_types = program
-        .structs
-        .iter()
-        .map(|struct_definition| {
-            let struct_type = context.struct_type(
-                &struct_definition
-                    .fields
-                    .iter()
-                    .map(|field| {
-                        field
-                            .type_
-                            .inkwell_type(context)
-                            .ok_or_else(|| CompilationError {
-                                message: CompilationErrorMessage::UnitPassedAsValue,
-                                position: Some(field.name.get_position()),
-                            })
-                    })
-                    .collect::<Result<Vec<_>, _>>()?,
-                false,
-            );
-
-            Ok((struct_definition, struct_type))
-        })
-        .collect::<Result<_, _>>()?;
-
-    let main_function = compile_main_function(
-        context,
-        &builder,
-        built_in_values,
-        fork_function_cache,
-        module,
-        execution_engine,
-        program,
-        struct_types,
-    )?;
-
-    compile_main_harness_function(
-        context,
-        &builder,
-        built_in_values,
-        module,
-        execution_engine,
-        main_function,
-    );
-
+    let mut object_descriptor_store = ObjectDescriptorStore::new();
     let target_triple = TargetMachine::get_default_triple();
     let target = Target::from_triple(&target_triple).unwrap();
     let target_machine = target
@@ -1640,6 +1635,69 @@ fn compile_program<'a>(
             CodeModel::JITDefault,
         )
         .unwrap();
+
+    let target_data = target_machine.get_target_data();
+    let struct_types = program
+        .structs
+        .iter()
+        .map(|struct_definition| {
+            let mut field_types = Vec::with_capacity(struct_definition.fields.len() + 1);
+
+            // The first field is the descriptor reference
+            field_types.push(context.i32_type().as_basic_type_enum());
+
+            for field in &struct_definition.fields {
+                field_types.push(field.type_.inkwell_type(context).ok_or_else(|| {
+                    CompilationError {
+                        message: CompilationErrorMessage::UnitPassedAsValue,
+                        position: Some(field.name.get_position()),
+                    }
+                })?);
+            }
+
+            Ok(context.struct_type(&field_types, false))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+
+    let struct_information = program
+        .structs
+        .iter()
+        .enumerate()
+        .map(|(i, struct_definition)| {
+            Ok(StructInformation {
+                definition: struct_definition,
+                inkwell_type: struct_types[i],
+                descriptor_reference: object_descriptor_store.get_or_set_descriptor_for_struct(
+                    program,
+                    &struct_types,
+                    &target_data,
+                    i,
+                )?,
+            })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+
+    mmtk_set_object_descriptor_store(object_descriptor_store).unwrap();
+
+    let main_function = compile_main_function(
+        &builder,
+        built_in_values,
+        context,
+        execution_engine,
+        fork_function_cache,
+        module,
+        &struct_information,
+        program,
+    )?;
+
+    compile_main_harness_function(
+        &builder,
+        built_in_values,
+        context,
+        execution_engine,
+        module,
+        main_function,
+    );
 
     module
         .underlying

@@ -9,7 +9,7 @@ use crate::{
 };
 use inkwell::{
     context::Context,
-    types::{BasicType, BasicTypeEnum, StructType},
+    types::{BasicType, BasicTypeEnum},
     AddressSpace,
 };
 use std::fmt::{Debug, Display};
@@ -25,28 +25,33 @@ pub enum AnalyzedType {
 }
 
 impl AnalyzedType {
-    pub fn debug(&self, struct_types: &[(&AnalyzedStructDefinition, StructType)]) -> impl Debug {
-        self.debug_display_underlying(struct_types)
+    pub fn debug<'a, A: FnMut(usize) -> &'a AnalyzedStructDefinition + Copy>(
+        &self,
+        struct_definition: A,
+    ) -> impl Debug {
+        self.debug_display_underlying(struct_definition)
     }
 
-    fn debug_display_underlying(
+    fn debug_display_underlying<'a, A: FnMut(usize) -> &'a AnalyzedStructDefinition + Copy>(
         &self,
-        struct_types: &[(&AnalyzedStructDefinition, StructType)],
+        mut struct_definition: A,
     ) -> Type {
         match self {
             Self::Bool => Type::Bool,
-            Self::Struct(i) => Type::Identifier(struct_types[*i].0.name.value.clone()),
+            Self::Struct(i) => Type::Identifier(struct_definition(*i).name.value.clone()),
             Self::Function(function_type) => Type::Function(FunctionType {
                 parameters: function_type
                     .parameters
                     .iter()
-                    .map(|parameter_type| parameter_type.debug_display_underlying(struct_types))
+                    .map(|parameter_type| {
+                        parameter_type.debug_display_underlying(struct_definition)
+                    })
                     .collect(),
 
                 return_type: Box::new(
                     function_type
                         .return_type
-                        .debug_display_underlying(struct_types),
+                        .debug_display_underlying(struct_definition),
                 ),
             }),
 
@@ -55,11 +60,11 @@ impl AnalyzedType {
         }
     }
 
-    pub fn display(
+    pub fn display<'a, A: FnMut(usize) -> &'a AnalyzedStructDefinition + Copy>(
         &self,
-        struct_types: &[(&AnalyzedStructDefinition, StructType)],
+        struct_definition: A,
     ) -> impl Display {
-        self.debug_display_underlying(struct_types)
+        self.debug_display_underlying(struct_definition)
     }
 
     pub fn inkwell_type<'a>(&self, context: &'a Context) -> Option<BasicTypeEnum<'a>> {

@@ -1,9 +1,10 @@
+pub mod object_descriptor_store;
 pub mod runtime;
 pub mod stack_map;
 
 use crate::mmtk::runtime::{
     is_mutator, mmtk_pause_all_mutators, mmtk_register_roots, mmtk_resume_all_mutators,
-    mmtk_spawn_gc_thread, number_of_mutators, with_mutator, with_mutators,
+    mmtk_scan_object, mmtk_spawn_gc_thread, number_of_mutators, with_mutator, with_mutators,
 };
 use mmtk::{
     util::{
@@ -40,6 +41,13 @@ impl VMBinding for UlarVM {
     type VMReferenceGlue = UlarReferenceGlue;
     type VMScanning = UlarScanning;
     type VMSlot = SimpleSlot;
+
+    // When creating object references, the minimum alignment MMTK will accept is the length of a word
+    // (see the check in `ObjectReference::from_raw_address`). Despite this, `MIN_ALIGNMENT` is set to
+    // 4 bytes (32 bits) by default.
+    //
+    // We set it to the correct value.
+    const MIN_ALIGNMENT: usize = size_of::<usize>();
 }
 
 /// The purpose of this struct is to implement [ActivePlan] from MMTk.
@@ -294,12 +302,12 @@ pub struct UlarScanning;
 impl Scanning<UlarVM> for UlarScanning {
     fn notify_initial_thread_scan_complete(_partial_scan: bool, _tls: VMWorkerThread) {}
     fn prepare_for_roots_re_scanning() {}
-    fn scan_object<SV: SlotVisitor<SimpleSlot>>(
+    fn scan_object<A: SlotVisitor<SimpleSlot>>(
         _tls: VMWorkerThread,
-        _object: ObjectReference,
-        _slot_visitor: &mut SV,
+        object: ObjectReference,
+        slot_visitor: &mut A,
     ) {
-        unimplemented!()
+        mmtk_scan_object(object, slot_visitor);
     }
 
     fn scan_roots_in_mutator_thread(

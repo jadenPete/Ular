@@ -1,4 +1,4 @@
-use inkwell::{context::Context, AddressSpace};
+use inkwell::context::Context;
 use mmtk::{
     util::{Address, ObjectReference},
     vm::{slot::SimpleSlot, RootsWorkFactory},
@@ -103,16 +103,14 @@ seq {
 };
 ";
 
-        let mut additional_values: HashMap<String, AdditionalValue> = HashMap::new();
+        let mut additional_values = HashMap::new();
 
         additional_values.insert(
             String::from("__pause_for_garbage_collection"),
             AdditionalValue {
                 built_in_value: Box::new(BuiltInMappedFunction::new(
                     String::from("__pause_for_garbage_collection"),
-                    context
-                        .void_type()
-                        .fn_type(&[context.ptr_type(AddressSpace::default()).into()], false),
+                    context.void_type().fn_type(&[], false),
                     __pause_for_garbage_collection as usize,
                 )),
 

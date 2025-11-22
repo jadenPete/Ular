@@ -1,5 +1,3 @@
-use std::ffi::c_void;
-
 use crate::{
     libunwind::{add_dynamic_eh_frame_section, remove_dynamic_eh_frame_section},
     mmtk::{
@@ -10,6 +8,7 @@ use crate::{
 use inkwell::memory_manager::McjitMemoryManager;
 use libc::{c_uint, uintptr_t};
 use log::warn;
+use std::{ffi::c_void, fmt::Debug};
 
 #[derive(Debug)]
 struct StackMapSection {

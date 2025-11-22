@@ -4,6 +4,10 @@ version = "0.1.0"
 edition = "2021"
 
 [[test]]
+name = "garbage_collection_object_scanning_works"
+path = "tests/garbage_collection/object_scanning_works.rs"
+
+[[test]]
 name = "garbage_collection_root_scanning_works"
 path = "tests/garbage_collection/root_scanning_works.rs"
 

@@ -1,15 +1,12 @@
-use std::{
-    cell::UnsafeCell,
-    fmt::{Debug, Formatter},
-};
+use std::fmt::{Debug, Formatter};
 
 pub struct NumberMap<A> {
     pub offset: usize,
-    values: UnsafeCell<Vec<Option<A>>>,
+    values: Vec<Option<A>>,
 }
 
 impl<A> NumberMap<A> {
-    fn ensure_defined(&self, key: usize) {
+    fn ensure_defined(&mut self, key: usize) {
         if key < self.offset {
             panic!(
                 "Attempted to write to the key {} in a map with offset {}.",
@@ -17,43 +14,17 @@ impl<A> NumberMap<A> {
             );
         }
 
-        /*
-         * SAFETY: Logically, this is immutable, because although we're modifying `self.values`,
-         * we're only inserting *new* elements. Those new elements are `None`, and an element not
-         * existing at index `key` and one existing whose value is `None` both imply that the key
-         * `key` doesn't exist.
-         */
-        let mut_self = unsafe { &mut *self.values.get() };
-
-        for _ in mut_self.len()..=key - self.offset {
-            mut_self.push(None);
+        for _ in self.values.len()..=key - self.offset {
+            self.values.push(None);
         }
     }
 
-    fn get_values(&self) -> &Vec<Option<A>> {
-        /*
-         * SAFETY: Getting an immutable reference to `self.values`, given an immutable reference
-         * `self`, was always safe.
-         */
-        unsafe { &*self.values.get() }
-    }
-
-    fn get_values_mut(&mut self) -> &mut Vec<Option<A>> {
-        /*
-         * SAFETY: Getting a mutable reference to `self.values`, given a mutable reference `self`,
-         * was always safe.
-         */
-        unsafe { &mut *self.values.get() }
-    }
-
     pub fn contains_key(&self, key: usize) -> bool {
-        let values = self.get_values();
-
-        key - self.offset < values.len() && values[key - self.offset].is_some()
+        key - self.offset < self.values.len() && self.values[key - self.offset].is_some()
     }
 
     pub fn get(&self, key: usize) -> Option<&A> {
-        self.get_values()
+        self.values
             .get(key - self.offset)
             .and_then(|value| value.as_ref())
     }
@@ -61,7 +32,7 @@ impl<A> NumberMap<A> {
     pub fn get_mut(&mut self, key: usize) -> Option<&mut A> {
         let offset = self.offset;
 
-        self.get_values_mut()
+        self.values
             .get_mut(key - offset)
             .and_then(|value| value.as_mut())
     }
@@ -70,7 +41,7 @@ impl<A> NumberMap<A> {
         let offset = self.offset;
 
         self.ensure_defined(key);
-        self.get_values_mut()[key - offset].get_or_insert_with(default)
+        self.values[key - offset].get_or_insert_with(default)
     }
 
     pub fn insert(&mut self, key: usize, value: A) -> &mut A {
@@ -78,11 +49,10 @@ impl<A> NumberMap<A> {
 
         self.ensure_defined(key);
 
-        let values = self.get_values_mut();
         let i = key - offset;
 
-        values[i] = Some(value);
-        values[i].as_mut().unwrap()
+        self.values[i] = Some(value);
+        self.values[i].as_mut().unwrap()
     }
 
     /// Returns a consuming iterator of each entry of the map. [NumberMap] doesn't implement
@@ -93,7 +63,7 @@ impl<A> NumberMap<A> {
     pub fn into_iter(self) -> impl Iterator<Item = (usize, A)> {
         let offset = self.offset;
 
-        self.into_values()
+        self.values
             .into_iter()
             .enumerate()
             .flat_map(move |(i, value)| value.map(|value| (i + offset, value)))
@@ -122,12 +92,8 @@ impl<A> NumberMap<A> {
         Ok(result)
     }
 
-    fn into_values(self) -> Vec<Option<A>> {
-        self.values.into_inner()
-    }
-
     pub fn iter(&self) -> impl Iterator<Item = (usize, &A)> {
-        self.get_values()
+        self.values
             .iter()
             .enumerate()
             .flat_map(|(i, value)| value.as_ref().map(|value| (i + self.offset, value)))
@@ -136,7 +102,7 @@ impl<A> NumberMap<A> {
     pub fn new(offset: usize) -> Self {
         Self {
             offset,
-            values: UnsafeCell::new(Vec::new()),
+            values: Vec::new(),
         }
     }
 }
