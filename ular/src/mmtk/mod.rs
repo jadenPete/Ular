@@ -241,26 +241,22 @@ impl ObjectModel<UlarVM> for UlarObjectModel {
     }
 }
 
+/// The purpose of this struct is to implement [ReferenceGlue] from MMTk.
+///
+/// That trait is for weak references and finalizers, neither of which we support. For that reason,
+/// its implementation of [ReferenceGlue] is mostly empty.
 pub struct UlarReferenceGlue;
 
 impl ReferenceGlue<UlarVM> for UlarReferenceGlue {
     type FinalizableType = ObjectReference;
 
-    fn clear_referent(_object: ObjectReference) {
-        unimplemented!()
-    }
-
-    fn enqueue_references(_references: &[ObjectReference], _tls: VMWorkerThread) {
-        unimplemented!()
-    }
-
+    fn clear_referent(_object: ObjectReference) {}
+    fn enqueue_references(_references: &[ObjectReference], _tls: VMWorkerThread) {}
     fn get_referent(_object: ObjectReference) -> Option<ObjectReference> {
-        unimplemented!()
+        None
     }
 
-    fn set_referent(_reference: ObjectReference, _referent: ObjectReference) {
-        unimplemented!()
-    }
+    fn set_referent(_reference: ObjectReference, _referent: ObjectReference) {}
 }
 
 /// The purpose of this struct is to implement [Scanning] from MMTk.
