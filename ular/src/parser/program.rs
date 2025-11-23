@@ -107,7 +107,7 @@ pub enum Statement {
     StructDefinition(StructDefinition),
     VariableDefinition(VariableDefinition),
     FunctionDefinition(FunctionDefinition),
-    Expression(Expression),
+    Expression(Box<Expression>),
     NoOp { position: Position },
 }
 
@@ -129,7 +129,7 @@ pub struct StructDefinitionField {
 #[derive(Debug, Node)]
 pub struct VariableDefinition {
     pub name: Identifier,
-    pub value: Expression,
+    pub value: Box<Expression>,
     pub position: Position,
 }
 
@@ -269,7 +269,7 @@ pub struct StructApplication {
 #[derive(Debug)]
 pub struct StructApplicationField {
     pub name: Identifier,
-    pub value: Expression,
+    pub value: Box<Expression>,
 }
 
 #[derive(Clone, Debug, Node)]

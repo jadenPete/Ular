@@ -23,7 +23,7 @@ pub enum TypedStatement {
     StructDefinition(TypedStructDefinition),
     VariableDefinition(TypedVariableDefinition),
     FunctionDefinition(TypedFunctionDefinition),
-    Expression(TypedExpression),
+    Expression(Box<TypedExpression>),
     NoOp { position: Position },
 }
 
@@ -38,7 +38,7 @@ pub struct TypedStructDefinition {
 #[derive(Clone, Debug, Node)]
 pub struct TypedVariableDefinition {
     pub name: Identifier,
-    pub value: TypedExpression,
+    pub value: Box<TypedExpression>,
     pub position: Position,
 }
 
@@ -154,7 +154,7 @@ pub struct TypedPath {
 #[derive(Clone, Debug)]
 pub struct TypedStructApplicationField {
     pub name: Identifier,
-    pub value: TypedExpression,
+    pub value: Box<TypedExpression>,
 }
 
 #[derive(Clone, Debug, Node, Typed)]

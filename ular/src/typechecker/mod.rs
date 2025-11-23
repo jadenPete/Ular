@@ -521,9 +521,9 @@ impl<'a> Typechecker<'a> {
                 TypedStatement::FunctionDefinition(self.typecheck_function_definition(definition)?),
             ),
 
-            SimpleStatement::Expression(expression) => Ok(TypedStatement::Expression(
+            SimpleStatement::Expression(expression) => Ok(TypedStatement::Expression(Box::new(
                 self.typecheck_expression(expression, Some(&Type::Unit))?,
-            )),
+            ))),
 
             SimpleStatement::NoOp { position } => Ok(TypedStatement::NoOp {
                 position: position.clone(),
@@ -651,7 +651,7 @@ impl<'a> Typechecker<'a> {
 
             typechecked_fields.push(TypedStructApplicationField {
                 name: field.name.clone(),
-                value: typechecked_field,
+                value: Box::new(typechecked_field),
             });
         }
 
@@ -708,7 +708,7 @@ impl<'a> Typechecker<'a> {
 
         Ok(TypedVariableDefinition {
             name: definition.name.clone(),
-            value: result,
+            value: Box::new(result),
             position: definition.get_position(),
         })
     }

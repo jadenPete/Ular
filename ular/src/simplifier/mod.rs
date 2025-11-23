@@ -208,7 +208,7 @@ fn simplify_select(select: &Select) -> SimpleSelect {
 fn simplify_statement(statement: &Statement) -> SimpleStatement {
     match statement {
         Statement::Expression(expression) => {
-            SimpleStatement::Expression(simplify_expression(expression))
+            SimpleStatement::Expression(Box::new(simplify_expression(expression)))
         }
 
         Statement::StructDefinition(definition) => {
@@ -237,7 +237,7 @@ fn simplify_struct_application(struct_application: &StructApplication) -> Simple
             .iter()
             .map(|field| SimpleStructApplicationField {
                 name: field.name.clone(),
-                value: simplify_expression(&field.value),
+                value: Box::new(simplify_expression(&field.value)),
             })
             .collect(),
         position: struct_application.get_position(),
@@ -261,7 +261,7 @@ fn simplify_struct_definition(definition: &StructDefinition) -> SimpleStructDefi
 fn simplify_variable_definition(definition: &VariableDefinition) -> SimpleVariableDefinition {
     SimpleVariableDefinition {
         name: definition.name.clone(),
-        value: simplify_expression(&definition.value),
+        value: Box::new(simplify_expression(&definition.value)),
         position: definition.get_position(),
     }
 }

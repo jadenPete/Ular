@@ -20,7 +20,7 @@ pub enum SimpleStatement {
     StructDefinition(SimpleStructDefinition),
     VariableDefinition(SimpleVariableDefinition),
     FunctionDefinition(SimpleFunctionDefinition),
-    Expression(SimpleExpression),
+    Expression(Box<SimpleExpression>),
     NoOp { position: Position },
 }
 
@@ -35,7 +35,7 @@ pub struct SimpleStructDefinition {
 #[derive(Debug, Node)]
 pub struct SimpleVariableDefinition {
     pub name: Identifier,
-    pub value: SimpleExpression,
+    pub value: Box<SimpleExpression>,
     pub position: Position,
 }
 
@@ -136,5 +136,5 @@ pub struct SimpleStructApplication {
 #[derive(Debug)]
 pub struct SimpleStructApplicationField {
     pub name: Identifier,
-    pub value: SimpleExpression,
+    pub value: Box<SimpleExpression>,
 }

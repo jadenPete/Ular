@@ -96,7 +96,7 @@ fn parse_statement(input: Tokens) -> IResult<Tokens, Statement> {
         map(parse_function_definition, Statement::FunctionDefinition),
         map(
             tuple((parse_expression, parse_token(Token::Semicolon))),
-            |(expression, _)| Statement::Expression(expression),
+            |(expression, _)| Statement::Expression(Box::new(expression)),
         ),
         map(
             positioned(parse_token(Token::Semicolon)),
@@ -222,7 +222,7 @@ fn parse_variable_definition(input: Tokens) -> IResult<Tokens, VariableDefinitio
         ))),
         |(position, (name, _, value, _))| VariableDefinition {
             name,
-            value,
+            value: Box::new(value),
             position,
         },
     )(input)
@@ -652,7 +652,10 @@ fn parse_struct_application_field(input: Tokens) -> IResult<Tokens, StructApplic
             parse_token(Token::TypeAnnotation),
             parse_expression,
         )),
-        |(name, _, value)| StructApplicationField { name, value },
+        |(name, _, value)| StructApplicationField {
+            name,
+            value: Box::new(value),
+        },
     )(input)
 }
 
