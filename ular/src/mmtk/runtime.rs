@@ -1,4 +1,5 @@
 use crate::{
+    arguments::GarbageCollectionPlan,
     libunwind,
     mmtk::{
         object_descriptor_store::{
@@ -245,14 +246,10 @@ pub fn mmtk_get_object_size(object: ObjectReference) -> usize {
     get_object_descriptor(object).size
 }
 
-pub extern "C" fn mmtk_init() {
+pub extern "C" fn mmtk_init(plan: GarbageCollectionPlan) {
     let mut mmtk_builder = MMTKBuilder::new();
 
-    // TODO: Use a real garbage collector
-    mmtk_builder
-        .options
-        .plan
-        .set(mmtk::util::options::PlanSelector::NoGC);
+    mmtk_builder.options.plan.set(plan.into());
 
     let mmtk = mmtk::memory_manager::mmtk_init(&mmtk_builder);
 

@@ -63,6 +63,7 @@ pub fn run_phases<'a>(
     let analyzed_program = analyzer_phase.execute_and_debug(&typed_program, arguments)?;
     let jit_compiler_phase = JitCompilerPhase {
         context,
+        garbage_collection_plan: arguments.gc_plan,
         print_stack_map: arguments.print_stack_map,
         additional_values: additional_values
             .iter()

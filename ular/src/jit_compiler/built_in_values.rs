@@ -1,4 +1,5 @@
 use crate::{
+    arguments::GarbageCollectionPlan,
     jit_compiler::{
         get_value_buffer_type,
         module::UlarModule,
@@ -14,7 +15,7 @@ use inkwell::{
     context::Context,
     execution_engine::ExecutionEngine,
     module::Linkage,
-    types::{ArrayType, FunctionType, StructType},
+    types::{ArrayType, FunctionType, IntType, StructType},
     values::{BasicValue, FunctionValue},
     AddressSpace, GlobalVisibility,
 };
@@ -244,6 +245,7 @@ pub struct BuiltInValues<'a> {
     pub _divide_u16: BuiltInMappedFunction<'a>,
     pub _divide_u32: BuiltInMappedFunction<'a>,
     pub _divide_u64: BuiltInMappedFunction<'a>,
+    pub _garbage_collection_plan_type: IntType<'a>,
     pub _job_new: BuiltInMappedFunction<'a>,
     pub _job_type: StructType<'a>,
     pub _mmtk_alloc: BuiltInMappedFunction<'a>,
@@ -538,9 +540,14 @@ impl<'a> BuiltInValues<'a> {
             mmtk_bind_current_mutator as usize,
         );
 
+        let _garbage_collection_plan_type =
+            context.custom_width_int_type(size_of::<GarbageCollectionPlan>() as u32 * 8);
+
         let _mmtk_init = BuiltInMappedFunction::new(
             String::from("_mmtk_init"),
-            context.void_type().fn_type(&[], false),
+            context
+                .void_type()
+                .fn_type(&[_garbage_collection_plan_type.into()], false),
             mmtk_init as usize,
         );
 
@@ -644,6 +651,7 @@ impl<'a> BuiltInValues<'a> {
             _divide_u16,
             _divide_u32,
             _divide_u64,
+            _garbage_collection_plan_type,
             _job_new,
             _job_type,
             _mmtk_alloc,

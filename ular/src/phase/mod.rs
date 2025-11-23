@@ -1,11 +1,14 @@
-use crate::{arguments::Arguments, error_reporting::CompilationError};
+use crate::{
+    arguments::{Arguments, PhaseName},
+    error_reporting::CompilationError,
+};
 use log::warn;
 use std::fmt::Debug;
 
 pub trait Phase<Input> {
     type Output: Debug;
 
-    fn name() -> String;
+    fn name() -> PhaseName;
     fn execute(&self, input: Input) -> Result<Self::Output, CompilationError>;
 
     fn execute_and_debug(
@@ -20,7 +23,7 @@ pub trait Phase<Input> {
             if arguments
                 .debug_phase
                 .iter()
-                .any(|other_name| other_name.as_ref() == name)
+                .any(|other_name| *other_name == name)
             {
                 warn!("Output of the {} phase:\n{:#?}", name, output);
             }

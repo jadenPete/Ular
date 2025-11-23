@@ -6,6 +6,7 @@ mod scope;
 mod value;
 
 use crate::{
+    arguments::{GarbageCollectionPlan, PhaseName},
     data_structures::graph::DirectedGraph,
     dependency_analyzer::analyzed_program::{
         AnalyzedBlock, AnalyzedCall, AnalyzedExpression, AnalyzedFunctionDefinition, AnalyzedIf,
@@ -79,8 +80,8 @@ impl Phase<&CompiledProgram<'_>> for ExecutorPhase {
         Ok(unsafe { program.main_harness_function.call() })
     }
 
-    fn name() -> String {
-        String::from("executor")
+    fn name() -> PhaseName {
+        PhaseName::Executor
     }
 }
 
@@ -946,8 +947,482 @@ impl Debug for CompiledProgram<'_> {
 
 pub struct JitCompilerPhase<'a> {
     pub context: &'a Context,
+    pub garbage_collection_plan: GarbageCollectionPlan,
     pub print_stack_map: bool,
     pub additional_values: HashMap<String, Box<dyn BuiltInValue<'a> + 'a>>,
+}
+
+impl<'a> JitCompilerPhase<'a> {
+    #[allow(clippy::too_many_arguments)]
+    fn compile_main_function(
+        &self,
+        builder: &Builder<'a>,
+        built_in_values: &mut BuiltInValues<'a>,
+        execution_engine: &ExecutionEngine<'a>,
+        fork_function_cache: &mut ForkFunctionCache<'a>,
+        module: &mut UlarModule<'a>,
+        struct_information: &[StructInformation<'_, 'a>],
+        program: &AnalyzedProgram,
+    ) -> Result<FunctionValue<'a>, CompilationError> {
+        let main_function = module.add_garbage_collecting_function(
+            MAIN_FUNCTION_NAME,
+            self.context.void_type().fn_type(
+                &[self.context.ptr_type(AddressSpace::default()).into()],
+                false,
+            ),
+            None,
+        );
+
+        let worker = main_function
+            .get_first_param()
+            .unwrap()
+            .into_pointer_value();
+
+        let main_entry_block = self.context.append_basic_block(main_function, "entry");
+
+        builder.position_at_end(main_entry_block);
+
+        let struct_method_values = program
+            .structs
+            .iter()
+            .map(|struct_definition| {
+                struct_definition
+                    .methods
+                    .iter()
+                    .map(|method_definition| {
+                        let function_type = method_definition
+                            .type_
+                            .inkwell_type(self.context)
+                            .ok_or_else(|| CompilationError {
+                                message: CompilationErrorMessage::UnitPassedAsValue,
+                                position: Some(method_definition.get_position()),
+                            })?;
+
+                        let function_name = format!(
+                            "{}_{}",
+                            struct_definition.name.value, method_definition.name.value
+                        );
+
+                        Ok(module.add_garbage_collecting_function(
+                            &function_name,
+                            function_type,
+                            None,
+                        ))
+                    })
+                    .collect::<Result<_, _>>()
+            })
+            .collect::<Result<_, _>>()?;
+
+        let function_values = program
+            .functions
+            .iter()
+            .map(|definition| {
+                let function_type =
+                    definition.type_.inkwell_type(self.context).ok_or_else(|| {
+                        CompilationError {
+                            message: CompilationErrorMessage::UnitPassedAsValue,
+                            position: Some(definition.get_position()),
+                        }
+                    })?;
+
+                Ok(module.add_garbage_collecting_function(
+                    &definition.name.value,
+                    function_type,
+                    None,
+                ))
+            })
+            .collect::<Result<_, _>>()?;
+
+        let scope_context = JitCompilerScopeContext {
+            function_values,
+            struct_method_values,
+        };
+
+        let mut scope = JitCompilerScope::new_without_parent(None, worker);
+        let mut function_compiler = JitFunctionCompiler {
+            built_in_values,
+            context: self.context,
+            execution_engine,
+            fork_function_cache,
+            module,
+            scope_context: &scope_context,
+            struct_information,
+            function: main_function,
+        };
+
+        for (struct_definition, method_values) in program
+            .structs
+            .iter()
+            .zip(&scope_context.struct_method_values)
+        {
+            for (method_definition, method_value) in
+                struct_definition.methods.iter().zip(method_values)
+            {
+                function_compiler.compile_function_definition(
+                    &mut scope,
+                    method_definition,
+                    *method_value,
+                )?;
+            }
+        }
+
+        for (definition, value) in program.functions.iter().zip(&scope_context.function_values) {
+            function_compiler.compile_function_definition(&mut scope, definition, *value)?;
+        }
+
+        function_compiler.compile_expression_graph(
+            builder,
+            &mut scope,
+            &program.expression_graph,
+        )?;
+
+        builder.build_return(None).unwrap();
+
+        Ok(main_function)
+    }
+
+    /// Generates the main harness function, which wraps the main function.
+    ///
+    /// This function is responsible for:
+    /// 1. Setting up the thread pool and creating a worker
+    /// 2. Invoking the main function
+    /// 3. Handling exceptions that may occur during the execution of the main function
+    ///
+    /// The LLVM IR generated by [compile_main_harness_function] should look like this:
+    ///
+    /// ```llvm
+    /// define i8 @main_harness() personality ptr @__gxx_personality_v0 {
+    /// entry:
+    ///     %worker_pool = call ptr @_workerpool_new()
+    ///     %worker = call ptr @_workerpool_worker(ptr %worker_pool)
+    ///
+    ///     invoke void @main(%worker) to label %then unwind label %catch
+    ///
+    /// catch:
+    ///     %landing_pad_result = landingpad { ptr, i32 } catch ptr null
+    ///     %exception_structure = extractvalue { ptr, i32 } %landing_pad_result, 0
+    ///     %exception_object = call ptr @__cxa_begin_catch(ptr %exception_structure)
+    ///     %exception_value = load ptr, ptr %exception_object
+    ///
+    ///     call void @_print_c_string(ptr %exception_value)
+    ///     call void @__cxa_end_catch()
+    ///     br label %end
+    ///
+    /// end:
+    ///     %return_value = phi i8 [ 0, %entry ], [ 1, %catch ]
+    ///
+    ///     call void @_worker_free(ptr %worker)
+    ///     call void @_workerpool_join(ptr %worker_pool)
+    ///     ret i8 %return_value
+    /// }
+    /// ```
+    ///
+    /// This function ensures that if `main` completes successfully, it returns 0.
+    /// If an exception is thrown, it prints the exception and returns 1.
+    fn compile_main_harness_function(
+        &self,
+        builder: &Builder<'a>,
+        built_in_values: &mut BuiltInValues<'a>,
+        execution_engine: &ExecutionEngine<'a>,
+        module: &mut UlarModule<'a>,
+        main_function: FunctionValue<'a>,
+    ) {
+        let main_harness_function = module.add_garbage_collecting_function(
+            MAIN_HARNESS_FUNCTION_NAME,
+            self.context.i8_type().fn_type(&[], false),
+            None,
+        );
+
+        let entry_block = self
+            .context
+            .append_basic_block(main_harness_function, "entry");
+
+        let catch_block = self
+            .context
+            .append_basic_block(main_harness_function, "catch");
+
+        let end_block = self
+            .context
+            .append_basic_block(main_harness_function, "end");
+
+        builder.position_at_end(entry_block);
+        builder
+            .build_call(
+                built_in_values._mmtk_init.get_inkwell_function(
+                    self.context,
+                    execution_engine,
+                    module,
+                ),
+                &[built_in_values
+                    ._garbage_collection_plan_type
+                    .const_int(self.garbage_collection_plan as u64, false)
+                    .into()],
+                "",
+            )
+            .unwrap();
+
+        let worker_pool = builder
+            .build_call(
+                built_in_values._workerpool_new.get_inkwell_function(
+                    self.context,
+                    execution_engine,
+                    module,
+                ),
+                &[],
+                "worker_pool",
+            )
+            .unwrap()
+            .try_as_basic_value()
+            .unwrap_left()
+            .into();
+
+        let worker = builder
+            .build_call(
+                built_in_values._workerpool_worker.get_inkwell_function(
+                    self.context,
+                    execution_engine,
+                    module,
+                ),
+                &[worker_pool],
+                "worker",
+            )
+            .unwrap()
+            .try_as_basic_value()
+            .unwrap_left();
+
+        builder
+            .build_call(
+                built_in_values
+                    ._mmtk_bind_current_mutator
+                    .get_inkwell_function(self.context, execution_engine, module),
+                &[],
+                "",
+            )
+            .unwrap();
+
+        builder
+            .build_invoke(main_function, &[worker], end_block, catch_block, "")
+            .unwrap();
+
+        builder.position_at_end(catch_block);
+
+        let landing_pad_result_type = self.context.struct_type(
+            &[
+                self.context.ptr_type(AddressSpace::default()).into(),
+                self.context.i32_type().into(),
+            ],
+            false,
+        );
+
+        let landing_pad_result = builder
+            .build_landing_pad(
+                landing_pad_result_type,
+                built_in_values.__gxx_personality_v0.get_inkwell_function(
+                    self.context,
+                    execution_engine,
+                    module,
+                ),
+                &[self
+                    .context
+                    .ptr_type(AddressSpace::default())
+                    .const_zero()
+                    .into()],
+                false,
+                "landing_pad_result",
+            )
+            .unwrap()
+            .into_struct_value();
+
+        let exception_structure = builder
+            .build_extract_value(landing_pad_result, 0, "exception_structure")
+            .unwrap();
+
+        let exception_object = builder
+            .build_call(
+                built_in_values.__cxa_begin_catch.get_inkwell_function(
+                    self.context,
+                    execution_engine,
+                    module,
+                ),
+                &[exception_structure.into()],
+                "exception_object",
+            )
+            .unwrap()
+            .try_as_basic_value()
+            .unwrap_left()
+            .into_pointer_value();
+
+        let exception_value = builder
+            .build_load(
+                self.context.ptr_type(AddressSpace::default()),
+                exception_object,
+                "exception_value",
+            )
+            .unwrap();
+
+        builder
+            .build_call(
+                built_in_values._print_c_string.get_inkwell_function(
+                    self.context,
+                    execution_engine,
+                    module,
+                ),
+                &[exception_value.into()],
+                "",
+            )
+            .unwrap();
+
+        builder
+            .build_call(
+                built_in_values.__cxa_end_catch.get_inkwell_function(
+                    self.context,
+                    execution_engine,
+                    module,
+                ),
+                &[],
+                "",
+            )
+            .unwrap();
+
+        builder.build_unconditional_branch(end_block).unwrap();
+        builder.position_at_end(end_block);
+
+        let phi = builder
+            .build_phi(self.context.i8_type(), "return_value")
+            .unwrap();
+
+        phi.add_incoming(&[
+            (&self.context.i8_type().const_int(0, false), entry_block),
+            (&self.context.i8_type().const_int(1, false), catch_block),
+        ]);
+
+        builder
+            .build_call(
+                built_in_values._worker_free.get_inkwell_function(
+                    self.context,
+                    execution_engine,
+                    module,
+                ),
+                &[worker.into()],
+                "",
+            )
+            .unwrap();
+
+        builder
+            .build_call(
+                built_in_values._workerpool_join.get_inkwell_function(
+                    self.context,
+                    execution_engine,
+                    module,
+                ),
+                &[worker_pool],
+                "",
+            )
+            .unwrap();
+
+        builder.build_return(Some(&phi.as_basic_value())).unwrap();
+    }
+
+    fn compile_program(
+        &self,
+        built_in_values: &mut BuiltInValues<'a>,
+        execution_engine: &ExecutionEngine<'a>,
+        fork_function_cache: &mut ForkFunctionCache<'a>,
+        module: &mut UlarModule<'a>,
+        program: &AnalyzedProgram,
+    ) -> Result<JitFunction<'a, MainFunction>, CompilationError> {
+        let builder = self.context.create_builder();
+        let mut object_descriptor_store = ObjectDescriptorStore::new();
+        let target_triple = TargetMachine::get_default_triple();
+        let target = Target::from_triple(&target_triple).unwrap();
+        let target_machine = target
+            .create_target_machine(
+                &target_triple,
+                "generic",
+                "",
+                OptimizationLevel::None,
+                RelocMode::Default,
+                CodeModel::JITDefault,
+            )
+            .unwrap();
+
+        let target_data = target_machine.get_target_data();
+        let struct_types = program
+            .structs
+            .iter()
+            .map(|struct_definition| {
+                let mut field_types = Vec::with_capacity(struct_definition.fields.len() + 1);
+
+                // The first field is the descriptor reference
+                field_types.push(self.context.i32_type().as_basic_type_enum());
+
+                for field in &struct_definition.fields {
+                    field_types.push(field.type_.inkwell_type(self.context).ok_or_else(|| {
+                        CompilationError {
+                            message: CompilationErrorMessage::UnitPassedAsValue,
+                            position: Some(field.name.get_position()),
+                        }
+                    })?);
+                }
+
+                Ok(self.context.struct_type(&field_types, false))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        let struct_information = program
+            .structs
+            .iter()
+            .enumerate()
+            .map(|(i, struct_definition)| {
+                Ok(StructInformation {
+                    definition: struct_definition,
+                    inkwell_type: struct_types[i],
+                    descriptor_reference: object_descriptor_store
+                        .get_or_set_descriptor_for_struct(
+                            program,
+                            &struct_types,
+                            &target_data,
+                            i,
+                        )?,
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        mmtk_set_object_descriptor_store(object_descriptor_store).unwrap();
+
+        let main_function = self.compile_main_function(
+            &builder,
+            built_in_values,
+            execution_engine,
+            fork_function_cache,
+            module,
+            &struct_information,
+            program,
+        )?;
+
+        self.compile_main_harness_function(
+            &builder,
+            built_in_values,
+            execution_engine,
+            module,
+            main_function,
+        );
+
+        module
+            .underlying
+            .run_passes(
+                "rewrite-statepoints-for-gc",
+                &target_machine,
+                PassBuilderOptions::create(),
+            )
+            .unwrap();
+
+        Ok(unsafe {
+            execution_engine
+                .get_function(MAIN_HARNESS_FUNCTION_NAME)
+                .unwrap()
+        })
+    }
 }
 
 impl<'a> Phase<&AnalyzedProgram> for JitCompilerPhase<'a> {
@@ -978,9 +1453,8 @@ impl<'a> Phase<&AnalyzedProgram> for JitCompilerPhase<'a> {
         );
 
         let mut fork_function_cache = ForkFunctionCache::new();
-        let main_harness_function = compile_program(
+        let main_harness_function = self.compile_program(
             &mut built_in_values,
-            self.context,
             &execution_engine,
             &mut fork_function_cache,
             &mut module,
@@ -993,8 +1467,8 @@ impl<'a> Phase<&AnalyzedProgram> for JitCompilerPhase<'a> {
         })
     }
 
-    fn name() -> String {
-        String::from("jit_compiler")
+    fn name() -> PhaseName {
+        PhaseName::JitCompiler
     }
 }
 
@@ -1275,444 +1749,6 @@ struct StructInformation<'a, 'context> {
     definition: &'a AnalyzedStructDefinition,
     inkwell_type: StructType<'context>,
     descriptor_reference: ObjectDescriptorReference,
-}
-
-#[allow(clippy::too_many_arguments)]
-fn compile_main_function<'a>(
-    builder: &Builder<'a>,
-    built_in_values: &mut BuiltInValues<'a>,
-    context: &'a Context,
-    execution_engine: &ExecutionEngine<'a>,
-    fork_function_cache: &mut ForkFunctionCache<'a>,
-    module: &mut UlarModule<'a>,
-    struct_information: &[StructInformation<'_, 'a>],
-    program: &AnalyzedProgram,
-) -> Result<FunctionValue<'a>, CompilationError> {
-    let main_function = module.add_garbage_collecting_function(
-        MAIN_FUNCTION_NAME,
-        context
-            .void_type()
-            .fn_type(&[context.ptr_type(AddressSpace::default()).into()], false),
-        None,
-    );
-
-    let worker = main_function
-        .get_first_param()
-        .unwrap()
-        .into_pointer_value();
-
-    let main_entry_block = context.append_basic_block(main_function, "entry");
-
-    builder.position_at_end(main_entry_block);
-
-    let struct_method_values = program
-        .structs
-        .iter()
-        .map(|struct_definition| {
-            struct_definition
-                .methods
-                .iter()
-                .map(|method_definition| {
-                    let function_type =
-                        method_definition
-                            .type_
-                            .inkwell_type(context)
-                            .ok_or_else(|| CompilationError {
-                                message: CompilationErrorMessage::UnitPassedAsValue,
-                                position: Some(method_definition.get_position()),
-                            })?;
-
-                    let function_name = format!(
-                        "{}_{}",
-                        struct_definition.name.value, method_definition.name.value
-                    );
-
-                    Ok(module.add_garbage_collecting_function(&function_name, function_type, None))
-                })
-                .collect::<Result<_, _>>()
-        })
-        .collect::<Result<_, _>>()?;
-
-    let function_values = program
-        .functions
-        .iter()
-        .map(|definition| {
-            let function_type =
-                definition
-                    .type_
-                    .inkwell_type(context)
-                    .ok_or_else(|| CompilationError {
-                        message: CompilationErrorMessage::UnitPassedAsValue,
-                        position: Some(definition.get_position()),
-                    })?;
-
-            Ok(module.add_garbage_collecting_function(&definition.name.value, function_type, None))
-        })
-        .collect::<Result<_, _>>()?;
-
-    let scope_context = JitCompilerScopeContext {
-        function_values,
-        struct_method_values,
-    };
-
-    let mut scope = JitCompilerScope::new_without_parent(None, worker);
-    let mut function_compiler = JitFunctionCompiler {
-        built_in_values,
-        context,
-        execution_engine,
-        fork_function_cache,
-        module,
-        scope_context: &scope_context,
-        struct_information,
-        function: main_function,
-    };
-
-    for (struct_definition, method_values) in program
-        .structs
-        .iter()
-        .zip(&scope_context.struct_method_values)
-    {
-        for (method_definition, method_value) in struct_definition.methods.iter().zip(method_values)
-        {
-            function_compiler.compile_function_definition(
-                &mut scope,
-                method_definition,
-                *method_value,
-            )?;
-        }
-    }
-
-    for (definition, value) in program.functions.iter().zip(&scope_context.function_values) {
-        function_compiler.compile_function_definition(&mut scope, definition, *value)?;
-    }
-
-    function_compiler.compile_expression_graph(builder, &mut scope, &program.expression_graph)?;
-
-    builder.build_return(None).unwrap();
-
-    Ok(main_function)
-}
-
-/// Generates the main harness function, which wraps the main function.
-///
-/// This function is responsible for:
-/// 1. Setting up the thread pool and creating a worker
-/// 2. Invoking the main function
-/// 3. Handling exceptions that may occur during the execution of the main function
-///
-/// The LLVM IR generated by [compile_main_harness_function] should look like this:
-///
-/// ```llvm
-/// define i8 @main_harness() personality ptr @__gxx_personality_v0 {
-/// entry:
-///     %worker_pool = call ptr @_workerpool_new()
-///     %worker = call ptr @_workerpool_worker(ptr %worker_pool)
-///
-///     invoke void @main(%worker) to label %then unwind label %catch
-///
-/// catch:
-///     %landing_pad_result = landingpad { ptr, i32 } catch ptr null
-///     %exception_structure = extractvalue { ptr, i32 } %landing_pad_result, 0
-///     %exception_object = call ptr @__cxa_begin_catch(ptr %exception_structure)
-///     %exception_value = load ptr, ptr %exception_object
-///
-///     call void @_print_c_string(ptr %exception_value)
-///     call void @__cxa_end_catch()
-///     br label %end
-///
-/// end:
-///     %return_value = phi i8 [ 0, %entry ], [ 1, %catch ]
-///
-///     call void @_worker_free(ptr %worker)
-///     call void @_workerpool_join(ptr %worker_pool)
-///     ret i8 %return_value
-/// }
-/// ```
-///
-/// This function ensures that if `main` completes successfully, it returns 0.
-/// If an exception is thrown, it prints the exception and returns 1.
-fn compile_main_harness_function<'a>(
-    builder: &Builder<'a>,
-    built_in_values: &mut BuiltInValues<'a>,
-    context: &'a Context,
-    execution_engine: &ExecutionEngine<'a>,
-    module: &mut UlarModule<'a>,
-    main_function: FunctionValue<'a>,
-) {
-    let main_harness_function = module.add_garbage_collecting_function(
-        MAIN_HARNESS_FUNCTION_NAME,
-        context.i8_type().fn_type(&[], false),
-        None,
-    );
-
-    let entry_block = context.append_basic_block(main_harness_function, "entry");
-    let catch_block = context.append_basic_block(main_harness_function, "catch");
-    let end_block = context.append_basic_block(main_harness_function, "end");
-
-    builder.position_at_end(entry_block);
-    builder
-        .build_call(
-            built_in_values
-                ._mmtk_init
-                .get_inkwell_function(context, execution_engine, module),
-            &[],
-            "",
-        )
-        .unwrap();
-
-    let worker_pool = builder
-        .build_call(
-            built_in_values
-                ._workerpool_new
-                .get_inkwell_function(context, execution_engine, module),
-            &[],
-            "worker_pool",
-        )
-        .unwrap()
-        .try_as_basic_value()
-        .unwrap_left()
-        .into();
-
-    let worker = builder
-        .build_call(
-            built_in_values._workerpool_worker.get_inkwell_function(
-                context,
-                execution_engine,
-                module,
-            ),
-            &[worker_pool],
-            "worker",
-        )
-        .unwrap()
-        .try_as_basic_value()
-        .unwrap_left();
-
-    builder
-        .build_call(
-            built_in_values
-                ._mmtk_bind_current_mutator
-                .get_inkwell_function(context, execution_engine, module),
-            &[],
-            "",
-        )
-        .unwrap();
-
-    builder
-        .build_invoke(main_function, &[worker], end_block, catch_block, "")
-        .unwrap();
-
-    builder.position_at_end(catch_block);
-
-    let landing_pad_result_type = context.struct_type(
-        &[
-            context.ptr_type(AddressSpace::default()).into(),
-            context.i32_type().into(),
-        ],
-        false,
-    );
-
-    let landing_pad_result = builder
-        .build_landing_pad(
-            landing_pad_result_type,
-            built_in_values.__gxx_personality_v0.get_inkwell_function(
-                context,
-                execution_engine,
-                module,
-            ),
-            &[context
-                .ptr_type(AddressSpace::default())
-                .const_zero()
-                .into()],
-            false,
-            "landing_pad_result",
-        )
-        .unwrap()
-        .into_struct_value();
-
-    let exception_structure = builder
-        .build_extract_value(landing_pad_result, 0, "exception_structure")
-        .unwrap();
-
-    let exception_object = builder
-        .build_call(
-            built_in_values.__cxa_begin_catch.get_inkwell_function(
-                context,
-                execution_engine,
-                module,
-            ),
-            &[exception_structure.into()],
-            "exception_object",
-        )
-        .unwrap()
-        .try_as_basic_value()
-        .unwrap_left()
-        .into_pointer_value();
-
-    let exception_value = builder
-        .build_load(
-            context.ptr_type(AddressSpace::default()),
-            exception_object,
-            "exception_value",
-        )
-        .unwrap();
-
-    builder
-        .build_call(
-            built_in_values
-                ._print_c_string
-                .get_inkwell_function(context, execution_engine, module),
-            &[exception_value.into()],
-            "",
-        )
-        .unwrap();
-
-    builder
-        .build_call(
-            built_in_values
-                .__cxa_end_catch
-                .get_inkwell_function(context, execution_engine, module),
-            &[],
-            "",
-        )
-        .unwrap();
-
-    builder.build_unconditional_branch(end_block).unwrap();
-    builder.position_at_end(end_block);
-
-    let phi = builder
-        .build_phi(context.i8_type(), "return_value")
-        .unwrap();
-
-    phi.add_incoming(&[
-        (&context.i8_type().const_int(0, false), entry_block),
-        (&context.i8_type().const_int(1, false), catch_block),
-    ]);
-
-    builder
-        .build_call(
-            built_in_values
-                ._worker_free
-                .get_inkwell_function(context, execution_engine, module),
-            &[worker.into()],
-            "",
-        )
-        .unwrap();
-
-    builder
-        .build_call(
-            built_in_values._workerpool_join.get_inkwell_function(
-                context,
-                execution_engine,
-                module,
-            ),
-            &[worker_pool],
-            "",
-        )
-        .unwrap();
-
-    builder.build_return(Some(&phi.as_basic_value())).unwrap();
-}
-
-fn compile_program<'a>(
-    built_in_values: &mut BuiltInValues<'a>,
-    context: &'a Context,
-    execution_engine: &ExecutionEngine<'a>,
-    fork_function_cache: &mut ForkFunctionCache<'a>,
-    module: &mut UlarModule<'a>,
-    program: &AnalyzedProgram,
-) -> Result<JitFunction<'a, MainFunction>, CompilationError> {
-    let builder = context.create_builder();
-    let mut object_descriptor_store = ObjectDescriptorStore::new();
-    let target_triple = TargetMachine::get_default_triple();
-    let target = Target::from_triple(&target_triple).unwrap();
-    let target_machine = target
-        .create_target_machine(
-            &target_triple,
-            "generic",
-            "",
-            OptimizationLevel::None,
-            RelocMode::Default,
-            CodeModel::JITDefault,
-        )
-        .unwrap();
-
-    let target_data = target_machine.get_target_data();
-    let struct_types = program
-        .structs
-        .iter()
-        .map(|struct_definition| {
-            let mut field_types = Vec::with_capacity(struct_definition.fields.len() + 1);
-
-            // The first field is the descriptor reference
-            field_types.push(context.i32_type().as_basic_type_enum());
-
-            for field in &struct_definition.fields {
-                field_types.push(field.type_.inkwell_type(context).ok_or_else(|| {
-                    CompilationError {
-                        message: CompilationErrorMessage::UnitPassedAsValue,
-                        position: Some(field.name.get_position()),
-                    }
-                })?);
-            }
-
-            Ok(context.struct_type(&field_types, false))
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-
-    let struct_information = program
-        .structs
-        .iter()
-        .enumerate()
-        .map(|(i, struct_definition)| {
-            Ok(StructInformation {
-                definition: struct_definition,
-                inkwell_type: struct_types[i],
-                descriptor_reference: object_descriptor_store.get_or_set_descriptor_for_struct(
-                    program,
-                    &struct_types,
-                    &target_data,
-                    i,
-                )?,
-            })
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-
-    mmtk_set_object_descriptor_store(object_descriptor_store).unwrap();
-
-    let main_function = compile_main_function(
-        &builder,
-        built_in_values,
-        context,
-        execution_engine,
-        fork_function_cache,
-        module,
-        &struct_information,
-        program,
-    )?;
-
-    compile_main_harness_function(
-        &builder,
-        built_in_values,
-        context,
-        execution_engine,
-        module,
-        main_function,
-    );
-
-    module
-        .underlying
-        .run_passes(
-            "rewrite-statepoints-for-gc",
-            &target_machine,
-            PassBuilderOptions::create(),
-        )
-        .unwrap();
-
-    Ok(unsafe {
-        execution_engine
-            .get_function(MAIN_HARNESS_FUNCTION_NAME)
-            .unwrap()
-    })
 }
 
 fn get_value_buffer_type(context: &Context) -> ArrayType {

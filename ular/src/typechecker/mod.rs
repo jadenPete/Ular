@@ -3,6 +3,7 @@ mod scope;
 pub mod typed_program;
 
 use crate::{
+    arguments::PhaseName,
     error_reporting::{CompilationError, CompilationErrorMessage},
     parser::{
         program::{
@@ -746,8 +747,8 @@ pub struct TypecheckerPhase {
 impl Phase<&SimpleProgram> for TypecheckerPhase {
     type Output = TypedProgram;
 
-    fn name() -> String {
-        String::from("typechecker")
+    fn name() -> PhaseName {
+        PhaseName::Typechecker
     }
 
     fn execute(&self, program: &SimpleProgram) -> Result<TypedProgram, CompilationError> {

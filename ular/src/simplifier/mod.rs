@@ -1,6 +1,7 @@
 pub mod simple_program;
 
 use crate::{
+    arguments::PhaseName,
     error_reporting::{CompilationError, Position},
     parser::{
         program::{
@@ -24,8 +25,8 @@ pub struct SimplifierPhase;
 impl Phase<&Program> for SimplifierPhase {
     type Output = SimpleProgram;
 
-    fn name() -> String {
-        String::from("simplifier")
+    fn name() -> PhaseName {
+        PhaseName::Simplifier
     }
 
     fn execute(&self, program: &Program) -> Result<SimpleProgram, CompilationError> {

@@ -12,7 +12,7 @@ name = "garbage_collection_root_scanning_works"
 path = "tests/garbage_collection/root_scanning_works.rs"
 
 [dependencies]
-clap = { version = "4.5.29", features = ["derive"] }
+clap = { version = "4.5.29", features = ["derive", "string"] }
 dashmap = { git = "https://github.com/g-plane/dashmap", branch = "explicit-lifetime" }
 dyn-clone = "1.0.20"
 either = "1.13.0"

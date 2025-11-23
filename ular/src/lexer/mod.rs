@@ -1,6 +1,7 @@
 pub mod token;
 
 use crate::{
+    arguments::PhaseName,
     error_reporting::{CompilationError, CompilationErrorMessage, Position},
     lexer::token::{PositionedToken, Token},
     phase::Phase,
@@ -232,8 +233,8 @@ pub struct LexerPhase;
 impl Phase<&str> for LexerPhase {
     type Output = Vec<PositionedToken>;
 
-    fn name() -> String {
-        String::from("lexer")
+    fn name() -> PhaseName {
+        PhaseName::Lexer
     }
 
     fn execute(&self, input: &str) -> Result<Vec<PositionedToken>, CompilationError> {

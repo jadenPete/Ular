@@ -2,6 +2,7 @@ pub mod program;
 pub mod type_;
 
 use crate::{
+    arguments::PhaseName,
     error_reporting::{CompilationError, CompilationErrorMessage, Position},
     lexer::token::{PositionedToken, Token, Tokens},
     parser::{
@@ -31,8 +32,8 @@ pub struct ParserPhase;
 impl Phase<Tokens<'_>> for ParserPhase {
     type Output = Program;
 
-    fn name() -> String {
-        String::from("parser")
+    fn name() -> PhaseName {
+        PhaseName::Parser
     }
 
     fn execute(&self, tokens: Tokens) -> Result<Program, CompilationError> {

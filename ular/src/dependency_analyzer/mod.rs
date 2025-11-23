@@ -2,6 +2,7 @@ pub mod analyzed_program;
 mod scope;
 
 use crate::{
+    arguments::PhaseName,
     data_structures::{graph::DirectedGraph, number_map::NumberMap},
     dependency_analyzer::{
         analyzed_program::{
@@ -685,8 +686,8 @@ pub struct AnalyzerPhase {
 impl Phase<&TypedProgram> for AnalyzerPhase {
     type Output = AnalyzedProgram;
 
-    fn name() -> String {
-        String::from("analyzer")
+    fn name() -> PhaseName {
+        PhaseName::Analyzer
     }
 
     fn execute(&self, program: &TypedProgram) -> Result<AnalyzedProgram, CompilationError> {
