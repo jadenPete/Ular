@@ -31,6 +31,14 @@ impl BuiltInValues {
             );
         }
 
+        value_types.insert(
+            String::from("println_str"),
+            Type::Function(FunctionType {
+                parameters: vec![Type::Str],
+                return_type: Box::new(Type::Unit),
+            }),
+        );
+
         value_types.insert(String::from("true"), Type::Bool);
         value_types.insert(String::from("false"), Type::Bool);
 

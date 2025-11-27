@@ -57,6 +57,7 @@ use std::{
 /// IF_KEYWORD = "if";
 /// ELSE_KEYWORD = "else";
 /// SEQ_KEYWORD = "seq";
+/// STR_KEYWORD = "str";
 /// STRUCT_KEYWORD = "struct";
 /// LEFT_CURLY_BRACKET = "{";
 /// RIGHT_CURLY_BRACKET = "}";
@@ -76,6 +77,17 @@ use std::{
 /// (* Variable-length tokens *)
 /// IDENTIFIER = ?[a-zA-Z_][a-zA-Z0-9_]*?;
 /// NUMBER = ?[+-]?[0-9]+?;
+/// STRING = '"' string_fragment+ '"';
+/// string_fragment = ? any character except '"' or "\\" ?+ | string_escape;
+/// string_escape = simple_escape | line_continuation | unicode_escape;
+/// simple_escape = '\\"' | "\\\\" | "\\n" | "\\r" | "\\t";
+/// line_continuation = "\\\n";
+/// unicode_escape = '\\u(' hex_number ')';
+/// hex_number = hex_digit+;
+/// hex_digit =
+///     | '0' | '1' | '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9'
+///     | 'a' | 'b' | 'c' | 'd' | 'e' | 'f'
+///     | 'A' | 'B' | 'C' | 'D' | 'E' | 'F';
 ///
 /// (* This needs to come after `NUMBER` so signs aren't interpreted as operators *)
 /// MINUS = "-";
@@ -104,6 +116,7 @@ pub enum Token {
     U32Type,
     U64Type,
     BoolType,
+    StrType,
     UnitType,
     IfKeyword,
     ElseKeyword,
@@ -126,6 +139,7 @@ pub enum Token {
     TypeAnnotation,
     Identifier(String),
     Number(i128),
+    String(String),
     Select,
 }
 

@@ -1,7 +1,7 @@
 use crate::{
     error_reporting::Position,
     parser::{
-        program::{Identifier, InfixOperator, Node, StructDefinitionField},
+        program::{Identifier, InfixOperator, Node, StringLiteral, StructDefinitionField},
         type_::{FunctionType, NumericType, Type},
     },
     simplifier::simple_program::SimplePrefixOperator,
@@ -10,6 +10,12 @@ use ular_derive::{Node, Typed};
 
 pub trait Typed {
     fn get_type(&self) -> Type;
+}
+
+impl Typed for StringLiteral {
+    fn get_type(&self) -> Type {
+        Type::Str
+    }
 }
 
 #[derive(Debug, Node)]
@@ -67,6 +73,7 @@ pub enum TypedExpression {
     Path(TypedPath),
     Identifier(TypedIdentifier),
     Number(TypedNumber),
+    String(StringLiteral),
     PrefixOperation(TypedPrefixOperation),
     SequentialBlock(TypedBlock),
     Unit(TypedUnit),

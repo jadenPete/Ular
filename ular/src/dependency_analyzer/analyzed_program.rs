@@ -2,7 +2,7 @@ use crate::{
     data_structures::graph::DirectedGraph,
     error_reporting::Position,
     parser::{
-        program::{Identifier, InfixOperator, Node},
+        program::{Identifier, InfixOperator, Node, StringLiteral},
         type_::{FunctionType, NumericType, Type},
     },
     simplifier::simple_program::SimplePrefixOperator,
@@ -21,6 +21,7 @@ pub enum AnalyzedType {
     Struct(usize),
     Function(AnalyzedFunctionType),
     Numeric(NumericType),
+    Str,
     Unit,
 }
 
@@ -56,6 +57,7 @@ impl AnalyzedType {
             }),
 
             Self::Numeric(numeric_type) => Type::Numeric(*numeric_type),
+            Self::Str => Type::Str,
             Self::Unit => Type::Unit,
         }
     }
@@ -70,7 +72,7 @@ impl AnalyzedType {
     pub fn inkwell_type<'a>(&self, context: &'a Context) -> Option<BasicTypeEnum<'a>> {
         match self {
             Self::Bool => Some(BasicTypeEnum::IntType(context.i8_type())),
-            Self::Struct(_) => Some(BasicTypeEnum::PointerType(
+            Self::Struct(_) | Self::Str => Some(BasicTypeEnum::PointerType(
                 // https://llvm.org/docs/Statepoints.html#rewritestatepointsforgc
                 context.ptr_type(AddressSpace::from(1)),
             )),
@@ -118,8 +120,15 @@ pub trait AnalyzerTyped {
     fn get_type(&self) -> AnalyzedType;
 }
 
+impl AnalyzerTyped for StringLiteral {
+    fn get_type(&self) -> AnalyzedType {
+        AnalyzedType::Str
+    }
+}
+
 #[derive(Debug, Node)]
 pub struct AnalyzedProgram {
+    pub string_literals: Vec<String>,
     pub structs: Vec<AnalyzedStructDefinition>,
     pub functions: Vec<AnalyzedFunctionDefinition>,
     pub expression_graph: DirectedGraph<AnalyzedExpression>,
@@ -250,6 +259,7 @@ pub enum AnalyzedExpressionRef {
     },
 
     Number(AnalyzedNumber),
+    String(AnalyzedStringLiteral),
     Parameter {
         index: usize,
         type_: AnalyzedType,
@@ -276,6 +286,18 @@ pub struct AnalyzedNumber {
 impl AnalyzerTyped for AnalyzedNumber {
     fn get_type(&self) -> AnalyzedType {
         AnalyzedType::Numeric(self.type_)
+    }
+}
+
+#[derive(Clone, Debug, Node)]
+pub struct AnalyzedStringLiteral {
+    pub index: usize,
+    pub position: Position,
+}
+
+impl AnalyzerTyped for AnalyzedStringLiteral {
+    fn get_type(&self) -> AnalyzedType {
+        AnalyzedType::Str
     }
 }
 
@@ -331,6 +353,10 @@ impl AnalyzedExpressionRef {
                 position,
             },
 
+            Self::String(string) => Self::String(AnalyzedStringLiteral {
+                index: string.index,
+                position,
+            }),
             Self::StructMethod {
                 struct_index,
                 method_index,

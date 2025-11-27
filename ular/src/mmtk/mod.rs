@@ -137,9 +137,22 @@ impl Collection<UlarVM> for UlarCollection {
 ///
 /// # Ular's Object Model
 ///
+/// ## What is an object?
+///
+/// In Ular, an object can be one of a few things:
+/// 1. An instance of a struct
+/// 2. A string literal (e.g. `"Hello, world!"`)
+/// 3. An allocated string (e.g. `"Hello, " + "world!"`)
+///
+/// Only #1 and #3 are heap-allocated, so when we encounter a string literal (which is stored as a
+/// constant, not as a heap-allocated value), we ignore it for the purposes of garbage collection. The
+/// reason we still consider string literals objects is because we don't differentiate them from
+/// strings at the type-level, so it's impossible to know at compile time if a particular value
+/// references an allocated string or string literal.
+///
 /// ## Object Layout
 ///
-/// In Ular, objects are structured like so:
+/// In Ular, the memory layout of an object looks like this (not including padding):
 ///
 /// | Section | Size | Description |
 /// | ------- | ---- | ----------- |
@@ -157,6 +170,23 @@ impl Collection<UlarVM> for UlarCollection {
 /// - [get_reference_when_copied_to] returns the destination address provided to it
 /// - [OBJECT_REF_OFFSET_LOWER_BOUND], the minimum difference between an object reference and
 ///   start address, is 0
+///
+/// ### String Layout
+///
+/// For the purposes of garbage collection and, well, using objects, we need to be able to compute
+/// their sizes at runtime. Structs' sizes are known at compile-time the object descriptor
+/// (see [crate::mmtk::object_descriptor_store::ObjectSize]). Strings' sizes' aren't known at
+/// compile-time, so we store their length after the object descriptor reference.
+///
+/// Thus, the memory layout of a string looks like this (not including padding):
+///
+/// | Section | Size | Description |
+/// | ------- | ---- | ----------- |
+/// | Object descriptor reference | 4 bytes | An index locating the object's descriptor in the object descriptor store
+/// | Length | 1 word | The length of the string's content in bytes
+/// | Content | ? | The string content
+///
+/// See [crate::mmtk::object_descriptor_store] for the specifics on how this works.
 ///
 /// ## Object Metadata
 ///

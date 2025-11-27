@@ -3,18 +3,86 @@ use crate::{
     dependency_analyzer::analyzed_program::{AnalyzedProgram, AnalyzedType},
     error_reporting::{CompilationError, CompilationErrorMessage},
 };
-use inkwell::{targets::TargetData, types::StructType};
+use inkwell::{context::Context, targets::TargetData, types::StructType};
+use mmtk::util::ObjectReference;
 use std::fmt::{Debug, Formatter};
 
-#[derive(Debug)]
-pub struct ObjectDescriptor {
-    pub inner_references: Vec<ObjectInnerReference>,
-    pub size: usize,
-    pub align: usize,
+/// The object descriptor reference for string literals.
+///
+/// See [crate::mmtk::UlarObjectModel] to understand why we create object descriptors for strings.
+pub const STRING_LITERAL_DESCRIPTOR_INDEX: ObjectDescriptorReference = ObjectDescriptorReference(0);
+
+/// The object descriptor reference for allocated strings.
+///
+/// See [crate::mmtk::UlarObjectModel] to understand why we create object descriptors for strings.
+pub const STRING_ALLOCATED_DESCRIPTOR_INDEX: ObjectDescriptorReference =
+    ObjectDescriptorReference(1);
+
+#[derive(Clone, Debug)]
+pub enum ObjectDescriptor {
+    Struct {
+        inner_references: Vec<ObjectInnerReference>,
+        size: usize,
+        align: usize,
+    },
+
+    String {
+        length_field_offset: usize,
+        length_size_difference: usize,
+        align: usize,
+    },
 }
 
-#[derive(Clone, Copy)]
+impl ObjectDescriptor {
+    pub fn align(&self) -> usize {
+        match self {
+            Self::Struct { align, .. } => *align,
+            Self::String { align, .. } => *align,
+        }
+    }
+
+    /// Returns the size of an object, given its descriptor and a reference to it.
+    ///
+    /// # Safety
+    ///
+    /// If the object's size isn't fixed, the length of its payload must actually be located at the
+    /// offset referenced in `length_field_offset`.
+    pub unsafe fn get_size(&self, object: ObjectReference) -> usize {
+        match self {
+            Self::Struct { size, .. } => *size,
+            Self::String {
+                length_field_offset,
+                length_size_difference,
+                ..
+            } => {
+                let length = (object.to_raw_address() + *length_field_offset).load::<usize>();
+
+                length + length_size_difference
+            }
+        }
+    }
+
+    pub fn inner_references(&self) -> &[ObjectInnerReference] {
+        match self {
+            Self::Struct {
+                inner_references, ..
+            } => inner_references,
+
+            Self::String { .. } => &[],
+        }
+    }
+}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
 pub struct ObjectDescriptorReference(pub u32);
+
+impl ObjectDescriptorReference {
+    pub fn is_allocated(self) -> bool {
+        // All structs are currently allocated on the heap, and so are strings produced at runtime.
+        // Therefore, the only non-allocated objects are string literals.
+        self != STRING_LITERAL_DESCRIPTOR_INDEX
+    }
+}
 
 impl Debug for ObjectDescriptorReference {
     fn fmt(&self, formatter: &mut Formatter) -> std::fmt::Result {
@@ -88,7 +156,7 @@ impl ObjectDescriptorStore {
 
         let size = target_data.get_abi_size(struct_type) as usize;
         let align = target_data.get_abi_alignment(struct_type) as usize;
-        let descriptor = ObjectDescriptor {
+        let descriptor = ObjectDescriptor::Struct {
             inner_references,
             size,
             align,
@@ -101,22 +169,53 @@ impl ObjectDescriptorStore {
         Ok(reference)
     }
 
-    pub fn new() -> Self {
-        Self::default()
-    }
-}
+    pub fn new(context: &Context, target_data: &TargetData) -> Self {
+        // In order to figure out:
+        // - The offset of the string length field
+        // - The alignment of string structs
+        //
+        // we need to know the ABI we're compiling to. I personally don't feel like rewriting all of
+        // LLVM's logic for determining struct offsets and alignments, so I'd rather just create a
+        // dummy string struct whose offsets and alignments we know will be identical to those of
+        // any string struct, and then query the offset and alignment on that.
+        let dummy_string_type = context.struct_type(
+            &[
+                context.i32_type().into(),
+                context.ptr_sized_int_type(target_data, None).into(),
+                context.i8_type().array_type(0).into(),
+            ],
+            false,
+        );
 
-impl Default for ObjectDescriptorStore {
-    fn default() -> Self {
+        let string_descriptor = ObjectDescriptor::String {
+            length_field_offset: target_data
+                .offset_of_element(&dummy_string_type, 1)
+                .unwrap() as usize,
+
+            length_size_difference: target_data
+                .offset_of_element(&dummy_string_type, 2)
+                .unwrap() as usize,
+
+            align: target_data.get_abi_alignment(&dummy_string_type) as usize,
+        };
+
         Self {
-            descriptors: Vec::new(),
+            // One for `STRING_LITERAL_DESCRIPTOR_INDEX` and another for
+            // `STRING_ALLOCATED_DESCRIPTOR_INDEX`
+            descriptors: vec![string_descriptor.clone(), string_descriptor],
             references_by_struct_index: NumberMap::new(0),
         }
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct ObjectInnerReference {
     pub offset: usize,
     pub descriptor: ObjectDescriptorReference,
+}
+
+#[derive(Clone, Debug)]
+pub enum ObjectSize {
+    Fixed(usize),
+    StoredAtOffset(usize),
 }

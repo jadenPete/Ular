@@ -277,6 +277,7 @@ pub enum InternalError {
         actual_type: String,
     },
 
+    JitCompilerStringComparisonNotRewritten,
     JitCompilerStructComparisonNotRewritten,
     JitCompilerTypeMismatch {
         expected_type: String,
@@ -288,6 +289,10 @@ pub enum InternalError {
     },
 
     JitCompilerUnknownFunction {
+        index: usize,
+    },
+
+    JitCompilerUnknownString {
         index: usize,
     },
 
@@ -348,6 +353,13 @@ impl Display for InternalError {
                 )
             }
 
+            Self::JitCompilerStringComparisonNotRewritten => {
+                write!(
+                    formatter,
+                    "This string comparison should've been rewritten in the typechecking phase, but it wasn't.",
+                )
+            }
+
             Self::JitCompilerStructComparisonNotRewritten => {
                 write!(
                     formatter,
@@ -378,6 +390,14 @@ impl Display for InternalError {
                 write!(
                     formatter,
                     "JIT compiler has no value for the function with index {}.",
+                    index,
+                )
+            }
+
+            Self::JitCompilerUnknownString { index } => {
+                write!(
+                    formatter,
+                    "JIT compiler has no value for the string with index {}.",
                     index,
                 )
             }

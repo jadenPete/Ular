@@ -20,10 +20,12 @@ use crate::{
         memory_manager::UlarMemoryManager,
         module::UlarModule,
         scope::{JitCompilerScope, JitCompilerScopeContext},
-        value::{UlarFunction, UlarStruct, UlarValue},
+        value::{UlarFunction, UlarValue},
     },
     mmtk::{
-        object_descriptor_store::{ObjectDescriptorReference, ObjectDescriptorStore},
+        object_descriptor_store::{
+            ObjectDescriptorReference, ObjectDescriptorStore, STRING_LITERAL_DESCRIPTOR_INDEX,
+        },
         runtime::mmtk_set_object_descriptor_store,
     },
     parser::program::{
@@ -39,7 +41,7 @@ use inkwell::{
     context::Context,
     execution_engine::{ExecutionEngine, JitFunction},
     passes::PassBuilderOptions,
-    targets::{CodeModel, RelocMode, Target, TargetMachine},
+    targets::{CodeModel, RelocMode, Target, TargetData, TargetMachine},
     types::{ArrayType, BasicType, StructType},
     values::{BasicValueEnum, FunctionValue, IntValue, PointerValue},
     AddressSpace, IntPredicate, OptimizationLevel,
@@ -643,10 +645,19 @@ impl<'context> CompilableInfixOperation<'_> {
                     .into())
             }
 
+            UlarValue::String(_) => Err(CompilationError {
+                message: CompilationErrorMessage::InternalError(
+                    InternalError::JitCompilerStringComparisonNotRewritten,
+                ),
+
+                position: Some(position),
+            }),
+
             UlarValue::Struct(_) => Err(CompilationError {
                 message: CompilationErrorMessage::InternalError(
                     InternalError::JitCompilerStructComparisonNotRewritten,
                 ),
+
                 position: Some(position),
             }),
 
@@ -795,7 +806,7 @@ impl<'context> InlineExpression<'context> for CompilableSelect<'_> {
         let field_pointer = builder
             .build_struct_gep(
                 struct_information.inkwell_type,
-                UlarStruct::try_from(struct_value)?.pointer,
+                PointerValue::try_from(struct_value)?,
                 // Add 1 to offset for the object descriptor reference
                 self.0.field_index as u32 + 1,
                 &field_pointer_name.to_string(),
@@ -923,10 +934,7 @@ impl<'context> InlineExpression<'context> for CompilableStructApplication<'_> {
                 .unwrap();
         }
 
-        Ok(UlarValue::Struct(UlarStruct {
-            pointer: struct_pointer,
-            struct_index: self.0.struct_index,
-        }))
+        Ok(UlarValue::Struct(struct_pointer))
     }
 }
 
@@ -1033,8 +1041,12 @@ impl<'a> JitCompilerPhase<'a> {
             })
             .collect::<Result<_, _>>()?;
 
+        let string_values =
+            self.get_string_values(module, execution_engine.get_target_data(), program);
+
         let scope_context = JitCompilerScopeContext {
             function_values,
+            string_values,
             struct_method_values,
         };
 
@@ -1331,8 +1343,6 @@ impl<'a> JitCompilerPhase<'a> {
         module: &mut UlarModule<'a>,
         program: &AnalyzedProgram,
     ) -> Result<JitFunction<'a, MainFunction>, CompilationError> {
-        let builder = self.context.create_builder();
-        let mut object_descriptor_store = ObjectDescriptorStore::new();
         let target_triple = TargetMachine::get_default_triple();
         let target = Target::from_triple(&target_triple).unwrap();
         let target_machine = target
@@ -1347,6 +1357,7 @@ impl<'a> JitCompilerPhase<'a> {
             .unwrap();
 
         let target_data = target_machine.get_target_data();
+        let mut object_descriptor_store = ObjectDescriptorStore::new(self.context, &target_data);
         let struct_types = program
             .structs
             .iter()
@@ -1390,6 +1401,7 @@ impl<'a> JitCompilerPhase<'a> {
 
         mmtk_set_object_descriptor_store(object_descriptor_store).unwrap();
 
+        let builder = self.context.create_builder();
         let main_function = self.compile_main_function(
             &builder,
             built_in_values,
@@ -1422,6 +1434,52 @@ impl<'a> JitCompilerPhase<'a> {
                 .get_function(MAIN_HARNESS_FUNCTION_NAME)
                 .unwrap()
         })
+    }
+
+    fn get_string_values(
+        &self,
+        module: &mut UlarModule<'a>,
+        target_data: &TargetData,
+        program: &AnalyzedProgram,
+    ) -> Vec<UlarValue<'a>> {
+        let ptr_sized_int_type = self.context.ptr_sized_int_type(target_data, None);
+
+        program
+            .string_literals
+            .iter()
+            .enumerate()
+            .map(|(i, string)| {
+                let string_array = self.context.const_string(string.as_bytes(), false);
+                let string_type = self.context.struct_type(
+                    &[
+                        self.context.i32_type().into(), // The object descriptor reference
+                        ptr_sized_int_type.into(),      // The string length
+                        string_array.get_type().into(), // The string data
+                    ],
+                    false,
+                );
+
+                let object_descriptor_reference_value = self
+                    .context
+                    .i32_type()
+                    .const_int(STRING_LITERAL_DESCRIPTOR_INDEX.0.into(), false);
+
+                let length_value = ptr_sized_int_type.const_int(string.len() as u64, false);
+                let string_value = string_type.const_named_struct(&[
+                    object_descriptor_reference_value.into(),
+                    length_value.into(),
+                    string_array.into(),
+                ]);
+
+                let string_global = module.add_global(string_type);
+
+                string_global.set_name(&format!(".str{}", i));
+                string_global.set_constant(true);
+                string_global.set_initializer(&string_value);
+
+                UlarValue::String(string_global.as_pointer_value())
+            })
+            .collect()
     }
 }
 

@@ -8,6 +8,7 @@ pub enum Type {
     Function(FunctionType),
     Identifier(String),
     Numeric(NumericType),
+    Str,
     Unit,
 }
 
@@ -35,6 +36,7 @@ impl Debug for Type {
 
             Self::Identifier(value) => write!(formatter, "{}", value),
             Self::Numeric(numeric_type) => write!(formatter, "{}", numeric_type),
+            Self::Str => write!(formatter, "str"),
             Self::Unit => write!(formatter, "unit"),
         }
     }

@@ -16,7 +16,10 @@ use mmtk::{
         copy::{CopySemantics, GCWorkerCopyContext},
         Address, ObjectReference, OpaquePointer, VMMutatorThread, VMThread,
     },
-    vm::{slot::SimpleSlot, ActivePlan, GCThreadContext, RootsWorkFactory, SlotVisitor, VMBinding},
+    vm::{
+        slot::{SimpleSlot, Slot},
+        ActivePlan, GCThreadContext, RootsWorkFactory, SlotVisitor, VMBinding,
+    },
     AllocationSemantics, MMTKBuilder, Mutator, MMTK,
 };
 use std::{
@@ -32,6 +35,15 @@ use std::{
 enum GarbageCollectionRoot {
     Direct(Address),
     Indirect(SimpleSlot),
+}
+
+impl GarbageCollectionRoot {
+    fn object_reference(&self) -> Option<ObjectReference> {
+        match self {
+            Self::Direct(address) => ObjectReference::from_raw_address(*address),
+            Self::Indirect(slot) => slot.load(),
+        }
+    }
 }
 
 struct SafepointState {
@@ -105,18 +117,21 @@ impl Debug for StackMapAlreadySetError {
 }
 
 fn get_object_descriptor(object: ObjectReference) -> &'static ObjectDescriptor {
-    // SAFETY: All objects begin with a 32 bit object descriptor reference
-    let descriptor_reference = unsafe {
-        object
-            .to_header::<UlarVM>()
-            .load::<ObjectDescriptorReference>()
-    };
-
+    let descriptor_reference = get_object_descriptor_reference(object);
     let object_descriptor_store = OBJECT_DESCRIPTOR_STORE
         .get()
         .expect("Expected the object descriptor store to be set");
 
     object_descriptor_store.get_descriptor(descriptor_reference)
+}
+
+fn get_object_descriptor_reference(object: ObjectReference) -> ObjectDescriptorReference {
+    // SAFETY: All objects begin with a 32 bit object descriptor reference
+    unsafe {
+        object
+            .to_header::<UlarVM>()
+            .load::<ObjectDescriptorReference>()
+    }
 }
 
 fn get_mmtk() -> &'static MMTK<UlarVM> {
@@ -203,7 +218,15 @@ pub fn mmtk_copy_object(
     copy_context: &mut GCWorkerCopyContext<UlarVM>,
 ) -> ObjectReference {
     let descriptor = get_object_descriptor(from);
-    let to_address = copy_context.alloc_copy(from, descriptor.size, descriptor.align, 0, semantics);
+    let object_size = unsafe { descriptor.get_size(from) };
+    let to_address = copy_context.alloc_copy(
+        from,
+        // SAFETY: We assume the object descriptor is valid
+        object_size,
+        descriptor.align(),
+        0,
+        semantics,
+    );
 
     // SAFETY:
     // - `to_address` is guaranteed to be valid for writes of `descriptor.size` bytes
@@ -214,7 +237,7 @@ pub fn mmtk_copy_object(
 
     let to = ObjectReference::from_raw_address(to_address).unwrap();
 
-    copy_context.post_copy(to, descriptor.size, semantics);
+    copy_context.post_copy(to, object_size, semantics);
 
     to
 }
@@ -239,11 +262,12 @@ pub unsafe fn mmtk_copy_object_to(from: ObjectReference, region: Address) -> Add
 }
 
 pub fn mmtk_get_object_align(object: ObjectReference) -> usize {
-    get_object_descriptor(object).align
+    get_object_descriptor(object).align()
 }
 
 pub fn mmtk_get_object_size(object: ObjectReference) -> usize {
-    get_object_descriptor(object).size
+    // SAFETY: We assume the object descriptor is valid
+    unsafe { get_object_descriptor(object).get_size(object) }
 }
 
 pub extern "C" fn mmtk_init(plan: GarbageCollectionPlan) {
@@ -325,10 +349,17 @@ pub fn mmtk_resume_all_mutators() {
 pub fn mmtk_scan_object<A: SlotVisitor<SimpleSlot>>(object: ObjectReference, slot_visitor: &mut A) {
     let descriptor = get_object_descriptor(object);
 
-    for inner_reference in &descriptor.inner_references {
+    for inner_reference in descriptor.inner_references() {
         let address = object.to_raw_address().add(inner_reference.offset);
+        let slot = SimpleSlot::from_address(address);
 
-        slot_visitor.visit_slot(SimpleSlot::from_address(address));
+        // Explanation for `.unwrap()`: inner references should always be non-null. If an
+        // inner reference is null, something is wrong and we should know about it.
+        let inner_descriptor_reference = get_object_descriptor_reference(slot.load().unwrap());
+
+        if inner_descriptor_reference.is_allocated() {
+            slot_visitor.visit_slot(slot);
+        }
     }
 }
 
@@ -415,7 +446,7 @@ fn scan_current_thread_roots() {
                     };
 
                 for location in &record.locations {
-                    let root = match location {
+                    let potential_root = match location {
                         StackMapLocation::ConstIndex(i) => {
                             let constant_value = stack_map.constants[*i as usize].0 as usize;
 
@@ -461,7 +492,13 @@ fn scan_current_thread_roots() {
                         }
                     };
 
-                    roots.push(root);
+                    let is_root = potential_root.object_reference().is_none_or(|object| {
+                        get_object_descriptor_reference(object).is_allocated()
+                    });
+
+                    if is_root {
+                        roots.push(potential_root);
+                    }
                 }
 
                 Ok(())

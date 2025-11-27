@@ -1,9 +1,13 @@
 use crate::{
-    data_structures::number_map::NumberMap,
-    dependency_analyzer::analyzed_program::{
-        AnalyzedExpressionRef, AnalyzedFunctionType, AnalyzedStructDefinition, AnalyzedType,
+    data_structures::{graph::DirectedGraph, number_map::NumberMap},
+    dependency_analyzer::{
+        analyzed_program::{
+            AnalyzedExpression, AnalyzedExpressionRef, AnalyzedFunctionType, AnalyzedProgram,
+            AnalyzedStructDefinition, AnalyzedType,
+        },
+        AnalyzerFunctions,
     },
-    error_reporting::{CompilationError, CompilationErrorMessage, InternalError},
+    error_reporting::{CompilationError, CompilationErrorMessage, InternalError, Position},
     parser::{
         program::{Identifier, Node},
         type_::{FunctionType, Type},
@@ -58,6 +62,7 @@ impl<'a> AnalyzerScope<'a> {
             }
 
             Type::Numeric(numeric_type) => AnalyzedType::Numeric(*numeric_type),
+            Type::Str => AnalyzedType::Str,
             Type::Unit => AnalyzedType::Unit,
         })
     }
@@ -157,24 +162,55 @@ impl<'a> AnalyzerScope<'a> {
 }
 
 pub struct AnalyzerScopeContext {
+    functions: AnalyzerFunctions,
+    string_literals: Vec<String>,
     struct_count: usize,
     structs: NumberMap<AnalyzedStructDefinition>,
 }
 
 impl AnalyzerScopeContext {
-    pub fn into_structs(self) -> Result<Vec<AnalyzedStructDefinition>, CompilationError> {
-        self.structs
+    pub fn add_string_literal(&mut self, string_literal: String) -> usize {
+        let i = self.string_literals.len();
+
+        self.string_literals.push(string_literal);
+
+        i
+    }
+
+    pub fn functions_mut(&mut self) -> &mut AnalyzerFunctions {
+        &mut self.functions
+    }
+
+    pub fn into_program(
+        self,
+        expression_graph: DirectedGraph<AnalyzedExpression>,
+        position: Position,
+    ) -> Result<AnalyzedProgram, CompilationError> {
+        let structs = self
+            .structs
             .into_contiguous_values(self.struct_count)
             .map_err(|error| CompilationError {
                 message: CompilationErrorMessage::InternalError(
                     InternalError::AnalyzerStructNotDefined { index: error.index },
                 ),
                 position: None,
-            })
+            })?;
+
+        let functions = self.functions.into_vec()?;
+
+        Ok(AnalyzedProgram {
+            string_literals: self.string_literals,
+            structs,
+            functions,
+            expression_graph,
+            position,
+        })
     }
 
     pub fn new() -> Self {
         Self {
+            functions: AnalyzerFunctions::new(),
+            string_literals: Vec::new(),
             struct_count: 0,
             structs: NumberMap::new(0),
         }

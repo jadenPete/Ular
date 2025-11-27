@@ -70,6 +70,7 @@ fn simplify_expression(expression: &Expression) -> SimpleExpression {
         Expression::Path(path) => SimpleExpression::Path(path.clone()),
         Expression::Identifier(identifier) => SimpleExpression::Identifier(identifier.clone()),
         Expression::Number(number) => SimpleExpression::Number(number.clone()),
+        Expression::String(string) => SimpleExpression::String(string.clone()),
         Expression::PrefixOperation(prefix_operation) => {
             simplify_prefix_operation(prefix_operation)
         }

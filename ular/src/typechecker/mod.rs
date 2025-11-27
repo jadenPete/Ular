@@ -147,6 +147,7 @@ impl<'a> Typechecker<'a> {
                 self.typecheck_number(number, suggested_type)?,
             )),
 
+            SimpleExpression::String(string) => Ok(TypedExpression::String(string.clone())),
             SimpleExpression::PrefixOperation(prefix_operation) => {
                 Ok(TypedExpression::PrefixOperation(
                     self.typecheck_prefix_operation(prefix_operation, suggested_type)?,

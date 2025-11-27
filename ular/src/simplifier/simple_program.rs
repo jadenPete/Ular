@@ -2,7 +2,8 @@ use crate::{
     error_reporting::Position,
     parser::{
         program::{
-            Identifier, InfixOperator, Node, Number, Parameter, Path, StructDefinitionField, Unit,
+            Identifier, InfixOperator, Node, Number, Parameter, Path, StringLiteral,
+            StructDefinitionField, Unit,
         },
         type_::{FunctionType, Type},
     },
@@ -79,6 +80,7 @@ pub enum SimpleExpression {
     Path(Path),
     Identifier(Identifier),
     Number(Number),
+    String(StringLiteral),
     PrefixOperation(SimplePrefixOperation),
     SequentialBlock(SimpleBlock),
     Unit(Unit),

@@ -89,16 +89,11 @@ impl<'a> TryFrom<UlarFunction<'a>> for FunctionValue<'a> {
 }
 
 #[derive(Clone, Copy, Debug)]
-pub struct UlarStruct<'a> {
-    pub pointer: PointerValue<'a>,
-    pub struct_index: usize,
-}
-
-#[derive(Clone, Copy, Debug)]
 pub enum UlarValue<'a> {
     Function(UlarFunction<'a>),
     Int(IntValue<'a>),
-    Struct(UlarStruct<'a>),
+    String(PointerValue<'a>),
+    Struct(PointerValue<'a>),
     Unit,
 }
 
@@ -141,11 +136,7 @@ impl<'a> UlarValue<'a> {
                 Ok(UlarValue::Int(basic_value_enum.into_int_value()))
             }
 
-            AnalyzedType::Struct(i) => Ok(UlarValue::Struct(UlarStruct {
-                pointer: basic_value_enum.into_pointer_value(),
-                struct_index: *i,
-            })),
-
+            AnalyzedType::Struct(_) => Ok(UlarValue::Struct(basic_value_enum.into_pointer_value())),
             AnalyzedType::Function(function_type) => {
                 Ok(Self::Function(UlarFunction::IndirectReference {
                     pointer: basic_value_enum.into_pointer_value(),
@@ -158,6 +149,7 @@ impl<'a> UlarValue<'a> {
                 }))
             }
 
+            AnalyzedType::Str => Ok(UlarValue::String(basic_value_enum.into_pointer_value())),
             AnalyzedType::Unit => Err(CompilationError {
                 message: CompilationErrorMessage::UnitPassedAsValue,
                 position: Some(value_position),
@@ -197,7 +189,10 @@ impl<'a> TryFrom<UlarValue<'a>> for BasicValueEnum<'a> {
             }
 
             UlarValue::Int(int_value) => Ok(BasicValueEnum::IntValue(int_value)),
-            UlarValue::Struct(struct_) => Ok(BasicValueEnum::PointerValue(struct_.pointer)),
+            UlarValue::String(pointer_value) | UlarValue::Struct(pointer_value) => {
+                Ok(BasicValueEnum::PointerValue(pointer_value))
+            }
+
             UlarValue::Unit => Err(CompilationError {
                 message: CompilationErrorMessage::InternalError(
                     InternalError::JitCompilerTypeMismatch {
@@ -260,12 +255,13 @@ impl<'a> TryFrom<UlarValue<'a>> for UlarFunction<'a> {
     }
 }
 
-impl<'a> TryFrom<UlarValue<'a>> for UlarStruct<'a> {
+impl<'a> TryFrom<UlarValue<'a>> for PointerValue<'a> {
     type Error = CompilationError;
 
     fn try_from(value: UlarValue<'a>) -> Result<Self, Self::Error> {
         match value {
-            UlarValue::Struct(struct_) => Ok(struct_),
+            UlarValue::String(pointer_value) => Ok(pointer_value),
+            UlarValue::Struct(pointer_value) => Ok(pointer_value),
             _ => Err(CompilationError {
                 message: CompilationErrorMessage::InternalError(
                     InternalError::JitCompilerTypeMismatch {

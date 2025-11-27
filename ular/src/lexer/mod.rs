@@ -9,8 +9,8 @@ use crate::{
 use core::str;
 use nom::{
     branch::alt,
-    bytes::complete::tag,
-    character::complete::{multispace0, satisfy},
+    bytes::complete::{is_not, tag},
+    character::complete::{char, hex_digit1, multispace0, satisfy},
     combinator::{consumed, eof, map, recognize},
     error::{ErrorKind, ParseError},
     multi::many0,
@@ -309,6 +309,43 @@ fn lex_number(input: PositionedSource) -> IResult<PositionedSource, PositionedTo
     )(input)
 }
 
+fn lex_string_escape(input: PositionedSource) -> IResult<PositionedSource, String> {
+    alt((
+        map(tag("\\\""), |_| String::from("\"")),
+        map(tag("\\\\"), |_| String::from("\\")),
+        map(tag("\\n"), |_| String::from("\n")),
+        map(tag("\\r"), |_| String::from("\r")),
+        map(tag("\\t"), |_| String::from("\t")),
+        map(tag("\\\n"), |_| String::from("")),
+        map(
+            tuple((tag("\\u("), hex_digit1, tag(")"))),
+            |(_, codepoint, _): (_, PositionedSource, _)| {
+                char::from_u32(u32::from_str_radix(codepoint.source, 16).unwrap())
+                    .unwrap()
+                    .to_string()
+            },
+        ),
+    ))(input)
+}
+
+fn lex_string_fragment(input: PositionedSource) -> IResult<PositionedSource, String> {
+    alt((
+        map(is_not("\"\\"), |consumed: PositionedSource| {
+            String::from(consumed.source)
+        }),
+        lex_string_escape,
+    ))(input)
+}
+
+fn lex_string(input: PositionedSource) -> IResult<PositionedSource, PositionedToken> {
+    map(
+        consumed(tuple((char('"'), many0(lex_string_fragment), char('"')))),
+        |(consumed, (_, fragments, _))| {
+            consumed.to_positioned_token(Token::String(fragments.into_iter().collect()))
+        },
+    )(input)
+}
+
 /*
  * Both this function and `lex_keyword` match against a provided string.
  *
@@ -352,10 +389,11 @@ fn lex_token(input: PositionedSource) -> IResult<PositionedSource, PositionedTok
             lex_keyword("u32", Token::U32Type),
             lex_keyword("u64", Token::U64Type),
             lex_keyword("bool", Token::BoolType),
+            lex_keyword("str", Token::StrType),
             lex_keyword("unit", Token::UnitType),
-            lex_keyword("if", Token::IfKeyword),
         )),
         alt((
+            lex_keyword("if", Token::IfKeyword),
             lex_keyword("else", Token::ElseKeyword),
             lex_keyword("seq", Token::SeqKeyword),
             lex_keyword("struct", Token::StructKeyword),
@@ -373,8 +411,11 @@ fn lex_token(input: PositionedSource) -> IResult<PositionedSource, PositionedTok
             lex_static_token("::", Token::PathSeparator),
             lex_static_token(";", Token::Semicolon),
             lex_static_token(":", Token::TypeAnnotation),
-            lex_number,
             lex_identifier,
+            lex_number,
+            lex_string,
+        )),
+        alt((
             // This needs to come after `lex_number` so signs aren't interpreted as operators
             lex_static_token("-", Token::Minus),
             lex_static_token(".", Token::Select),

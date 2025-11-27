@@ -5,5 +5,6 @@ mod if_expression;
 mod integration;
 mod number;
 mod print;
+mod strings;
 mod structs;
 mod typechecking;

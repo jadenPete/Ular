@@ -9,13 +9,16 @@ use crate::{
             AnalyzedBlock, AnalyzedCall, AnalyzedExpression, AnalyzedExpressionRef,
             AnalyzedFunctionDefinition, AnalyzedIf, AnalyzedInfixOperation, AnalyzedNumber,
             AnalyzedParameter, AnalyzedPrefixOperation, AnalyzedProgram, AnalyzedSelect,
-            AnalyzedStructApplication, AnalyzedStructApplicationField, AnalyzedStructDefinition,
-            AnalyzedStructDefinitionField, AnalyzedType, AnalyzedUnit,
+            AnalyzedStringLiteral, AnalyzedStructApplication, AnalyzedStructApplicationField,
+            AnalyzedStructDefinition, AnalyzedStructDefinitionField, AnalyzedType, AnalyzedUnit,
         },
         scope::{AnalyzerScope, AnalyzerScopeContext},
     },
     error_reporting::{CompilationError, CompilationErrorMessage, InternalError, Position},
-    parser::{program::Node, type_::Type},
+    parser::{
+        program::{Node, StringLiteral},
+        type_::Type,
+    },
     phase::Phase,
     typechecker::{
         built_in_values::BuiltInValues,
@@ -32,7 +35,6 @@ use std::collections::HashMap;
 struct Analyzer<'a> {
     scope_context: &'a mut AnalyzerScopeContext,
     scope: AnalyzerScope<'a>,
-    functions: &'a mut AnalyzerFunctions,
     expression_graph: AnalyzerExpressionGraph<'a>,
 }
 
@@ -109,6 +111,7 @@ impl<'a> Analyzer<'a> {
                 Ok(AnalyzedExpressionRef::Number(self.analyze_number(number)))
             }
 
+            TypedExpression::String(string) => Ok(self.analyze_string(string)),
             TypedExpression::PrefixOperation(prefix_operation) => {
                 self.analyze_prefix_operation(prefix_operation)
             }
@@ -384,7 +387,7 @@ impl<'a> Analyzer<'a> {
                         });
                     }
 
-                    let i = self.functions.reserve_function();
+                    let i = self.scope_context.functions_mut().reserve_function();
 
                     function_indices.push(i);
 
@@ -434,7 +437,8 @@ impl<'a> Analyzer<'a> {
         {
             let analyzed_definition = self.analyze_function_definition(definition)?;
 
-            self.functions
+            self.scope_context
+                .functions_mut()
                 .set_function(function_indices[i], analyzed_definition);
         }
 
@@ -465,6 +469,13 @@ impl<'a> Analyzer<'a> {
         }
 
         Ok(last_index)
+    }
+
+    fn analyze_string(&mut self, string: &StringLiteral) -> AnalyzedExpressionRef {
+        AnalyzedExpressionRef::String(AnalyzedStringLiteral {
+            index: self.scope_context.add_string_literal(string.value.clone()),
+            position: string.position.clone(),
+        })
     }
 
     fn analyze_struct_application(
@@ -551,7 +562,6 @@ impl<'a> Analyzer<'a> {
         Self {
             scope_context: parent.scope_context,
             scope: AnalyzerScope::with_parent(&parent.scope),
-            functions: parent.functions,
             expression_graph: AnalyzerExpressionGraph::with_parent(
                 &mut parent.expression_graph,
                 surrounding_expression,
@@ -562,12 +572,10 @@ impl<'a> Analyzer<'a> {
     fn without_parent(
         built_in_values: &'a BuiltInValues,
         scope_context: &'a mut AnalyzerScopeContext,
-        functions: &'a mut AnalyzerFunctions,
     ) -> Self {
         Self {
             scope_context,
             scope: AnalyzerScope::without_parent(built_in_values),
-            functions,
             expression_graph: AnalyzerExpressionGraph::without_parent(),
         }
     }
@@ -692,23 +700,13 @@ impl Phase<&TypedProgram> for AnalyzerPhase {
 
     fn execute(&self, program: &TypedProgram) -> Result<AnalyzedProgram, CompilationError> {
         let built_in_values = BuiltInValues::new(self.additional_values.clone());
-        let mut functions = AnalyzerFunctions::new();
         let mut analyzer_scope_context = AnalyzerScopeContext::new();
-        let mut analyzer = Analyzer::without_parent(
-            &built_in_values,
-            &mut analyzer_scope_context,
-            &mut functions,
-        );
+        let mut analyzer = Analyzer::without_parent(&built_in_values, &mut analyzer_scope_context);
 
         analyzer.analyze_statements_with_hoisting(&program.statements, false)?;
 
         let expression_graph = analyzer.into_expression_graph();
 
-        Ok(AnalyzedProgram {
-            structs: analyzer_scope_context.into_structs()?,
-            functions: functions.into_vec()?,
-            expression_graph,
-            position: program.get_position(),
-        })
+        analyzer_scope_context.into_program(expression_graph, program.get_position())
     }
 }

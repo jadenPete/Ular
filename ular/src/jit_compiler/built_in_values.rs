@@ -23,7 +23,7 @@ use num::Zero;
 use std::{
     collections::HashMap,
     ffi::{c_char, CString},
-    fmt::Display,
+    fmt::{Display, Formatter},
     ops::Div,
     ptr::null,
 };
@@ -442,6 +442,21 @@ impl<'a> BuiltInValues<'a> {
             )),
         );
 
+        referencable_values.insert(
+            String::from("println_str"),
+            Box::new(BuiltInMappedFunction::new(
+                String::from("println_str"),
+                context.void_type().fn_type(
+                    &[
+                        context.ptr_type(AddressSpace::default()).into(),
+                        context.ptr_type(AddressSpace::default()).into(),
+                    ],
+                    false,
+                ),
+                println_display::<&UlarString> as usize,
+            )),
+        );
+
         let __cxa_allocate_exception = BuiltInLinkedFunction::new(
             String::from("__cxa_allocate_exception"),
             context
@@ -668,6 +683,25 @@ impl<'a> BuiltInValues<'a> {
             _worker_tick,
             _worker_try_join,
         }
+    }
+}
+
+#[repr(C)]
+struct UlarString {
+    object_descriptor_reference: u32,
+    length: usize,
+    content: [u8],
+}
+
+impl Display for UlarString {
+    fn fmt(&self, formatter: &mut Formatter) -> std::fmt::Result {
+        // SAFETY: `self.length` is the length of `self.content`
+        let slice = unsafe { std::slice::from_raw_parts(self.content.as_ptr(), self.length) };
+
+        // SAFETY: Ular strings always contain valid UTF-8
+        let string = unsafe { std::str::from_utf8_unchecked(slice) };
+
+        write!(formatter, "{}", string)
     }
 }
 

@@ -10,8 +10,8 @@ use crate::{
             Block, Call, ElseClause, ElseIfClause, Expression, FunctionDefinition, Identifier, If,
             InfixOperation, InfixOperator, LogicalInfixOperator, Number, NumericInfixOperator,
             Parameter, Path, PrefixOperation, PrefixOperator, Program, Select, Statement,
-            StructApplication, StructApplicationField, StructDefinition, StructDefinitionField,
-            Unit, UniversalInfixOperator, VariableDefinition,
+            StringLiteral, StructApplication, StructApplicationField, StructDefinition,
+            StructDefinitionField, Unit, UniversalInfixOperator, VariableDefinition,
         },
         type_::{FunctionType, NumericType, Type},
     },
@@ -307,6 +307,7 @@ fn parse_primary_type(input: Tokens) -> IResult<Tokens, Type> {
         }),
         map(parse_numeric_type, Type::Numeric),
         map(parse_token(Token::BoolType), |_| Type::Bool),
+        map(parse_token(Token::StrType), |_| Type::Str),
         map(parse_token(Token::UnitType), |_| Type::Unit),
     ))(input)
 }
@@ -617,6 +618,7 @@ fn parse_primary(input: Tokens) -> IResult<Tokens, Expression> {
         map(parse_path, Expression::Path),
         map(parse_identifier, Expression::Identifier),
         map(parse_number, Expression::Number),
+        map(parse_string, Expression::String),
         map(positioned(parse_token(Token::UnitType)), |(position, _)| {
             Expression::Unit(Unit { position })
         }),
@@ -714,6 +716,24 @@ fn parse_number(input: Tokens) -> IResult<Tokens, Number> {
             position,
         },
     )(input)
+}
+
+fn parse_raw_string(input: Tokens) -> IResult<Tokens, String> {
+    let (remaining, token) = take_token(input)?;
+
+    match token.token {
+        Token::String(value) => Ok((remaining, value)),
+        _ => Err(nom::Err::Error(nom::error::Error::new(
+            input,
+            ErrorKind::IsNot,
+        ))),
+    }
+}
+
+fn parse_string(input: Tokens) -> IResult<Tokens, StringLiteral> {
+    map(positioned(parse_raw_string), |(position, value)| {
+        StringLiteral { value, position }
+    })(input)
 }
 
 fn parse_sequential_block(input: Tokens) -> IResult<Tokens, Block> {

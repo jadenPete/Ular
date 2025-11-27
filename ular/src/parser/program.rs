@@ -36,6 +36,7 @@ pub trait Node {
 ///     | identifier
 ///     | numeric_type
 ///     | 'bool'
+///     | 'str'
 ///     | 'unit';
 ///
 /// numeric_type = 'i8' | 'i16' | 'i32' | 'i64' | 'u8' | 'u16' | 'u32' | 'u64';
@@ -85,6 +86,7 @@ pub trait Node {
 ///     | path
 ///     | identifier
 ///     | number;
+///     | string;
 ///     | 'unit';
 ///     | '(' expression ')';
 ///     | sequential_block;
@@ -94,6 +96,7 @@ pub trait Node {
 /// path = identifier '::' identifier;
 /// identifier = IDENTIFIER;
 /// number = NUMBER numeric_type?;
+/// string = STRING;
 /// sequential_block = 'seq' block;
 /// ```
 #[derive(Debug, Node)]
@@ -166,6 +169,7 @@ pub enum Expression {
     Path(Path),
     Identifier(Identifier),
     Number(Number),
+    String(StringLiteral),
     PrefixOperation(PrefixOperation),
     SequentialBlock(Block),
     Unit(Unit),
@@ -289,6 +293,12 @@ pub struct Identifier {
 pub struct Number {
     pub value: i128,
     pub suffix: Option<NumericType>,
+    pub position: Position,
+}
+
+#[derive(Clone, Debug, Node)]
+pub struct StringLiteral {
+    pub value: String,
     pub position: Position,
 }
 
