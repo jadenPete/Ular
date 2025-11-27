@@ -5,7 +5,6 @@ use crate::{
         type_::Type,
     },
     simplifier::simple_program::SimpleStructDefinition,
-    typechecker::built_in_values::BuiltInValues,
 };
 use std::collections::HashMap;
 
@@ -16,7 +15,6 @@ pub struct IndexableStructDefinition<'a> {
 }
 
 pub struct TypecheckerScope<'a> {
-    built_in_values: &'a BuiltInValues,
     parent: Option<&'a TypecheckerScope<'a>>,
     structs: HashMap<&'a str, IndexableStructDefinition<'a>>,
     variable_types: HashMap<String, Type>,
@@ -25,16 +23,14 @@ pub struct TypecheckerScope<'a> {
 impl<'a> TypecheckerScope<'a> {
     pub fn with_parent(parent: &'a TypecheckerScope<'a>) -> Self {
         Self {
-            built_in_values: parent.built_in_values,
             parent: Some(parent),
             structs: HashMap::new(),
             variable_types: HashMap::new(),
         }
     }
 
-    pub fn without_parent(built_in_values: &'a BuiltInValues) -> Self {
+    pub fn without_parent() -> Self {
         Self {
-            built_in_values,
             parent: None,
             structs: HashMap::new(),
             variable_types: HashMap::new(),
@@ -122,13 +118,9 @@ impl<'a> TypecheckerScope<'a> {
     }
 
     pub fn get_variable_type(&self, name: &str) -> Option<Type> {
-        self.variable_types
-            .get(name)
-            .cloned()
-            .or_else(|| {
-                self.parent
-                    .and_then(|parent| parent.get_variable_type(name))
-            })
-            .or_else(|| self.built_in_values.get_value_type(name))
+        self.variable_types.get(name).cloned().or_else(|| {
+            self.parent
+                .and_then(|parent| parent.get_variable_type(name))
+        })
     }
 }

@@ -17,6 +17,7 @@ dashmap = { git = "https://github.com/g-plane/dashmap", branch = "explicit-lifet
 dyn-clone = "1.0.20"
 either = "1.13.0"
 enum-iterator = "2.1.0"
+hashbrown = "0.16.1"
 inkwell = { version = "0.6.0", features = ["llvm18-1"] }
 libc = "0.2.175"
 log = "0.4.25"

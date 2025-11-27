@@ -1,3 +1,5 @@
+pub mod built_in_values;
+
 use crate::{
     arguments::{Arguments, PhaseName},
     error_reporting::CompilationError,

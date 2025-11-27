@@ -89,14 +89,8 @@ impl NumericType {
 
     pub fn is_signed(self) -> bool {
         match self {
-            Self::I8 => true,
-            Self::I16 => true,
-            Self::I32 => true,
-            Self::I64 => true,
-            Self::U8 => false,
-            Self::U16 => false,
-            Self::U32 => false,
-            Self::U64 => false,
+            Self::I8 | Self::I16 | Self::I32 | Self::I64 => true,
+            Self::U8 | Self::U16 | Self::U32 | Self::U64 => false,
         }
     }
 

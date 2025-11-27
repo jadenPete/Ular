@@ -5,6 +5,7 @@ use crate::{
         program::{Identifier, InfixOperator, Node, StringLiteral},
         type_::{FunctionType, NumericType, Type},
     },
+    phase::built_in_values::BuiltInPathBuf,
     simplifier::simple_program::SimplePrefixOperator,
 };
 use inkwell::{
@@ -241,7 +242,7 @@ pub struct AnalyzedStructApplicationField {
 #[derive(AnalyzerTyped, Debug, Clone, Node)]
 pub enum AnalyzedExpressionRef {
     BuiltIn {
-        name: String,
+        path: BuiltInPathBuf,
         type_: AnalyzedType,
         position: Position,
     },
@@ -323,8 +324,8 @@ impl AnalyzedExpressionRef {
 
     pub fn with_position(&self, position: Position) -> Self {
         match self {
-            Self::BuiltIn { name, type_, .. } => Self::BuiltIn {
-                name: name.clone(),
+            Self::BuiltIn { path, type_, .. } => Self::BuiltIn {
+                path: path.clone(),
                 type_: type_.clone(),
                 position,
             },

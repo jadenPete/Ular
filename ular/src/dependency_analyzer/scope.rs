@@ -12,12 +12,13 @@ use crate::{
         program::{Identifier, Node},
         type_::{FunctionType, Type},
     },
-    typechecker::{built_in_values::BuiltInValues, typed_program::TypedIdentifier},
+    phase::built_in_values::{BuiltInPath, BuiltInPathBuf},
+    typechecker::{built_in_values::TypecheckerBuiltInValues, typed_program::TypedIdentifier},
 };
 use std::collections::HashMap;
 
 pub struct AnalyzerScope<'a> {
-    built_in_values: &'a BuiltInValues,
+    built_in_values: &'a TypecheckerBuiltInValues,
     parent: Option<&'a AnalyzerScope<'a>>,
     struct_indices: HashMap<String, usize>,
     variables: HashMap<String, AnalyzedExpressionRef>,
@@ -126,9 +127,12 @@ impl<'a> AnalyzerScope<'a> {
         }
 
         Ok(
-            match self.built_in_values.get_value_type(&name.underlying.value) {
+            match self
+                .built_in_values
+                .get(&BuiltInPath::Identifier(&name.underlying.value))
+            {
                 Some(_) => Some(AnalyzedExpressionRef::BuiltIn {
-                    name: name.underlying.value.clone(),
+                    path: BuiltInPathBuf::Identifier(name.underlying.value.clone()),
                     type_: self.analyze_type(&name.type_)?,
                     position: name.get_position(),
                 }),
@@ -151,7 +155,7 @@ impl<'a> AnalyzerScope<'a> {
         }
     }
 
-    pub fn without_parent(built_in_values: &'a BuiltInValues) -> Self {
+    pub fn without_parent(built_in_values: &'a TypecheckerBuiltInValues) -> Self {
         Self {
             built_in_values,
             parent: None,

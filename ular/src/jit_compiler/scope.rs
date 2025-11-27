@@ -3,7 +3,7 @@ use crate::{
     dependency_analyzer::analyzed_program::{AnalyzedExpressionRef, AnalyzedStringLiteral},
     error_reporting::{CompilationError, CompilationErrorMessage, InternalError},
     jit_compiler::{
-        built_in_values::BuiltInValues,
+        built_in_values::JitCompilerBuiltInValues,
         module::UlarModule,
         value::{UlarFunction, UlarValue},
     },
@@ -44,14 +44,14 @@ impl<'a, 'context> JitCompilerScope<'a, 'context> {
         scope_context: &JitCompilerScopeContext<'context>,
         context: &'context Context,
         builder: &Builder<'context>,
-        built_in_values: &mut BuiltInValues<'context>,
+        built_in_values: &mut JitCompilerBuiltInValues<'context>,
         execution_engine: &ExecutionEngine<'context>,
         module: &mut UlarModule<'context>,
     ) -> Result<UlarValue<'context>, CompilationError> {
         match reference {
-            AnalyzedExpressionRef::BuiltIn { name, .. } => built_in_values
-                .get(name, local_name, context, builder, execution_engine, module)
-                .ok_or_else(|| InternalError::UnknownValue { name: name.clone() }),
+            AnalyzedExpressionRef::BuiltIn { path, .. } => Ok(built_in_values
+                .get(path, local_name, context, builder, execution_engine, module)
+                .unwrap()),
 
             AnalyzedExpressionRef::Expression { index, .. } => self
                 .get_expression(*index)

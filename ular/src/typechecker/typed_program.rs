@@ -4,6 +4,7 @@ use crate::{
         program::{Identifier, InfixOperator, Node, StringLiteral, StructDefinitionField},
         type_::{FunctionType, NumericType, Type},
     },
+    phase::built_in_values::BuiltInPathBuf,
     simplifier::simple_program::SimplePrefixOperator,
 };
 use ular_derive::{Node, Typed};
@@ -71,7 +72,6 @@ pub enum TypedExpression {
     Call(TypedCall),
     StructApplication(TypedStructApplication),
     Path(TypedPath),
-    Identifier(TypedIdentifier),
     Number(TypedNumber),
     String(StringLiteral),
     PrefixOperation(TypedPrefixOperation),
@@ -151,11 +151,20 @@ impl Typed for TypedStructApplication {
 }
 
 #[derive(Clone, Debug, Node, Typed)]
-pub struct TypedPath {
-    pub left_hand_side: Identifier,
-    pub method_index: usize,
-    pub type_: Type,
-    pub position: Position,
+pub enum TypedPath {
+    BuiltIn {
+        underlying: BuiltInPathBuf,
+        type_: Type,
+        position: Position,
+    },
+
+    UserDefinedIdentifier(TypedIdentifier),
+    UserDefinedMethod {
+        left_hand_side: Identifier,
+        method_index: usize,
+        type_: Type,
+        position: Position,
+    },
 }
 
 #[derive(Clone, Debug)]

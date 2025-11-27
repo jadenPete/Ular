@@ -12,7 +12,10 @@ use crate::{
         },
         type_::{FunctionType, NumericType, Type},
     },
-    phase::Phase,
+    phase::{
+        built_in_values::{BuiltInPath, BuiltInPathBuf},
+        Phase,
+    },
     simplifier::simple_program::{
         SimpleBlock, SimpleCall, SimpleExpression, SimpleFunctionDefinition, SimpleIf,
         SimpleInfixOperation, SimplePrefixOperation, SimplePrefixOperator, SimpleProgram,
@@ -20,7 +23,7 @@ use crate::{
         SimpleVariableDefinition,
     },
     typechecker::{
-        built_in_values::BuiltInValues,
+        built_in_values::{TypecheckerBuiltInValueProducer, TypecheckerBuiltInValues},
         scope::TypecheckerScope,
         typed_program::{
             Typed, TypedBlock, TypedCall, TypedExpression, TypedFunctionDefinition,
@@ -34,19 +37,24 @@ use crate::{
 use std::collections::{HashMap, HashSet};
 
 struct Typechecker<'a> {
+    built_in_values: &'a TypecheckerBuiltInValues,
     scope: TypecheckerScope<'a>,
 }
 
 impl<'a> Typechecker<'a> {
+    fn with_parent(parent: &'a Typechecker<'a>) -> Self {
+        Self {
+            built_in_values: parent.built_in_values,
+            scope: TypecheckerScope::with_parent(&parent.scope),
+        }
+    }
+
     fn typecheck_block(
         &self,
         block: &SimpleBlock,
         suggested_type: Option<&Type>,
     ) -> Result<TypedBlock, CompilationError> {
-        let mut typechecker = Typechecker {
-            scope: TypecheckerScope::with_parent(&self.scope),
-        };
-
+        let mut typechecker = Typechecker::with_parent(self);
         let typechecked_statements =
             typechecker.typecheck_statements_with_hoisting(&block.statements)?;
 
@@ -139,7 +147,7 @@ impl<'a> Typechecker<'a> {
             }
 
             SimpleExpression::Path(path) => Ok(TypedExpression::Path(self.typecheck_path(path)?)),
-            SimpleExpression::Identifier(identifier) => Ok(TypedExpression::Identifier(
+            SimpleExpression::Identifier(identifier) => Ok(TypedExpression::Path(
                 self.typecheck_identifier(identifier)?,
             )),
 
@@ -174,9 +182,7 @@ impl<'a> Typechecker<'a> {
 
         self.validate_type(&definition.return_type)?;
 
-        let mut typechecker = Typechecker {
-            scope: TypecheckerScope::with_parent(&self.scope),
-        };
+        let mut typechecker = Typechecker::with_parent(self);
 
         for parameter in &definition.parameters {
             typechecker
@@ -245,16 +251,26 @@ impl<'a> Typechecker<'a> {
         })
     }
 
-    fn typecheck_identifier(
-        &self,
-        identifier: &Identifier,
-    ) -> Result<TypedIdentifier, CompilationError> {
+    fn typecheck_identifier(&self, identifier: &Identifier) -> Result<TypedPath, CompilationError> {
+        if let Some(type_) = self
+            .built_in_values
+            .get(&BuiltInPath::Identifier(&identifier.value))
+        {
+            return Ok(TypedPath::UserDefinedIdentifier(TypedIdentifier {
+                underlying: identifier.clone(),
+                type_: type_.clone(),
+                position: identifier.get_position(),
+            }));
+        }
+
         self.scope
             .get_variable_type(&identifier.value)
-            .map(|type_| TypedIdentifier {
-                underlying: identifier.clone(),
-                type_,
-                position: identifier.get_position(),
+            .map(|type_| {
+                TypedPath::UserDefinedIdentifier(TypedIdentifier {
+                    underlying: identifier.clone(),
+                    type_,
+                    position: identifier.get_position(),
+                })
             })
             .ok_or_else(|| CompilationError {
                 message: CompilationErrorMessage::UnknownValue {
@@ -407,6 +423,21 @@ impl<'a> Typechecker<'a> {
     }
 
     fn typecheck_path(&self, path: &Path) -> Result<TypedPath, CompilationError> {
+        if let Some(type_) = self.built_in_values.get(&BuiltInPath::Method(
+            &path.left_hand_side.value,
+            &path.right_hand_side.value,
+        )) {
+            return Ok(TypedPath::BuiltIn {
+                underlying: BuiltInPathBuf::Method(
+                    path.left_hand_side.value.clone(),
+                    path.right_hand_side.value.clone(),
+                ),
+
+                type_: type_.clone(),
+                position: path.get_position(),
+            });
+        }
+
         let struct_definition = self
             .scope
             .get_struct_definition(&path.left_hand_side.value)
@@ -430,7 +461,7 @@ impl<'a> Typechecker<'a> {
                 position: Some(path.right_hand_side.get_position()),
             })?;
 
-        Ok(TypedPath {
+        Ok(TypedPath::UserDefinedMethod {
             left_hand_side: path.left_hand_side.clone(),
             method_index,
             type_: struct_definition.underlying.methods[method_index].reference_type(),
@@ -563,7 +594,7 @@ impl<'a> Typechecker<'a> {
          * Typecheck the functions first, so they don't yet have access to global variables.
          * Functions capturing their environment (i.e. closures) aren't yet supported.
          *
-         * This won't prevent nested functions from acessing the parameters of the functions within
+         * This won't prevent nested functions from accessing the parameters of the functions within
          * which they're nested, but the analyzer phase will take care of detecting nested functions
          * and erroring when one is detected.
          */
@@ -753,9 +784,14 @@ impl Phase<&SimpleProgram> for TypecheckerPhase {
     }
 
     fn execute(&self, program: &SimpleProgram) -> Result<TypedProgram, CompilationError> {
-        let build_in_values = BuiltInValues::new(self.additional_values.clone());
+        let built_in_values = TypecheckerBuiltInValues::new(
+            TypecheckerBuiltInValueProducer,
+            self.additional_values.clone(),
+        );
+
         let mut typechecker = Typechecker {
-            scope: TypecheckerScope::without_parent(&build_in_values),
+            built_in_values: &built_in_values,
+            scope: TypecheckerScope::without_parent(),
         };
 
         Ok(TypedProgram {

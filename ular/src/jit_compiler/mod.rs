@@ -15,7 +15,7 @@ use crate::{
     },
     error_reporting::{CompilationError, CompilationErrorMessage, InternalError, Position},
     jit_compiler::{
-        built_in_values::{BuiltInValue, BuiltInValues},
+        built_in_values::{BuiltInValue, JitCompilerBuiltInValues},
         fork_function_cache::ForkFunctionCache,
         memory_manager::UlarMemoryManager,
         module::UlarModule,
@@ -965,7 +965,7 @@ impl<'a> JitCompilerPhase<'a> {
     fn compile_main_function(
         &self,
         builder: &Builder<'a>,
-        built_in_values: &mut BuiltInValues<'a>,
+        built_in_values: &mut JitCompilerBuiltInValues<'a>,
         execution_engine: &ExecutionEngine<'a>,
         fork_function_cache: &mut ForkFunctionCache<'a>,
         module: &mut UlarModule<'a>,
@@ -1134,7 +1134,7 @@ impl<'a> JitCompilerPhase<'a> {
     fn compile_main_harness_function(
         &self,
         builder: &Builder<'a>,
-        built_in_values: &mut BuiltInValues<'a>,
+        built_in_values: &mut JitCompilerBuiltInValues<'a>,
         execution_engine: &ExecutionEngine<'a>,
         module: &mut UlarModule<'a>,
         main_function: FunctionValue<'a>,
@@ -1337,7 +1337,7 @@ impl<'a> JitCompilerPhase<'a> {
 
     fn compile_program(
         &self,
-        built_in_values: &mut BuiltInValues<'a>,
+        built_in_values: &mut JitCompilerBuiltInValues<'a>,
         execution_engine: &ExecutionEngine<'a>,
         fork_function_cache: &mut ForkFunctionCache<'a>,
         module: &mut UlarModule<'a>,
@@ -1504,7 +1504,7 @@ impl<'a> Phase<&AnalyzedProgram> for JitCompilerPhase<'a> {
             )
             .unwrap();
 
-        let mut built_in_values = BuiltInValues::new(
+        let mut built_in_values = JitCompilerBuiltInValues::new(
             self.context,
             &execution_engine,
             self.additional_values.clone(),
@@ -1531,7 +1531,7 @@ impl<'a> Phase<&AnalyzedProgram> for JitCompilerPhase<'a> {
 }
 
 struct JitFunctionCompiler<'a, 'context> {
-    built_in_values: &'a mut BuiltInValues<'context>,
+    built_in_values: &'a mut JitCompilerBuiltInValues<'context>,
     context: &'context Context,
     execution_engine: &'a ExecutionEngine<'context>,
     fork_function_cache: &'a mut ForkFunctionCache<'context>,

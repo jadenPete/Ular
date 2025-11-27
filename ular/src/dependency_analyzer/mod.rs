@@ -21,12 +21,11 @@ use crate::{
     },
     phase::Phase,
     typechecker::{
-        built_in_values::BuiltInValues,
+        built_in_values::{TypecheckerBuiltInValueProducer, TypecheckerBuiltInValues},
         typed_program::{
-            TypedBlock, TypedCall, TypedExpression, TypedFunctionDefinition, TypedIdentifier,
-            TypedIf, TypedInfixOperation, TypedNumber, TypedPath, TypedPrefixOperation,
-            TypedProgram, TypedSelect, TypedStatement, TypedStructApplication,
-            TypedStructDefinition, TypedUnit,
+            TypedBlock, TypedCall, TypedExpression, TypedFunctionDefinition, TypedIf,
+            TypedInfixOperation, TypedNumber, TypedPath, TypedPrefixOperation, TypedProgram,
+            TypedSelect, TypedStatement, TypedStructApplication, TypedStructDefinition, TypedUnit,
         },
     },
 };
@@ -106,7 +105,6 @@ impl<'a> Analyzer<'a> {
             }
 
             TypedExpression::Path(path) => self.analyze_path(path),
-            TypedExpression::Identifier(identifier) => self.analyze_identifier(identifier),
             TypedExpression::Number(number) => {
                 Ok(AnalyzedExpressionRef::Number(self.analyze_number(number)))
             }
@@ -200,21 +198,6 @@ impl<'a> Analyzer<'a> {
         })
     }
 
-    fn analyze_identifier(
-        &self,
-        identifier: &TypedIdentifier,
-    ) -> Result<AnalyzedExpressionRef, CompilationError> {
-        self.scope
-            .get_variable(identifier)?
-            .ok_or_else(|| CompilationError {
-                message: CompilationErrorMessage::InternalError(InternalError::UnknownValue {
-                    name: identifier.underlying.value.clone(),
-                }),
-
-                position: Some(identifier.get_position()),
-            })
-    }
-
     fn analyze_if(
         &mut self,
         if_expression: &TypedIf,
@@ -274,23 +257,55 @@ impl<'a> Analyzer<'a> {
     }
 
     fn analyze_path(&self, path: &TypedPath) -> Result<AnalyzedExpressionRef, CompilationError> {
-        let struct_index = self
-            .scope
-            .get_struct_index(&path.left_hand_side.value)
-            .ok_or_else(|| CompilationError {
-                message: CompilationErrorMessage::InternalError(InternalError::UnknownType {
-                    name: path.left_hand_side.value.clone(),
+        match path {
+            TypedPath::BuiltIn {
+                underlying,
+                type_,
+                position,
+            } => Ok(AnalyzedExpressionRef::BuiltIn {
+                path: underlying.clone(),
+                type_: self.scope.analyze_type(type_)?,
+                position: position.clone(),
+            }),
+
+            TypedPath::UserDefinedIdentifier(identifier) => self
+                .scope
+                .get_variable(identifier)?
+                .ok_or_else(|| CompilationError {
+                    message: CompilationErrorMessage::InternalError(InternalError::UnknownValue {
+                        name: identifier.underlying.value.clone(),
+                    }),
+
+                    position: Some(identifier.get_position()),
                 }),
 
-                position: Some(path.left_hand_side.get_position()),
-            })?;
+            TypedPath::UserDefinedMethod {
+                left_hand_side,
+                method_index,
+                type_,
+                position,
+            } => {
+                let struct_index = self
+                    .scope
+                    .get_struct_index(&left_hand_side.value)
+                    .ok_or_else(|| CompilationError {
+                        message: CompilationErrorMessage::InternalError(
+                            InternalError::UnknownType {
+                                name: left_hand_side.value.clone(),
+                            },
+                        ),
 
-        Ok(AnalyzedExpressionRef::StructMethod {
-            struct_index,
-            method_index: path.method_index,
-            type_: self.scope.analyze_type(&path.type_)?,
-            position: path.get_position(),
-        })
+                        position: Some(left_hand_side.get_position()),
+                    })?;
+
+                Ok(AnalyzedExpressionRef::StructMethod {
+                    struct_index,
+                    method_index: *method_index,
+                    type_: self.scope.analyze_type(type_)?,
+                    position: position.clone(),
+                })
+            }
+        }
     }
 
     fn analyze_prefix_operation(
@@ -570,7 +585,7 @@ impl<'a> Analyzer<'a> {
     }
 
     fn without_parent(
-        built_in_values: &'a BuiltInValues,
+        built_in_values: &'a TypecheckerBuiltInValues,
         scope_context: &'a mut AnalyzerScopeContext,
     ) -> Self {
         Self {
@@ -699,7 +714,11 @@ impl Phase<&TypedProgram> for AnalyzerPhase {
     }
 
     fn execute(&self, program: &TypedProgram) -> Result<AnalyzedProgram, CompilationError> {
-        let built_in_values = BuiltInValues::new(self.additional_values.clone());
+        let built_in_values = TypecheckerBuiltInValues::new(
+            TypecheckerBuiltInValueProducer,
+            self.additional_values.clone(),
+        );
+
         let mut analyzer_scope_context = AnalyzerScopeContext::new();
         let mut analyzer = Analyzer::without_parent(&built_in_values, &mut analyzer_scope_context);
 

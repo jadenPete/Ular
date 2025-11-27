@@ -8,8 +8,10 @@ use crate::{
     },
     mmtk::runtime::{mmtk_alloc, mmtk_bind_current_mutator, mmtk_bind_mutator, mmtk_init},
     parser::type_::NumericType,
+    phase::built_in_values::{BuiltInPathBuf, BuiltInValueProducer, BuiltInValues},
 };
 use dyn_clone::DynClone;
+use hashbrown::Equivalent;
 use inkwell::{
     builder::Builder,
     context::Context,
@@ -24,6 +26,7 @@ use std::{
     collections::HashMap,
     ffi::{c_char, CString},
     fmt::{Display, Formatter},
+    hash::Hash,
     ops::Div,
     ptr::null,
 };
@@ -230,8 +233,78 @@ impl<'a> BuiltInFunction<'a> for BuiltInMappedFunction<'a> {
     }
 }
 
-pub struct BuiltInValues<'a> {
-    referencable_values: HashMap<String, Box<dyn BuiltInValue<'a> + 'a>>,
+pub struct JitCompilerBuiltInValueProvider<'a> {
+    context: &'a Context,
+}
+
+impl<'a> BuiltInValueProducer for JitCompilerBuiltInValueProvider<'a> {
+    type Value = Box<dyn BuiltInValue<'a> + 'a>;
+
+    fn get_println_bool(&self, name: &str) -> Self::Value {
+        Box::new(BuiltInMappedFunction::new(
+            name.to_owned(),
+            self.context.void_type().fn_type(
+                &[
+                    self.context.ptr_type(AddressSpace::default()).into(),
+                    self.context.i8_type().into(),
+                ],
+                false,
+            ),
+            println_bool as usize,
+        ))
+    }
+
+    fn get_println_numeric(&self, name: &str, numeric_type: NumericType) -> Self::Value {
+        let address = match numeric_type {
+            NumericType::I8 => println_display::<i8> as usize,
+            NumericType::I16 => println_display::<i16> as usize,
+            NumericType::I32 => println_display::<i32> as usize,
+            NumericType::I64 => println_display::<i64> as usize,
+            NumericType::U8 => println_display::<u8> as usize,
+            NumericType::U16 => println_display::<u16> as usize,
+            NumericType::U32 => println_display::<u32> as usize,
+            NumericType::U64 => println_display::<u64> as usize,
+        };
+
+        Box::new(BuiltInMappedFunction::new(
+            name.to_owned(),
+            self.context.void_type().fn_type(
+                &[
+                    self.context.ptr_type(AddressSpace::default()).into(),
+                    numeric_type.inkwell_type(self.context).into(),
+                ],
+                false,
+            ),
+            address,
+        ))
+    }
+
+    fn get_println_str(&self, name: &str) -> Self::Value {
+        Box::new(BuiltInMappedFunction::new(
+            name.to_owned(),
+            self.context.void_type().fn_type(
+                &[
+                    self.context.ptr_type(AddressSpace::default()).into(),
+                    // https://llvm.org/docs/Statepoints.html#rewritestatepointsforgc
+                    self.context.ptr_type(AddressSpace::from(1)).into(),
+                ],
+                false,
+            ),
+            println_display::<&UlarString> as usize,
+        ))
+    }
+
+    fn get_true(&self, _name: &str) -> Self::Value {
+        Box::new(BuiltInBool::new(1))
+    }
+
+    fn get_false(&self, _name: &str) -> Self::Value {
+        Box::new(BuiltInBool::new(0))
+    }
+}
+
+pub struct JitCompilerBuiltInValues<'a> {
+    underlying: BuiltInValues<JitCompilerBuiltInValueProvider<'a>>,
     pub __cxa_allocate_exception: BuiltInLinkedFunction<'a>,
     pub __cxa_begin_catch: BuiltInLinkedFunction<'a>,
     pub __cxa_end_catch: BuiltInLinkedFunction<'a>,
@@ -263,17 +336,17 @@ pub struct BuiltInValues<'a> {
     pub _worker_try_join: BuiltInMappedFunction<'a>,
 }
 
-impl<'a> BuiltInValues<'a> {
-    pub fn get(
+impl<'a> JitCompilerBuiltInValues<'a> {
+    pub fn get<Path: Equivalent<BuiltInPathBuf> + Hash>(
         &mut self,
-        variable_name: &str,
+        path: &Path,
         local_name: LocalName,
         context: &'a Context,
         builder: &Builder<'a>,
         execution_engine: &ExecutionEngine<'a>,
         module: &mut UlarModule<'a>,
     ) -> Option<UlarValue<'a>> {
-        Some(self.referencable_values.get_mut(variable_name)?.get_value(
+        Some(self.underlying.get_mut(path)?.get_value(
             local_name,
             context,
             builder,
@@ -303,160 +376,8 @@ impl<'a> BuiltInValues<'a> {
         execution_engine: &ExecutionEngine<'a>,
         additional_values: HashMap<String, Box<dyn BuiltInValue<'a> + 'a>>,
     ) -> Self {
-        let mut referencable_values = additional_values;
-
-        referencable_values.insert(String::from("true"), Box::new(BuiltInBool::new(1)));
-        referencable_values.insert(String::from("false"), Box::new(BuiltInBool::new(0)));
-        referencable_values.insert(
-            String::from("println_bool"),
-            Box::new(BuiltInMappedFunction::new(
-                String::from("println_bool"),
-                context.void_type().fn_type(
-                    &[
-                        context.ptr_type(AddressSpace::default()).into(),
-                        context.i8_type().into(),
-                    ],
-                    false,
-                ),
-                println_bool as usize,
-            )),
-        );
-
-        referencable_values.insert(
-            String::from("println_i8"),
-            Box::new(BuiltInMappedFunction::new(
-                String::from("println_i8"),
-                context.void_type().fn_type(
-                    &[
-                        context.ptr_type(AddressSpace::default()).into(),
-                        context.i8_type().into(),
-                    ],
-                    false,
-                ),
-                println_display::<i8> as usize,
-            )),
-        );
-
-        referencable_values.insert(
-            String::from("println_i16"),
-            Box::new(BuiltInMappedFunction::new(
-                String::from("println_i16"),
-                context.void_type().fn_type(
-                    &[
-                        context.ptr_type(AddressSpace::default()).into(),
-                        context.i16_type().into(),
-                    ],
-                    false,
-                ),
-                println_display::<i16> as usize,
-            )),
-        );
-
-        referencable_values.insert(
-            String::from("println_i32"),
-            Box::new(BuiltInMappedFunction::new(
-                String::from("println_i32"),
-                context.void_type().fn_type(
-                    &[
-                        context.ptr_type(AddressSpace::default()).into(),
-                        context.i32_type().into(),
-                    ],
-                    false,
-                ),
-                println_display::<i32> as usize,
-            )),
-        );
-
-        referencable_values.insert(
-            String::from("println_i64"),
-            Box::new(BuiltInMappedFunction::new(
-                String::from("println_i64"),
-                context.void_type().fn_type(
-                    &[
-                        context.ptr_type(AddressSpace::default()).into(),
-                        context.i64_type().into(),
-                    ],
-                    false,
-                ),
-                println_display::<i64> as usize,
-            )),
-        );
-
-        referencable_values.insert(
-            String::from("println_u8"),
-            Box::new(BuiltInMappedFunction::new(
-                String::from("println_u8"),
-                context.void_type().fn_type(
-                    &[
-                        context.ptr_type(AddressSpace::default()).into(),
-                        context.i8_type().into(),
-                    ],
-                    false,
-                ),
-                println_display::<u8> as usize,
-            )),
-        );
-
-        referencable_values.insert(
-            String::from("println_u16"),
-            Box::new(BuiltInMappedFunction::new(
-                String::from("println_u16"),
-                context.void_type().fn_type(
-                    &[
-                        context.ptr_type(AddressSpace::default()).into(),
-                        context.i16_type().into(),
-                    ],
-                    false,
-                ),
-                println_display::<u16> as usize,
-            )),
-        );
-
-        referencable_values.insert(
-            String::from("println_u32"),
-            Box::new(BuiltInMappedFunction::new(
-                String::from("println_u32"),
-                context.void_type().fn_type(
-                    &[
-                        context.ptr_type(AddressSpace::default()).into(),
-                        context.i32_type().into(),
-                    ],
-                    false,
-                ),
-                println_display::<u32> as usize,
-            )),
-        );
-
-        referencable_values.insert(
-            String::from("println_u64"),
-            Box::new(BuiltInMappedFunction::new(
-                String::from("println_u64"),
-                context.void_type().fn_type(
-                    &[
-                        context.ptr_type(AddressSpace::default()).into(),
-                        context.i64_type().into(),
-                    ],
-                    false,
-                ),
-                println_display::<u64> as usize,
-            )),
-        );
-
-        referencable_values.insert(
-            String::from("println_str"),
-            Box::new(BuiltInMappedFunction::new(
-                String::from("println_str"),
-                context.void_type().fn_type(
-                    &[
-                        context.ptr_type(AddressSpace::default()).into(),
-                        context.ptr_type(AddressSpace::default()).into(),
-                    ],
-                    false,
-                ),
-                println_display::<&UlarString> as usize,
-            )),
-        );
-
+        let provider = JitCompilerBuiltInValueProvider { context };
+        let underlying = BuiltInValues::new(provider, additional_values);
         let __cxa_allocate_exception = BuiltInLinkedFunction::new(
             String::from("__cxa_allocate_exception"),
             context
@@ -652,7 +573,7 @@ impl<'a> BuiltInValues<'a> {
         );
 
         Self {
-            referencable_values,
+            underlying,
             __cxa_allocate_exception,
             __cxa_begin_catch,
             __cxa_end_catch,
@@ -771,7 +692,7 @@ unsafe extern "C" fn _worker_free(worker: *mut Worker) {
 
 /// # Safety
 ///
-/// This function should only be called with a pointer that's confertable to a `&WorkerPool`.
+/// This function should only be called with a pointer that's convertible to a `&WorkerPool`.
 unsafe extern "C" fn _workerpool_worker(worker_pool: *const WorkerPool) -> *mut Worker {
     Box::into_raw(Box::new(worker_pool.as_ref().unwrap().worker()))
 }
