@@ -7,7 +7,7 @@ mod value;
 
 use crate::{
     arguments::{GarbageCollectionPlan, PhaseName},
-    data_structures::graph::DirectedGraph,
+    data_structures::{graph::DirectedGraph, number_map::NumberMap, IteratorExtension},
     dependency_analyzer::analyzed_program::{
         AnalyzedBlock, AnalyzedCall, AnalyzedExpression, AnalyzedFunctionDefinition, AnalyzedIf,
         AnalyzedInfixOperation, AnalyzedPrefixOperation, AnalyzedProgram, AnalyzedSelect,
@@ -71,6 +71,8 @@ trait CompilableExpression<'a, 'context> {
         builder: &Builder<'context>,
         scope: &mut JitCompilerScope<'_, 'context>,
     ) -> Result<UlarValue<'context>, CompilationError>;
+
+    fn is_forkable(&self) -> bool;
 }
 
 pub struct ExecutorPhase;
@@ -124,6 +126,10 @@ impl<'a, 'context, A: InlineExpression<'context> + Copy + 'a> CompilableExpressi
         scope: &mut JitCompilerScope<'_, 'context>,
     ) -> Result<UlarValue<'context>, CompilationError> {
         self.compile(compiler, builder, scope)
+    }
+
+    fn is_forkable(&self) -> bool {
+        false
     }
 }
 
@@ -260,6 +266,10 @@ impl<'a, 'context: 'a> CompilableExpression<'a, 'context> for CompilableCall<'a>
             &self.0.get_type(),
             self.0.get_position(),
         )
+    }
+
+    fn is_forkable(&self) -> bool {
+        true
     }
 }
 
@@ -1610,60 +1620,96 @@ impl<'context> JitFunctionCompiler<'_, 'context> {
         scope: &mut JitCompilerScope<'_, 'context>,
         expression_graph: &DirectedGraph<AnalyzedExpression>,
     ) -> Result<(), CompilationError> {
-        let compile_inline =
-            |compiler: &mut Self, builder, scope: &mut JitCompilerScope<'_, 'context>, i| {
-                let compilable = Self::compile_expression(expression_graph.get_node(i).unwrap());
-                let value = compilable.compile_inline(compiler, builder, scope)?;
+        let mut compilables = NumberMap::new(expression_graph.get_offset());
 
-                scope.set_expression(i, value);
+        compilables.extend(
+            expression_graph
+                .node_iter()
+                .map(|(i, node)| (i, Self::compile_expression(node))),
+        );
 
-                Ok(())
-            };
+        // Compiles an individual node as "inline", avoiding any fork/join operations.
+        //
+        // This is done if (1) the operation is so cheap that it's not worth forking (i.e.
+        // `is_forkable` returned false) or (2) we're compiling an operation that we want to execute
+        // while other threads are potentially busy executing forked operations.
+        let compile_inline = |compiler: &mut Self,
+                              builder: &Builder<'context>,
+                              scope: &mut JitCompilerScope<'_, 'context>,
+                              i: usize| {
+            let compilable = compilables.get(i).unwrap();
+            let value = compilable.compile_inline(compiler, builder, scope)?;
+
+            scope.set_expression(i, value);
+
+            Ok(())
+        };
+
+        // Compiles a layer within the topological sort.
+        let compile_layer = |compiler: &mut Self,
+                             builder: &Builder<'context>,
+                             scope: &mut JitCompilerScope<'_, 'context>,
+                             layer: &[usize]| {
+            let multiple_are_forkable = compilables
+                .values()
+                .at_least(|compilable| compilable.is_forkable(), 2);
+
+            if !multiple_are_forkable {
+                // If fewer than two operations in the layer are expensive enough to warrant
+                // fork/join-ing, then compile all the operations as "inline" to avoid
+                // unnecessary overhead.
+                for &i in layer.iter() {
+                    compile_inline(compiler, builder, scope, i)?;
+                }
+            } else {
+                // Otherwise, fork all operations but the last one, execute the last one in the
+                // current thread, and then join the operations we forked.
+                let mut forked = Vec::with_capacity(layer.len() - 1);
+
+                for &i in &layer[..layer.len() - 1] {
+                    let compilable = compilables.get(i).unwrap();
+
+                    forked.push(compilable.compile_fork(compiler, builder, scope)?);
+                }
+
+                compile_inline(compiler, builder, scope, layer[layer.len() - 1])?;
+
+                for (&i, forked) in layer.iter().zip(forked) {
+                    let joined = forked.compile_join(compiler, builder, scope)?;
+
+                    scope.set_expression(i, joined);
+                }
+            }
+
+            Ok(())
+        };
 
         let topological_sort = expression_graph.topological_sort();
+        let has_forkable_layers = topological_sort.layers.iter().any(|layer| {
+            layer
+                .iter()
+                .any(|&i| compilables.get(i).unwrap().is_forkable())
+        });
 
         let mut forked_isolated_nodes = Vec::with_capacity(topological_sort.isolated_nodes.len());
 
-        if topological_sort.layers.is_empty() {
-            if let Some(&i) = topological_sort.isolated_nodes.last() {
-                for &i in
-                    &topological_sort.isolated_nodes[..topological_sort.isolated_nodes.len() - 1]
-                {
-                    let compilable =
-                        Self::compile_expression(expression_graph.get_node(i).unwrap());
-
-                    forked_isolated_nodes.push(compilable.compile_fork(self, builder, scope)?);
-                }
-
-                compile_inline(self, builder, scope, i)?;
-            }
+        if !has_forkable_layers {
+            // If none of the layers have operations worth forking, then just compile the list of
+            // isolated nodes as a layer. There's no point in forking all of them and then joining all
+            // of them because we're not going to do any expensive work in between.
+            compile_layer(self, builder, scope, &topological_sort.isolated_nodes)?;
         } else {
+            // Fork all of the isolated nodes. After we're done, we'll compute all of the layers.
+            // Then, we'll join all of the isolated nodes.
             for &i in &topological_sort.isolated_nodes {
                 let compilable = Self::compile_expression(expression_graph.get_node(i).unwrap());
 
                 forked_isolated_nodes.push(compilable.compile_fork(self, builder, scope)?);
             }
+        }
 
-            for layer in &topological_sort.layers {
-                if let Some(&i) = layer.last() {
-                    let mut forked = Vec::with_capacity(layer.len());
-
-                    for &i in &layer[..layer.len() - 1] {
-                        let compilable =
-                            Self::compile_expression(expression_graph.get_node(i).unwrap());
-
-                        forked.push(compilable.compile_fork(self, builder, scope)?);
-                    }
-
-                    compile_inline(self, builder, scope, i)?;
-
-                    for (&i, forked) in layer.iter().zip(forked) {
-                        let joined = forked.compile_join(self, builder, scope)?;
-
-                        scope.set_expression(i, joined);
-                    }
-                }
-            }
+        for layer in &topological_sort.layers {
+            compile_layer(self, builder, scope, layer)?;
         }
 
         for (&i, forked) in topological_sort

@@ -44,6 +44,10 @@ impl<A> DirectedGraph<A> {
         }
     }
 
+    pub fn node_iter(&self) -> impl Iterator<Item = (usize, &A)> {
+        self.nodes.iter()
+    }
+
     pub fn reserve_node(&mut self) -> usize {
         let result = self.next_node;
 

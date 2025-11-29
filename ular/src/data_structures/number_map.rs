@@ -105,11 +105,23 @@ impl<A> NumberMap<A> {
             values: Vec::new(),
         }
     }
+
+    pub fn values(&self) -> impl Iterator<Item = &A> {
+        self.values.iter().flatten()
+    }
 }
 
 impl<A: Debug> Debug for NumberMap<A> {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
         formatter.debug_map().entries(self.iter()).finish()
+    }
+}
+
+impl<A> Extend<(usize, A)> for NumberMap<A> {
+    fn extend<T: IntoIterator<Item = (usize, A)>>(&mut self, iter: T) {
+        for (i, value) in iter {
+            self.insert(i, value);
+        }
     }
 }
 
