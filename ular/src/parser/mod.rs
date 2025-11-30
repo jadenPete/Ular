@@ -583,8 +583,8 @@ fn parse_else_if_clause(input: Tokens) -> IResult<Tokens, ElseIfClause> {
 
 fn parse_else_clause(input: Tokens) -> IResult<Tokens, ElseClause> {
     map(
-        tuple((parse_token(Token::ElseKeyword), parse_block)),
-        |(_, body)| ElseClause { body },
+        positioned(tuple((parse_token(Token::ElseKeyword), parse_block))),
+        |(position, (_, body))| ElseClause { body, position },
     )(input)
 }
 
@@ -649,14 +649,15 @@ fn parse_struct_application(input: Tokens) -> IResult<Tokens, StructApplication>
 
 fn parse_struct_application_field(input: Tokens) -> IResult<Tokens, StructApplicationField> {
     map(
-        tuple((
+        positioned(tuple((
             parse_identifier,
             parse_token(Token::TypeAnnotation),
             parse_expression,
-        )),
-        |(name, _, value)| StructApplicationField {
+        ))),
+        |(position, (name, _, value))| StructApplicationField {
             name,
             value: Box::new(value),
+            position,
         },
     )(input)
 }

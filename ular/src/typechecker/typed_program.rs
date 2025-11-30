@@ -58,12 +58,6 @@ pub struct TypedFunctionDefinition {
     pub position: Position,
 }
 
-impl Typed for TypedFunctionDefinition {
-    fn get_type(&self) -> Type {
-        Type::Function(self.type_.clone())
-    }
-}
-
 #[derive(Clone, Debug, Node, Typed)]
 pub enum TypedExpression {
     If(TypedIf),
@@ -167,10 +161,11 @@ pub enum TypedPath {
     },
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Node)]
 pub struct TypedStructApplicationField {
     pub name: Identifier,
     pub value: Box<TypedExpression>,
+    pub position: Position,
 }
 
 #[derive(Clone, Debug, Node, Typed)]

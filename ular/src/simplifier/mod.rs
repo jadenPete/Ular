@@ -239,6 +239,7 @@ fn simplify_struct_application(struct_application: &StructApplication) -> Simple
             .map(|field| SimpleStructApplicationField {
                 name: field.name.clone(),
                 value: Box::new(simplify_expression(&field.value)),
+                position: field.get_position(),
             })
             .collect(),
         position: struct_application.get_position(),

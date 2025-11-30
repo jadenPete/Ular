@@ -684,6 +684,7 @@ impl<'a> Typechecker<'a> {
             typechecked_fields.push(TypedStructApplicationField {
                 name: field.name.clone(),
                 value: Box::new(typechecked_field),
+                position: field.get_position(),
             });
         }
 

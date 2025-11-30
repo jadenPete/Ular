@@ -135,8 +135,9 @@ pub struct SimpleStructApplication {
     pub position: Position,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Node)]
 pub struct SimpleStructApplicationField {
     pub name: Identifier,
     pub value: Box<SimpleExpression>,
+    pub position: Position,
 }

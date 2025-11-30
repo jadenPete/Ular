@@ -55,6 +55,7 @@ impl<'a> Analyzer<'a> {
         Ok(AnalyzedBlock {
             expression_graph: analyzer.into_expression_graph(),
             result: result_reference,
+            position: block.get_position(),
         })
     }
 
@@ -187,6 +188,7 @@ impl<'a> Analyzer<'a> {
         let analyzed_body = AnalyzedBlock {
             expression_graph: analyzer.into_expression_graph(),
             result: result_reference,
+            position: definition.body.get_position(),
         };
 
         Ok(AnalyzedFunctionDefinition {
@@ -507,6 +509,7 @@ impl<'a> Analyzer<'a> {
             analyzed_fields.push(AnalyzedStructApplicationField {
                 name: field.name.value.clone(),
                 value: self.analyze_expression(&field.value)?,
+                position: field.get_position(),
             });
         }
 
@@ -553,6 +556,7 @@ impl<'a> Analyzer<'a> {
                     Ok(AnalyzedStructDefinitionField {
                         name: field.name.clone(),
                         type_: self.scope.analyze_type(&field.type_)?,
+                        position: field.get_position(),
                     })
                 })
                 .collect::<Result<_, _>>()?,

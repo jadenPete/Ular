@@ -184,16 +184,17 @@ pub struct If {
     pub position: Position,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Node)]
 pub struct ElseIfClause {
     pub condition: Box<Expression>,
     pub body: Block,
     pub position: Position,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Node)]
 pub struct ElseClause {
     pub body: Block,
+    pub position: Position,
 }
 
 #[derive(Debug, Node)]
@@ -270,10 +271,11 @@ pub struct StructApplication {
     pub position: Position,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Node)]
 pub struct StructApplicationField {
     pub name: Identifier,
     pub value: Box<Expression>,
+    pub position: Position,
 }
 
 #[derive(Clone, Debug, Node)]

@@ -1776,7 +1776,7 @@ impl<'context> JitFunctionCompiler<'_, 'context> {
                 self.context,
                 &definition_parameter.type_,
                 function_parameter,
-                definition_parameter.position.clone(),
+                definition_parameter.get_position(),
             )?);
         }
 

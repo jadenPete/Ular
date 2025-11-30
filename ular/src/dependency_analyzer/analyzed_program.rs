@@ -144,10 +144,11 @@ pub struct AnalyzedStructDefinition {
     pub position: Position,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Node)]
 pub struct AnalyzedStructDefinitionField {
     pub name: Identifier,
     pub type_: AnalyzedType,
+    pub position: Position,
 }
 
 #[derive(Debug, Node)]
@@ -159,7 +160,7 @@ pub struct AnalyzedFunctionDefinition {
     pub position: Position,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Node)]
 pub struct AnalyzedParameter {
     #[allow(dead_code)]
     pub name: String,
@@ -187,10 +188,11 @@ pub struct AnalyzedIf {
     pub position: Position,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Node)]
 pub struct AnalyzedBlock {
     pub expression_graph: DirectedGraph<AnalyzedExpression>,
     pub result: Option<AnalyzedExpressionRef>,
+    pub position: Position,
 }
 
 #[derive(AnalyzerTyped, Debug, Node)]
@@ -234,10 +236,11 @@ pub struct AnalyzedStructApplication {
     pub position: Position,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Node)]
 pub struct AnalyzedStructApplicationField {
     pub name: String,
     pub value: AnalyzedExpressionRef,
+    pub position: Position,
 }
 
 #[derive(AnalyzerTyped, Debug, Clone, Node)]
