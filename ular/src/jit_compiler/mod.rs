@@ -1400,6 +1400,10 @@ impl<'a> JitCompilerPhase<'a> {
             .structs
             .iter()
             .map(|struct_definition| {
+                let struct_type = self
+                    .context
+                    .opaque_struct_type(&struct_definition.name.value);
+
                 let mut field_types = Vec::with_capacity(struct_definition.fields.len() + 1);
 
                 // The first field is the descriptor reference
@@ -1414,7 +1418,9 @@ impl<'a> JitCompilerPhase<'a> {
                     })?);
                 }
 
-                Ok(self.context.struct_type(&field_types, false))
+                struct_type.set_body(&field_types, false);
+
+                Ok(struct_type)
             })
             .collect::<Result<Vec<_>, _>>()?;
 
