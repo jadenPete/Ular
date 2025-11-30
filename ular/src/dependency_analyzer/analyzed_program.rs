@@ -175,6 +175,7 @@ pub enum AnalyzedExpression {
     Call(AnalyzedCall),
     StructApplication(AnalyzedStructApplication),
     PrefixOperation(AnalyzedPrefixOperation),
+    String(AnalyzedStringLiteral),
 }
 
 #[derive(AnalyzerTyped, Debug, Node)]
@@ -260,7 +261,6 @@ pub enum AnalyzedExpressionRef {
     },
 
     Number(AnalyzedNumber),
-    String(AnalyzedStringLiteral),
     Parameter {
         index: usize,
         type_: AnalyzedType,
@@ -354,10 +354,6 @@ impl AnalyzedExpressionRef {
                 position,
             },
 
-            Self::String(string) => Self::String(AnalyzedStringLiteral {
-                index: string.index,
-                position,
-            }),
             Self::StructMethod {
                 struct_index,
                 method_index,

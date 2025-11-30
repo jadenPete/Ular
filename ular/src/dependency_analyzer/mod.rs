@@ -487,10 +487,14 @@ impl<'a> Analyzer<'a> {
     }
 
     fn analyze_string(&mut self, string: &StringLiteral) -> AnalyzedExpressionRef {
-        AnalyzedExpressionRef::String(AnalyzedStringLiteral {
-            index: self.scope_context.add_string_literal(string.value.clone()),
-            position: string.position.clone(),
-        })
+        let (_, result) =
+            self.expression_graph
+                .add_node(AnalyzedExpression::String(AnalyzedStringLiteral {
+                    index: self.scope_context.add_string_literal(string.value.clone()),
+                    position: string.position.clone(),
+                }));
+
+        result
     }
 
     fn analyze_struct_application(

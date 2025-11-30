@@ -1,6 +1,6 @@
 use crate::{
     data_structures::number_map::NumberMap,
-    dependency_analyzer::analyzed_program::{AnalyzedExpressionRef, AnalyzedStringLiteral},
+    dependency_analyzer::analyzed_program::AnalyzedExpressionRef,
     error_reporting::{CompilationError, CompilationErrorMessage, InternalError},
     jit_compiler::{
         built_in_values::JitCompilerBuiltInValues,
@@ -75,12 +75,6 @@ impl<'a, 'context> JitCompilerScope<'a, 'context> {
                     .inkwell_type(context)
                     .const_int(number.value as u64, number.type_.is_signed()),
             )),
-
-            AnalyzedExpressionRef::String(AnalyzedStringLiteral { index, .. }) => scope_context
-                .string_values
-                .get(*index)
-                .copied()
-                .ok_or(InternalError::JitCompilerUnknownString { index: *index }),
 
             AnalyzedExpressionRef::StructMethod {
                 struct_index,

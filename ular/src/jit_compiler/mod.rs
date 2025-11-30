@@ -11,7 +11,8 @@ use crate::{
     dependency_analyzer::analyzed_program::{
         AnalyzedBlock, AnalyzedCall, AnalyzedExpression, AnalyzedFunctionDefinition, AnalyzedIf,
         AnalyzedInfixOperation, AnalyzedPrefixOperation, AnalyzedProgram, AnalyzedSelect,
-        AnalyzedStructApplication, AnalyzedStructDefinition, AnalyzedType, AnalyzerTyped,
+        AnalyzedStringLiteral, AnalyzedStructApplication, AnalyzedStructDefinition, AnalyzedType,
+        AnalyzerTyped,
     },
     error_reporting::{CompilationError, CompilationErrorMessage, InternalError, Position},
     jit_compiler::{
@@ -843,6 +844,33 @@ impl<'context> InlineExpression<'context> for CompilableSelect<'_> {
 }
 
 #[derive(Clone, Copy)]
+struct CompilableStringLiteral<'a>(&'a AnalyzedStringLiteral);
+
+impl<'context> InlineExpression<'context> for CompilableStringLiteral<'_> {
+    fn compile(
+        &self,
+        compiler: &mut JitFunctionCompiler<'_, 'context>,
+        _builder: &Builder<'context>,
+        _scope: &mut JitCompilerScope<'_, 'context>,
+    ) -> Result<UlarValue<'context>, CompilationError> {
+        let i = self.0.index;
+
+        compiler
+            .scope_context
+            .string_values
+            .get(i)
+            .copied()
+            .ok_or(CompilationError {
+                message: CompilationErrorMessage::InternalError(
+                    InternalError::JitCompilerUnknownString { index: i },
+                ),
+
+                position: None,
+            })
+    }
+}
+
+#[derive(Clone, Copy)]
 struct CompilableStructApplication<'a>(&'a AnalyzedStructApplication);
 
 impl<'context> InlineExpression<'context> for CompilableStructApplication<'_> {
@@ -1610,6 +1638,10 @@ impl<'context> JitFunctionCompiler<'_, 'context> {
 
             AnalyzedExpression::PrefixOperation(prefix_operation) => {
                 Box::new(CompilablePrefixOperation(prefix_operation))
+            }
+
+            AnalyzedExpression::String(string_literal) => {
+                Box::new(CompilableStringLiteral(string_literal))
             }
         }
     }
