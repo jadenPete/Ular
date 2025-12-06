@@ -3,7 +3,7 @@ use crate::{
     phase::built_in_values::{BuiltInValueProducer, BuiltInValues},
 };
 
-pub struct TypecheckerBuiltInValueProducer;
+pub(crate) struct TypecheckerBuiltInValueProducer;
 
 impl BuiltInValueProducer for TypecheckerBuiltInValueProducer {
     type Value = Type;
@@ -38,4 +38,4 @@ impl BuiltInValueProducer for TypecheckerBuiltInValueProducer {
     }
 }
 
-pub type TypecheckerBuiltInValues = BuiltInValues<TypecheckerBuiltInValueProducer>;
+pub(crate) type TypecheckerBuiltInValues = BuiltInValues<TypecheckerBuiltInValueProducer>;

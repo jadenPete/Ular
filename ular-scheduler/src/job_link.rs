@@ -7,7 +7,7 @@ const UNLINKED_MARKER: Option<NonNull<JobLink>> =
 
 /// Basically just a `repr(C)` version of [intrusive_collections::linked_list::Link]
 #[repr(C)]
-pub struct JobLink {
+pub(crate) struct JobLink {
     next: Cell<Option<NonNull<JobLink>>>,
     prev: Cell<Option<NonNull<JobLink>>>,
 }
@@ -20,12 +20,12 @@ impl DefaultLinkOps for JobLink {
 
 impl JobLink {
     #[inline]
-    pub fn is_linked(&self) -> bool {
+    pub(crate) fn is_linked(&self) -> bool {
         self.next.get() != UNLINKED_MARKER
     }
 
     #[inline]
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             next: Cell::new(UNLINKED_MARKER),
             prev: Cell::new(UNLINKED_MARKER),

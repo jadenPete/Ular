@@ -35,3 +35,6 @@ cmake = "0.1.54"
 
 [dev-dependencies]
 anyhow = "1.0.97"
+
+[lints]
+workspace = true

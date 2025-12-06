@@ -1,4 +1,4 @@
-pub mod simple_program;
+pub(crate) mod simple_program;
 
 use crate::{
     arguments::PhaseName,
@@ -20,7 +20,7 @@ use crate::{
     },
 };
 
-pub struct SimplifierPhase;
+pub(crate) struct SimplifierPhase;
 
 impl Phase<&Program> for SimplifierPhase {
     type Output = SimpleProgram;

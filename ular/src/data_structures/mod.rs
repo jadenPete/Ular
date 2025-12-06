@@ -1,7 +1,7 @@
-pub mod graph;
-pub mod number_map;
+pub(crate) mod graph;
+pub(crate) mod number_map;
 
-pub trait IteratorExtension: Iterator {
+pub(crate) trait IteratorExtension: Iterator {
     fn at_least<A: FnMut(&Self::Item) -> bool>(self, condition: A, expected: usize) -> bool;
 }
 

@@ -5,12 +5,12 @@ use inkwell::{
 };
 
 pub struct UlarModule<'a> {
-    pub underlying: Module<'a>,
+    pub(super) underlying: Module<'a>,
     next_global_value: u32,
 }
 
 impl<'a> UlarModule<'a> {
-    pub fn add_garbage_collecting_function(
+    pub(super) fn add_garbage_collecting_function(
         &self,
         name: &str,
         type_: FunctionType<'a>,
@@ -22,7 +22,7 @@ impl<'a> UlarModule<'a> {
         result
     }
 
-    pub fn add_global<A: BasicType<'a>>(&mut self, type_: A) -> GlobalValue<'a> {
+    pub(super) fn add_global<A: BasicType<'a>>(&mut self, type_: A) -> GlobalValue<'a> {
         let result = self
             .underlying
             .add_global(type_, None, &self.next_global_value.to_string());

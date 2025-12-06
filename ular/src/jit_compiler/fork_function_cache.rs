@@ -20,14 +20,14 @@ use std::{
     hash::{Hash, Hasher},
 };
 
-pub struct ForkFunction<'a> {
-    pub function: FunctionValue<'a>,
+pub(super) struct ForkFunction<'a> {
+    function: FunctionValue<'a>,
     context_type: StructType<'a>,
     underlying_pointer: Option<PointerValue<'a>>,
 }
 
 impl<'a> ForkFunction<'a> {
-    pub fn build_context(
+    pub(super) fn build_context(
         self,
         builder: &Builder<'a>,
         scope: &mut JitCompilerScope<'_, 'a>,
@@ -71,9 +71,13 @@ impl<'a> ForkFunction<'a> {
 
         Ok(context)
     }
+
+    pub(super) fn function(&self) -> FunctionValue<'a> {
+        self.function
+    }
 }
 
-pub struct ForkFunctionCache<'a> {
+pub(super) struct ForkFunctionCache<'a> {
     function_cache: HashMap<ForkFunctionKey<'a>, ForkFunctionValue<'a>>,
 }
 
@@ -202,7 +206,7 @@ impl<'a> ForkFunctionCache<'a> {
         })
     }
 
-    pub fn get_or_build(
+    pub(super) fn get_or_build(
         &mut self,
         function: UlarFunction<'a>,
         context: &'a Context,
@@ -221,7 +225,7 @@ impl<'a> ForkFunctionCache<'a> {
         }
     }
 
-    pub fn new() -> Self {
+    pub(super) fn new() -> Self {
         Self {
             function_cache: HashMap::new(),
         }

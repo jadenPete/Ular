@@ -1,7 +1,7 @@
 use std::fmt::{Debug, Formatter};
 
-pub struct NumberMap<A> {
-    pub offset: usize,
+pub(crate) struct NumberMap<A> {
+    offset: usize,
     values: Vec<Option<A>>,
 }
 
@@ -19,17 +19,17 @@ impl<A> NumberMap<A> {
         }
     }
 
-    pub fn contains_key(&self, key: usize) -> bool {
+    pub(crate) fn contains_key(&self, key: usize) -> bool {
         key - self.offset < self.values.len() && self.values[key - self.offset].is_some()
     }
 
-    pub fn get(&self, key: usize) -> Option<&A> {
+    pub(crate) fn get(&self, key: usize) -> Option<&A> {
         self.values
             .get(key - self.offset)
             .and_then(|value| value.as_ref())
     }
 
-    pub fn get_mut(&mut self, key: usize) -> Option<&mut A> {
+    pub(crate) fn get_mut(&mut self, key: usize) -> Option<&mut A> {
         let offset = self.offset;
 
         self.values
@@ -37,14 +37,18 @@ impl<A> NumberMap<A> {
             .and_then(|value| value.as_mut())
     }
 
-    pub fn get_or_insert_with<F: FnOnce() -> A>(&mut self, key: usize, default: F) -> &mut A {
+    pub(crate) fn get_or_insert_with<F: FnOnce() -> A>(
+        &mut self,
+        key: usize,
+        default: F,
+    ) -> &mut A {
         let offset = self.offset;
 
         self.ensure_defined(key);
         self.values[key - offset].get_or_insert_with(default)
     }
 
-    pub fn insert(&mut self, key: usize, value: A) -> &mut A {
+    pub(crate) fn insert(&mut self, key: usize, value: A) -> &mut A {
         let offset = self.offset;
 
         self.ensure_defined(key);
@@ -60,7 +64,7 @@ impl<A> NumberMap<A> {
     /// in order to set `IntoIter` to `impl Iterator<Item = (usize, A)>`.
     ///
     /// See [the tracking issue](https://github.com/rust-lang/rust/issues/63063) for more information.
-    pub fn into_iter(self) -> impl Iterator<Item = (usize, A)> {
+    pub(crate) fn into_iter(self) -> impl Iterator<Item = (usize, A)> {
         let offset = self.offset;
 
         self.values
@@ -69,7 +73,7 @@ impl<A> NumberMap<A> {
             .flat_map(move |(i, value)| value.map(|value| (i + offset, value)))
     }
 
-    pub fn into_contiguous_values(
+    pub(crate) fn into_contiguous_values(
         self,
         expected_length: usize,
     ) -> Result<Vec<A>, IndexUndefinedError> {
@@ -92,21 +96,21 @@ impl<A> NumberMap<A> {
         Ok(result)
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = (usize, &A)> {
+    pub(crate) fn iter(&self) -> impl Iterator<Item = (usize, &A)> {
         self.values
             .iter()
             .enumerate()
             .flat_map(|(i, value)| value.as_ref().map(|value| (i + self.offset, value)))
     }
 
-    pub fn new(offset: usize) -> Self {
+    pub(crate) fn new(offset: usize) -> Self {
         Self {
             offset,
             values: Vec::new(),
         }
     }
 
-    pub fn values(&self) -> impl Iterator<Item = &A> {
+    pub(crate) fn values(&self) -> impl Iterator<Item = &A> {
         self.values.iter().flatten()
     }
 }
@@ -125,6 +129,6 @@ impl<A> Extend<(usize, A)> for NumberMap<A> {
     }
 }
 
-pub struct IndexUndefinedError {
-    pub index: usize,
+pub(crate) struct IndexUndefinedError {
+    pub(crate) index: usize,
 }

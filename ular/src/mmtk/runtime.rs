@@ -100,7 +100,7 @@ thread_local! {
     });
 }
 
-pub struct ObjectDescriptorStoreAlreadySetError;
+pub(crate) struct ObjectDescriptorStoreAlreadySetError;
 
 impl Debug for ObjectDescriptorStoreAlreadySetError {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
@@ -108,7 +108,7 @@ impl Debug for ObjectDescriptorStoreAlreadySetError {
     }
 }
 
-pub struct StackMapAlreadySetError;
+pub(crate) struct StackMapAlreadySetError;
 
 impl Debug for StackMapAlreadySetError {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
@@ -140,15 +140,15 @@ fn get_mmtk() -> &'static MMTK<UlarVM> {
         .expect("MMTK is not initialized. Please call `mmtk_init` first.")
 }
 
-pub fn is_mutator(thread: VMThread) -> bool {
+pub(super) fn is_mutator(thread: VMThread) -> bool {
     MUTATORS.contains_key(&thread.0.to_address().as_usize())
 }
 
-pub extern "C" fn mmtk_bind_current_mutator() {
+pub(crate) extern "C" fn mmtk_bind_current_mutator() {
     mmtk_bind_mutator(std::thread::current());
 }
 
-pub fn mmtk_bind_mutator(thread: Thread) {
+pub(crate) fn mmtk_bind_mutator(thread: Thread) {
     static MMTK_THREAD_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
     let mutator_key = MMTK_THREAD_COUNTER.fetch_add(1, Ordering::Relaxed);
@@ -175,7 +175,7 @@ pub fn mmtk_bind_mutator(thread: Thread) {
     MUTATORS.insert(mutator_key, UlarMutator { mutator, thread });
 }
 
-pub extern "C" fn mmtk_alloc(size: usize, align: usize) -> Address {
+pub(crate) extern "C" fn mmtk_alloc(size: usize, align: usize) -> Address {
     mmtk_maybe_pause_at_safepoint();
     with_current_mutator(|mutator| {
         let adjusted_align = align.max(UlarVM::MIN_ALIGNMENT);
@@ -212,7 +212,7 @@ pub extern "C" fn mmtk_alloc(size: usize, align: usize) -> Address {
     })
 }
 
-pub fn mmtk_copy_object(
+pub(super) fn mmtk_copy_object(
     from: ObjectReference,
     semantics: CopySemantics,
     copy_context: &mut GCWorkerCopyContext<UlarVM>,
@@ -250,7 +250,7 @@ pub fn mmtk_copy_object(
 /// - [region] must be valid for writes of the size of the object referenced by [from]
 /// - [region] must be aligned to store objects of the type contained in [from]
 /// - [region] must not overlap with the object referenced by [from]
-pub unsafe fn mmtk_copy_object_to(from: ObjectReference, region: Address) -> Address {
+pub(super) unsafe fn mmtk_copy_object_to(from: ObjectReference, region: Address) -> Address {
     let from_address = from.to_raw_address();
     let size = mmtk_get_object_size(from);
 
@@ -261,16 +261,16 @@ pub unsafe fn mmtk_copy_object_to(from: ObjectReference, region: Address) -> Add
     from_address + size
 }
 
-pub fn mmtk_get_object_align(object: ObjectReference) -> usize {
+pub(super) fn mmtk_get_object_align(object: ObjectReference) -> usize {
     get_object_descriptor(object).align()
 }
 
-pub fn mmtk_get_object_size(object: ObjectReference) -> usize {
+pub(super) fn mmtk_get_object_size(object: ObjectReference) -> usize {
     // SAFETY: We assume the object descriptor is valid
     unsafe { get_object_descriptor(object).get_size(object) }
 }
 
-pub extern "C" fn mmtk_init(plan: GarbageCollectionPlan) {
+pub(crate) extern "C" fn mmtk_init(plan: GarbageCollectionPlan) {
     let mut mmtk_builder = MMTKBuilder::new();
 
     mmtk_builder.options.plan.set(plan.into());
@@ -363,7 +363,7 @@ pub fn mmtk_scan_object<A: SlotVisitor<SimpleSlot>>(object: ObjectReference, slo
     }
 }
 
-pub fn mmtk_set_object_descriptor_store(
+pub(crate) fn mmtk_set_object_descriptor_store(
     store: ObjectDescriptorStore,
 ) -> Result<(), ObjectDescriptorStoreAlreadySetError> {
     OBJECT_DESCRIPTOR_STORE
@@ -371,7 +371,7 @@ pub fn mmtk_set_object_descriptor_store(
         .map_err(|_| ObjectDescriptorStoreAlreadySetError)
 }
 
-pub fn mmtk_spawn_gc_thread(context: GCThreadContext<UlarVM>) {
+pub(super) fn mmtk_spawn_gc_thread(context: GCThreadContext<UlarVM>) {
     match context {
         GCThreadContext::Worker(worker) => std::thread::spawn(|| {
             let thread = worker.tls;
@@ -381,7 +381,9 @@ pub fn mmtk_spawn_gc_thread(context: GCThreadContext<UlarVM>) {
     };
 }
 
-pub fn mmtk_set_stack_map(stack_map: IndexableStackMap) -> Result<(), StackMapAlreadySetError> {
+pub(crate) fn mmtk_set_stack_map(
+    stack_map: IndexableStackMap,
+) -> Result<(), StackMapAlreadySetError> {
     STACK_MAP
         .set(RwLock::new(stack_map))
         .map_err(|_| StackMapAlreadySetError)
@@ -419,7 +421,7 @@ pub fn mmtk_pause_all_mutators<A: FnMut(&'static mut Mutator<UlarVM>)>(mut mutat
     }
 }
 
-pub fn number_of_mutators() -> usize {
+pub(super) fn number_of_mutators() -> usize {
     MUTATORS.len()
 }
 
@@ -532,7 +534,7 @@ fn with_current_mutator<A, B: FnOnce(&Mutator<UlarVM>) -> A>(callback: B) -> A {
     })
 }
 
-pub fn with_mutator<A, B: FnOnce(&Mutator<UlarVM>) -> A>(
+pub(super) fn with_mutator<A, B: FnOnce(&Mutator<UlarVM>) -> A>(
     thread: VMMutatorThread,
     callback: B,
 ) -> A {
@@ -549,7 +551,7 @@ pub fn with_mutator<A, B: FnOnce(&Mutator<UlarVM>) -> A>(
         })
 }
 
-pub fn with_mutators<A, B: FnOnce(Box<dyn Iterator<Item = &Mutator<UlarVM>> + '_>) -> A>(
+pub(super) fn with_mutators<A, B: FnOnce(Box<dyn Iterator<Item = &Mutator<UlarVM>> + '_>) -> A>(
     callback: B,
 ) -> A {
     callback(Box::new(

@@ -17,7 +17,7 @@ struct StackMapSection {
 }
 
 #[derive(Debug)]
-pub struct UlarMemoryManager {
+pub(super) struct UlarMemoryManager {
     capacity: usize,
     code_buffer: *mut u8,
     code_buffer_offset: usize,
@@ -34,7 +34,7 @@ impl UlarMemoryManager {
     /// After calling [UlarMemoryManager::destroy], none of the pointers returned by
     /// [UlarMemoryManager::allocate_code_section] or [UlarMemoryManager::allocate_data_section] must
     /// be read from or written to.
-    pub unsafe fn new(print_stack_map: bool) -> Self {
+    pub(super) unsafe fn new(print_stack_map: bool) -> Self {
         let capacity = 1024 * 128;
 
         // SAFETY: All of the requirements of calling `mmap` have been satisfied

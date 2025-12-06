@@ -3,7 +3,7 @@ use dashmap::Equivalent;
 use std::hash::Hash;
 
 #[derive(Eq, Hash, PartialEq)]
-pub enum BuiltInPath<'a> {
+pub(crate) enum BuiltInPath<'a> {
     Identifier(&'a str),
     Method(&'a str, &'a str),
 }
@@ -26,12 +26,12 @@ impl Equivalent<BuiltInPathBuf> for BuiltInPath<'_> {
 }
 
 #[derive(Debug, Clone, Eq, Hash, PartialEq)]
-pub enum BuiltInPathBuf {
+pub(crate) enum BuiltInPathBuf {
     Identifier(String),
     Method(String, String),
 }
 
-pub trait BuiltInValueProducer {
+pub(crate) trait BuiltInValueProducer {
     type Value;
 
     fn get_println_bool(&self, name: &str) -> Self::Value;
@@ -41,23 +41,26 @@ pub trait BuiltInValueProducer {
     fn get_false(&self, name: &str) -> Self::Value;
 }
 
-pub struct BuiltInValues<A: BuiltInValueProducer> {
+pub(crate) struct BuiltInValues<A: BuiltInValueProducer> {
     values_by_path: hashbrown::HashMap<BuiltInPathBuf, A::Value>,
 }
 
 impl<A: BuiltInValueProducer> BuiltInValues<A> {
-    pub fn get<Path: Equivalent<BuiltInPathBuf> + Hash>(&self, path: &Path) -> Option<&A::Value> {
+    pub(crate) fn get<Path: Equivalent<BuiltInPathBuf> + Hash>(
+        &self,
+        path: &Path,
+    ) -> Option<&A::Value> {
         self.values_by_path.get(path)
     }
 
-    pub fn get_mut<Path: Equivalent<BuiltInPathBuf> + Hash>(
+    pub(crate) fn get_mut<Path: Equivalent<BuiltInPathBuf> + Hash>(
         &mut self,
         path: &Path,
     ) -> Option<&mut A::Value> {
         self.values_by_path.get_mut(path)
     }
 
-    pub fn new<AdditionalValues: IntoIterator<Item = (String, A::Value)>>(
+    pub(crate) fn new<AdditionalValues: IntoIterator<Item = (String, A::Value)>>(
         built_in_values: A,
         additional_values: AdditionalValues,
     ) -> Self {

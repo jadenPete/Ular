@@ -10,16 +10,18 @@ use std::fmt::{Debug, Formatter};
 /// The object descriptor reference for string literals.
 ///
 /// See [crate::mmtk::UlarObjectModel] to understand why we create object descriptors for strings.
-pub const STRING_LITERAL_DESCRIPTOR_INDEX: ObjectDescriptorReference = ObjectDescriptorReference(0);
+pub(crate) const STRING_LITERAL_DESCRIPTOR_INDEX: ObjectDescriptorReference =
+    ObjectDescriptorReference(0);
 
 /// The object descriptor reference for allocated strings.
 ///
 /// See [crate::mmtk::UlarObjectModel] to understand why we create object descriptors for strings.
-pub const STRING_ALLOCATED_DESCRIPTOR_INDEX: ObjectDescriptorReference =
+#[allow(dead_code)]
+pub(crate) const STRING_ALLOCATED_DESCRIPTOR_INDEX: ObjectDescriptorReference =
     ObjectDescriptorReference(1);
 
 #[derive(Clone, Debug)]
-pub enum ObjectDescriptor {
+pub(crate) enum ObjectDescriptor {
     Struct {
         inner_references: Vec<ObjectInnerReference>,
         size: usize,
@@ -34,7 +36,7 @@ pub enum ObjectDescriptor {
 }
 
 impl ObjectDescriptor {
-    pub fn align(&self) -> usize {
+    pub(crate) fn align(&self) -> usize {
         match self {
             Self::Struct { align, .. } => *align,
             Self::String { align, .. } => *align,
@@ -47,7 +49,7 @@ impl ObjectDescriptor {
     ///
     /// If the object's size isn't fixed, the length of its payload must actually be located at the
     /// offset referenced in `length_field_offset`.
-    pub unsafe fn get_size(&self, object: ObjectReference) -> usize {
+    pub(crate) unsafe fn get_size(&self, object: ObjectReference) -> usize {
         match self {
             Self::Struct { size, .. } => *size,
             Self::String {
@@ -62,7 +64,7 @@ impl ObjectDescriptor {
         }
     }
 
-    pub fn inner_references(&self) -> &[ObjectInnerReference] {
+    pub(crate) fn inner_references(&self) -> &[ObjectInnerReference] {
         match self {
             Self::Struct {
                 inner_references, ..
@@ -74,10 +76,10 @@ impl ObjectDescriptor {
 }
 
 #[derive(Clone, Copy, Eq, PartialEq)]
-pub struct ObjectDescriptorReference(pub u32);
+pub(crate) struct ObjectDescriptorReference(pub(crate) u32);
 
 impl ObjectDescriptorReference {
-    pub fn is_allocated(self) -> bool {
+    pub(crate) fn is_allocated(self) -> bool {
         // All structs are currently allocated on the heap, and so are strings produced at runtime.
         // Therefore, the only non-allocated objects are string literals.
         self != STRING_LITERAL_DESCRIPTOR_INDEX
@@ -91,17 +93,17 @@ impl Debug for ObjectDescriptorReference {
 }
 
 #[derive(Debug)]
-pub struct ObjectDescriptorStore {
+pub(crate) struct ObjectDescriptorStore {
     descriptors: Vec<ObjectDescriptor>,
     references_by_struct_index: NumberMap<ObjectDescriptorReference>,
 }
 
 impl ObjectDescriptorStore {
-    pub fn get_descriptor(&self, reference: ObjectDescriptorReference) -> &ObjectDescriptor {
+    pub(crate) fn get_descriptor(&self, reference: ObjectDescriptorReference) -> &ObjectDescriptor {
         &self.descriptors[reference.0 as usize]
     }
 
-    pub fn get_or_set_descriptor_for_struct(
+    pub(crate) fn get_or_set_descriptor_for_struct(
         &mut self,
         program: &AnalyzedProgram,
         struct_types: &[StructType],
@@ -169,7 +171,7 @@ impl ObjectDescriptorStore {
         Ok(reference)
     }
 
-    pub fn new(context: &Context, target_data: &TargetData) -> Self {
+    pub(crate) fn new(context: &Context, target_data: &TargetData) -> Self {
         // In order to figure out:
         // - The offset of the string length field
         // - The alignment of string structs
@@ -209,9 +211,9 @@ impl ObjectDescriptorStore {
 }
 
 #[derive(Clone, Debug)]
-pub struct ObjectInnerReference {
-    pub offset: usize,
-    pub descriptor: ObjectDescriptorReference,
+pub(crate) struct ObjectInnerReference {
+    pub(crate) offset: usize,
+    pub(crate) descriptor: ObjectDescriptorReference,
 }
 
 #[derive(Clone, Debug)]

@@ -17,7 +17,7 @@ use std::fmt::{Debug, Display};
 use ular_derive::{AnalyzerTyped, Node};
 
 #[derive(Clone, Debug)]
-pub enum AnalyzedType {
+pub(crate) enum AnalyzedType {
     Bool,
     Struct(usize),
     Function(AnalyzedFunctionType),
@@ -27,7 +27,7 @@ pub enum AnalyzedType {
 }
 
 impl AnalyzedType {
-    pub fn debug<'a, A: FnMut(usize) -> &'a AnalyzedStructDefinition + Copy>(
+    pub(crate) fn debug<'a, A: FnMut(usize) -> &'a AnalyzedStructDefinition + Copy>(
         &self,
         struct_definition: A,
     ) -> impl Debug {
@@ -63,14 +63,14 @@ impl AnalyzedType {
         }
     }
 
-    pub fn display<'a, A: FnMut(usize) -> &'a AnalyzedStructDefinition + Copy>(
+    pub(crate) fn display<'a, A: FnMut(usize) -> &'a AnalyzedStructDefinition + Copy>(
         &self,
         struct_definition: A,
     ) -> impl Display {
         self.debug_display_underlying(struct_definition)
     }
 
-    pub fn inkwell_type<'a>(&self, context: &'a Context) -> Option<BasicTypeEnum<'a>> {
+    pub(crate) fn inkwell_type<'a>(&self, context: &'a Context) -> Option<BasicTypeEnum<'a>> {
         match self {
             Self::Bool => Some(BasicTypeEnum::IntType(context.i8_type())),
             Self::Struct(_) | Self::Str => Some(BasicTypeEnum::PointerType(
@@ -89,13 +89,13 @@ impl AnalyzedType {
 }
 
 #[derive(Clone, Debug)]
-pub struct AnalyzedFunctionType {
-    pub parameters: Vec<AnalyzedType>,
-    pub return_type: Box<AnalyzedType>,
+pub(crate) struct AnalyzedFunctionType {
+    pub(crate) parameters: Vec<AnalyzedType>,
+    pub(crate) return_type: Box<AnalyzedType>,
 }
 
 impl AnalyzedFunctionType {
-    pub fn inkwell_type<'a>(
+    pub(crate) fn inkwell_type<'a>(
         &self,
         context: &'a Context,
     ) -> Option<inkwell::types::FunctionType<'a>> {
@@ -117,7 +117,7 @@ impl AnalyzedFunctionType {
     }
 }
 
-pub trait AnalyzerTyped {
+pub(crate) trait AnalyzerTyped {
     fn get_type(&self) -> AnalyzedType;
 }
 
@@ -128,48 +128,48 @@ impl AnalyzerTyped for StringLiteral {
 }
 
 #[derive(Debug, Node)]
-pub struct AnalyzedProgram {
-    pub string_literals: Vec<String>,
-    pub structs: Vec<AnalyzedStructDefinition>,
-    pub functions: Vec<AnalyzedFunctionDefinition>,
-    pub expression_graph: DirectedGraph<AnalyzedExpression>,
-    pub position: Position,
+pub(crate) struct AnalyzedProgram {
+    pub(crate) string_literals: Vec<String>,
+    pub(crate) structs: Vec<AnalyzedStructDefinition>,
+    pub(crate) functions: Vec<AnalyzedFunctionDefinition>,
+    pub(crate) expression_graph: DirectedGraph<AnalyzedExpression>,
+    pub(crate) position: Position,
 }
 
 #[derive(Debug, Node)]
-pub struct AnalyzedStructDefinition {
-    pub name: Identifier,
-    pub fields: Vec<AnalyzedStructDefinitionField>,
-    pub methods: Vec<AnalyzedFunctionDefinition>,
-    pub position: Position,
+pub(crate) struct AnalyzedStructDefinition {
+    pub(crate) name: Identifier,
+    pub(crate) fields: Vec<AnalyzedStructDefinitionField>,
+    pub(crate) methods: Vec<AnalyzedFunctionDefinition>,
+    pub(crate) position: Position,
 }
 
 #[derive(Debug, Node)]
-pub struct AnalyzedStructDefinitionField {
-    pub name: Identifier,
-    pub type_: AnalyzedType,
-    pub position: Position,
+pub(crate) struct AnalyzedStructDefinitionField {
+    pub(crate) name: Identifier,
+    pub(crate) type_: AnalyzedType,
+    pub(crate) position: Position,
 }
 
 #[derive(Debug, Node)]
-pub struct AnalyzedFunctionDefinition {
-    pub name: Identifier,
-    pub parameters: Vec<AnalyzedParameter>,
-    pub body: AnalyzedBlock,
-    pub type_: AnalyzedFunctionType,
-    pub position: Position,
+pub(crate) struct AnalyzedFunctionDefinition {
+    pub(crate) name: Identifier,
+    pub(crate) parameters: Vec<AnalyzedParameter>,
+    pub(crate) body: AnalyzedBlock,
+    pub(crate) type_: AnalyzedFunctionType,
+    pub(crate) position: Position,
 }
 
 #[derive(Debug, Node)]
-pub struct AnalyzedParameter {
+pub(crate) struct AnalyzedParameter {
     #[allow(dead_code)]
-    pub name: String,
-    pub type_: AnalyzedType,
-    pub position: Position,
+    pub(crate) name: String,
+    pub(crate) type_: AnalyzedType,
+    pub(crate) position: Position,
 }
 
 #[derive(AnalyzerTyped, Debug, Node)]
-pub enum AnalyzedExpression {
+pub(crate) enum AnalyzedExpression {
     If(AnalyzedIf),
     InfixOperation(AnalyzedInfixOperation),
     Select(AnalyzedSelect),
@@ -180,71 +180,71 @@ pub enum AnalyzedExpression {
 }
 
 #[derive(AnalyzerTyped, Debug, Node)]
-pub struct AnalyzedIf {
-    pub condition: AnalyzedExpressionRef,
-    pub then_block: AnalyzedBlock,
-    pub else_block: AnalyzedBlock,
-    pub type_: AnalyzedType,
-    pub position: Position,
+pub(crate) struct AnalyzedIf {
+    pub(crate) condition: AnalyzedExpressionRef,
+    pub(crate) then_block: AnalyzedBlock,
+    pub(crate) else_block: AnalyzedBlock,
+    pub(crate) type_: AnalyzedType,
+    pub(crate) position: Position,
 }
 
 #[derive(Debug, Node)]
-pub struct AnalyzedBlock {
-    pub expression_graph: DirectedGraph<AnalyzedExpression>,
-    pub result: Option<AnalyzedExpressionRef>,
-    pub position: Position,
+pub(crate) struct AnalyzedBlock {
+    pub(crate) expression_graph: DirectedGraph<AnalyzedExpression>,
+    pub(crate) result: Option<AnalyzedExpressionRef>,
+    pub(crate) position: Position,
 }
 
 #[derive(AnalyzerTyped, Debug, Node)]
-pub struct AnalyzedInfixOperation {
-    pub left: AnalyzedExpressionRef,
-    pub operator: InfixOperator,
-    pub right: AnalyzedExpressionRef,
-    pub type_: AnalyzedType,
-    pub position: Position,
+pub(crate) struct AnalyzedInfixOperation {
+    pub(crate) left: AnalyzedExpressionRef,
+    pub(crate) operator: InfixOperator,
+    pub(crate) right: AnalyzedExpressionRef,
+    pub(crate) type_: AnalyzedType,
+    pub(crate) position: Position,
 }
 
 #[derive(AnalyzerTyped, Debug, Node)]
-pub struct AnalyzedPrefixOperation {
-    pub operator: SimplePrefixOperator,
-    pub expression: AnalyzedExpressionRef,
-    pub type_: AnalyzedType,
-    pub position: Position,
+pub(crate) struct AnalyzedPrefixOperation {
+    pub(crate) operator: SimplePrefixOperator,
+    pub(crate) expression: AnalyzedExpressionRef,
+    pub(crate) type_: AnalyzedType,
+    pub(crate) position: Position,
 }
 
 #[derive(AnalyzerTyped, Debug, Node)]
-pub struct AnalyzedSelect {
-    pub left_hand_side: AnalyzedExpressionRef,
-    pub field_index: usize,
-    pub type_: AnalyzedType,
-    pub position: Position,
+pub(crate) struct AnalyzedSelect {
+    pub(crate) left_hand_side: AnalyzedExpressionRef,
+    pub(crate) field_index: usize,
+    pub(crate) type_: AnalyzedType,
+    pub(crate) position: Position,
 }
 
 #[derive(AnalyzerTyped, Debug, Node)]
-pub struct AnalyzedCall {
-    pub function: AnalyzedExpressionRef,
-    pub arguments: Vec<AnalyzedExpressionRef>,
-    pub type_: AnalyzedType,
-    pub position: Position,
+pub(crate) struct AnalyzedCall {
+    pub(crate) function: AnalyzedExpressionRef,
+    pub(crate) arguments: Vec<AnalyzedExpressionRef>,
+    pub(crate) type_: AnalyzedType,
+    pub(crate) position: Position,
 }
 
 #[derive(AnalyzerTyped, Debug, Node)]
-pub struct AnalyzedStructApplication {
-    pub struct_index: usize,
-    pub fields: Vec<AnalyzedStructApplicationField>,
-    pub type_: AnalyzedType,
-    pub position: Position,
+pub(crate) struct AnalyzedStructApplication {
+    pub(crate) struct_index: usize,
+    pub(crate) fields: Vec<AnalyzedStructApplicationField>,
+    pub(crate) type_: AnalyzedType,
+    pub(crate) position: Position,
 }
 
 #[derive(Debug, Node)]
-pub struct AnalyzedStructApplicationField {
-    pub name: String,
-    pub value: AnalyzedExpressionRef,
-    pub position: Position,
+pub(crate) struct AnalyzedStructApplicationField {
+    pub(crate) name: String,
+    pub(crate) value: AnalyzedExpressionRef,
+    pub(crate) position: Position,
 }
 
 #[derive(AnalyzerTyped, Debug, Clone, Node)]
-pub enum AnalyzedExpressionRef {
+pub(crate) enum AnalyzedExpressionRef {
     BuiltIn {
         path: BuiltInPathBuf,
         type_: AnalyzedType,
@@ -281,10 +281,10 @@ pub enum AnalyzedExpressionRef {
 }
 
 #[derive(Clone, Debug, Node)]
-pub struct AnalyzedNumber {
-    pub value: i128,
-    pub type_: NumericType,
-    pub position: Position,
+pub(crate) struct AnalyzedNumber {
+    pub(crate) value: i128,
+    pub(crate) type_: NumericType,
+    pub(crate) position: Position,
 }
 
 impl AnalyzerTyped for AnalyzedNumber {
@@ -294,9 +294,9 @@ impl AnalyzerTyped for AnalyzedNumber {
 }
 
 #[derive(Clone, Debug, Node)]
-pub struct AnalyzedStringLiteral {
-    pub index: usize,
-    pub position: Position,
+pub(crate) struct AnalyzedStringLiteral {
+    pub(crate) index: usize,
+    pub(crate) position: Position,
 }
 
 impl AnalyzerTyped for AnalyzedStringLiteral {
@@ -306,8 +306,8 @@ impl AnalyzerTyped for AnalyzedStringLiteral {
 }
 
 #[derive(Clone, Debug, Node)]
-pub struct AnalyzedUnit {
-    pub position: Position,
+pub(crate) struct AnalyzedUnit {
+    pub(crate) position: Position,
 }
 
 impl AnalyzerTyped for AnalyzedUnit {
@@ -317,7 +317,7 @@ impl AnalyzerTyped for AnalyzedUnit {
 }
 
 impl AnalyzedExpressionRef {
-    pub fn for_expression<A: AnalyzerTyped + Node>(i: usize, expression: &A) -> Self {
+    pub(super) fn for_expression<A: AnalyzerTyped + Node>(i: usize, expression: &A) -> Self {
         Self::Expression {
             index: i,
             type_: expression.get_type(),
@@ -325,7 +325,7 @@ impl AnalyzedExpressionRef {
         }
     }
 
-    pub fn with_position(&self, position: Position) -> Self {
+    pub(super) fn with_position(&self, position: Position) -> Self {
         match self {
             Self::BuiltIn { path, type_, .. } => Self::BuiltIn {
                 path: path.clone(),

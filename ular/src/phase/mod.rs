@@ -1,4 +1,4 @@
-pub mod built_in_values;
+pub(crate) mod built_in_values;
 
 use crate::{
     arguments::{Arguments, PhaseName},
@@ -7,7 +7,7 @@ use crate::{
 use log::warn;
 use std::fmt::Debug;
 
-pub trait Phase<Input> {
+pub(crate) trait Phase<Input> {
     type Output: Debug;
 
     fn name() -> PhaseName;

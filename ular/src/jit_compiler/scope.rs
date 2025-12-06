@@ -19,16 +19,16 @@ use std::{
     fmt::{Display, Formatter},
 };
 
-pub struct JitCompilerScope<'a, 'context> {
+pub(super) struct JitCompilerScope<'a, 'context> {
     parent: Option<&'a JitCompilerScope<'a, 'context>>,
     parameter_values: Option<&'a [UlarValue<'context>]>,
     next_local_name: LocalName,
     expression_values: NumberMap<UlarValue<'context>>,
-    pub worker: PointerValue<'context>,
+    pub(super) worker: PointerValue<'context>,
 }
 
 impl<'a, 'context> JitCompilerScope<'a, 'context> {
-    pub fn get_local_name(&mut self) -> LocalName {
+    pub(super) fn get_local_name(&mut self) -> LocalName {
         let result = self.next_local_name;
 
         self.next_local_name.0 += 1;
@@ -37,7 +37,7 @@ impl<'a, 'context> JitCompilerScope<'a, 'context> {
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub fn get(
+    pub(super) fn get(
         &self,
         reference: &AnalyzedExpressionRef,
         local_name: LocalName,
@@ -109,11 +109,14 @@ impl<'a, 'context> JitCompilerScope<'a, 'context> {
             .or_else(|| self.parent.and_then(|parent| parent.get_expression(i)))
     }
 
-    pub fn set_expression(&mut self, i: usize, value: UlarValue<'context>) {
+    pub(super) fn set_expression(&mut self, i: usize, value: UlarValue<'context>) {
         self.expression_values.insert(i, value);
     }
 
-    pub fn with_child_same_function<A: FnOnce(&mut JitCompilerScope<'_, 'context>) -> B, B>(
+    pub(super) fn with_child_same_function<
+        A: FnOnce(&mut JitCompilerScope<'_, 'context>) -> B,
+        B,
+    >(
         &mut self,
         offset: usize,
         callback: A,
@@ -128,7 +131,7 @@ impl<'a, 'context> JitCompilerScope<'a, 'context> {
         result
     }
 
-    pub fn new_with_parent(
+    pub(super) fn new_with_parent(
         parent: &'a JitCompilerScope<'a, 'context>,
         parameter_values: Option<&'a [UlarValue<'context>]>,
         offset: usize,
@@ -143,7 +146,7 @@ impl<'a, 'context> JitCompilerScope<'a, 'context> {
         }
     }
 
-    pub fn new_without_parent(
+    pub(super) fn new_without_parent(
         parameter_values: Option<&'a [UlarValue<'context>]>,
         worker: PointerValue<'context>,
     ) -> Self {
@@ -157,10 +160,10 @@ impl<'a, 'context> JitCompilerScope<'a, 'context> {
     }
 }
 
-pub struct JitCompilerScopeContext<'a> {
-    pub function_values: Vec<FunctionValue<'a>>,
-    pub string_values: Vec<UlarValue<'a>>,
-    pub struct_method_values: Vec<Vec<FunctionValue<'a>>>,
+pub(super) struct JitCompilerScopeContext<'a> {
+    pub(super) function_values: Vec<FunctionValue<'a>>,
+    pub(super) string_values: Vec<UlarValue<'a>>,
+    pub(super) struct_method_values: Vec<Vec<FunctionValue<'a>>>,
 }
 
 #[derive(Clone, Copy, Eq, Hash, PartialEq)]

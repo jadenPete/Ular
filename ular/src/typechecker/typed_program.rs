@@ -9,7 +9,7 @@ use crate::{
 };
 use ular_derive::{Node, Typed};
 
-pub trait Typed {
+pub(crate) trait Typed {
     fn get_type(&self) -> Type;
 }
 
@@ -20,13 +20,13 @@ impl Typed for StringLiteral {
 }
 
 #[derive(Debug, Node)]
-pub struct TypedProgram {
-    pub statements: Vec<TypedStatement>,
-    pub position: Position,
+pub(crate) struct TypedProgram {
+    pub(crate) statements: Vec<TypedStatement>,
+    pub(crate) position: Position,
 }
 
 #[derive(Clone, Debug, Node)]
-pub enum TypedStatement {
+pub(crate) enum TypedStatement {
     StructDefinition(TypedStructDefinition),
     VariableDefinition(TypedVariableDefinition),
     FunctionDefinition(TypedFunctionDefinition),
@@ -35,31 +35,31 @@ pub enum TypedStatement {
 }
 
 #[derive(Clone, Debug, Node)]
-pub struct TypedStructDefinition {
-    pub name: Identifier,
-    pub fields: Vec<StructDefinitionField>,
-    pub methods: Vec<TypedFunctionDefinition>,
-    pub position: Position,
+pub(crate) struct TypedStructDefinition {
+    pub(crate) name: Identifier,
+    pub(crate) fields: Vec<StructDefinitionField>,
+    pub(crate) methods: Vec<TypedFunctionDefinition>,
+    pub(crate) position: Position,
 }
 
 #[derive(Clone, Debug, Node)]
-pub struct TypedVariableDefinition {
-    pub name: Identifier,
-    pub value: Box<TypedExpression>,
-    pub position: Position,
+pub(crate) struct TypedVariableDefinition {
+    pub(crate) name: Identifier,
+    pub(crate) value: Box<TypedExpression>,
+    pub(crate) position: Position,
 }
 
 #[derive(Clone, Debug, Node)]
-pub struct TypedFunctionDefinition {
-    pub name: Identifier,
-    pub parameters: Vec<TypedIdentifier>,
-    pub body: TypedBlock,
-    pub type_: FunctionType,
-    pub position: Position,
+pub(crate) struct TypedFunctionDefinition {
+    pub(crate) name: Identifier,
+    pub(crate) parameters: Vec<TypedIdentifier>,
+    pub(crate) body: TypedBlock,
+    pub(crate) type_: FunctionType,
+    pub(crate) position: Position,
 }
 
 #[derive(Clone, Debug, Node, Typed)]
-pub enum TypedExpression {
+pub(crate) enum TypedExpression {
     If(TypedIf),
     InfixOperation(TypedInfixOperation),
     Select(TypedSelect),
@@ -74,19 +74,19 @@ pub enum TypedExpression {
 }
 
 #[derive(Clone, Debug, Node, Typed)]
-pub struct TypedIf {
-    pub condition: Box<TypedExpression>,
-    pub then_block: TypedBlock,
-    pub else_block: TypedBlock,
-    pub type_: Type,
-    pub position: Position,
+pub(crate) struct TypedIf {
+    pub(crate) condition: Box<TypedExpression>,
+    pub(crate) then_block: TypedBlock,
+    pub(crate) else_block: TypedBlock,
+    pub(crate) type_: Type,
+    pub(crate) position: Position,
 }
 
 #[derive(Clone, Debug, Node)]
-pub struct TypedBlock {
-    pub statements: Vec<TypedStatement>,
-    pub result: Option<Box<TypedExpression>>,
-    pub position: Position,
+pub(crate) struct TypedBlock {
+    pub(crate) statements: Vec<TypedStatement>,
+    pub(crate) result: Option<Box<TypedExpression>>,
+    pub(crate) position: Position,
 }
 
 impl Typed for TypedBlock {
@@ -99,43 +99,43 @@ impl Typed for TypedBlock {
 }
 
 #[derive(Clone, Debug, Node, Typed)]
-pub struct TypedInfixOperation {
-    pub left: Box<TypedExpression>,
-    pub operator: InfixOperator,
-    pub right: Box<TypedExpression>,
-    pub type_: Type,
-    pub position: Position,
+pub(crate) struct TypedInfixOperation {
+    pub(crate) left: Box<TypedExpression>,
+    pub(crate) operator: InfixOperator,
+    pub(crate) right: Box<TypedExpression>,
+    pub(crate) type_: Type,
+    pub(crate) position: Position,
 }
 
 #[derive(Clone, Debug, Node, Typed)]
-pub struct TypedPrefixOperation {
-    pub operator: SimplePrefixOperator,
-    pub expression: Box<TypedExpression>,
-    pub type_: Type,
-    pub position: Position,
+pub(crate) struct TypedPrefixOperation {
+    pub(crate) operator: SimplePrefixOperator,
+    pub(crate) expression: Box<TypedExpression>,
+    pub(crate) type_: Type,
+    pub(crate) position: Position,
 }
 
 #[derive(Clone, Debug, Node, Typed)]
-pub struct TypedSelect {
-    pub left_hand_side: Box<TypedExpression>,
-    pub field_index: usize,
-    pub type_: Type,
-    pub position: Position,
+pub(crate) struct TypedSelect {
+    pub(crate) left_hand_side: Box<TypedExpression>,
+    pub(crate) field_index: usize,
+    pub(crate) type_: Type,
+    pub(crate) position: Position,
 }
 
 #[derive(Clone, Debug, Node, Typed)]
-pub struct TypedCall {
-    pub function: Box<TypedExpression>,
-    pub arguments: Vec<TypedExpression>,
-    pub type_: Type,
-    pub position: Position,
+pub(crate) struct TypedCall {
+    pub(crate) function: Box<TypedExpression>,
+    pub(crate) arguments: Vec<TypedExpression>,
+    pub(crate) type_: Type,
+    pub(crate) position: Position,
 }
 
 #[derive(Clone, Debug, Node)]
-pub struct TypedStructApplication {
-    pub name: Identifier,
-    pub fields: Vec<TypedStructApplicationField>,
-    pub position: Position,
+pub(crate) struct TypedStructApplication {
+    pub(crate) name: Identifier,
+    pub(crate) fields: Vec<TypedStructApplicationField>,
+    pub(crate) position: Position,
 }
 
 impl Typed for TypedStructApplication {
@@ -145,7 +145,7 @@ impl Typed for TypedStructApplication {
 }
 
 #[derive(Clone, Debug, Node, Typed)]
-pub enum TypedPath {
+pub(crate) enum TypedPath {
     BuiltIn {
         underlying: BuiltInPathBuf,
         type_: Type,
@@ -162,24 +162,24 @@ pub enum TypedPath {
 }
 
 #[derive(Clone, Debug, Node)]
-pub struct TypedStructApplicationField {
-    pub name: Identifier,
-    pub value: Box<TypedExpression>,
-    pub position: Position,
+pub(crate) struct TypedStructApplicationField {
+    pub(crate) name: Identifier,
+    pub(crate) value: Box<TypedExpression>,
+    pub(crate) position: Position,
 }
 
 #[derive(Clone, Debug, Node, Typed)]
-pub struct TypedIdentifier {
-    pub underlying: Identifier,
-    pub type_: Type,
-    pub position: Position,
+pub(crate) struct TypedIdentifier {
+    pub(crate) underlying: Identifier,
+    pub(crate) type_: Type,
+    pub(crate) position: Position,
 }
 
 #[derive(Clone, Debug, Node)]
-pub struct TypedNumber {
-    pub value: i128,
-    pub type_: NumericType,
-    pub position: Position,
+pub(crate) struct TypedNumber {
+    pub(crate) value: i128,
+    pub(crate) type_: NumericType,
+    pub(crate) position: Position,
 }
 
 impl Typed for TypedNumber {
@@ -189,8 +189,8 @@ impl Typed for TypedNumber {
 }
 
 #[derive(Clone, Debug, Node)]
-pub struct TypedUnit {
-    pub position: Position,
+pub(crate) struct TypedUnit {
+    pub(crate) position: Position,
 }
 
 impl Typed for TypedUnit {

@@ -76,7 +76,7 @@ trait CompilableExpression<'a, 'context> {
     fn is_forkable(&self) -> bool;
 }
 
-pub struct ExecutorPhase;
+pub(crate) struct ExecutorPhase;
 
 impl Phase<&CompiledProgram<'_>> for ExecutorPhase {
     type Output = u8;
@@ -203,7 +203,11 @@ impl<'a, 'context: 'a> CompilableExpression<'a, 'context> for CompilableCall<'a>
                 .fork_function_cache
                 .get_or_build(function, compiler.context, compiler.module);
 
-        let fork_function_pointer = fork_function.function.as_global_value().as_pointer_value();
+        let fork_function_pointer = fork_function
+            .function()
+            .as_global_value()
+            .as_pointer_value();
+
         let context = fork_function.build_context(builder, scope, &arguments)?;
 
         let job_pointer_name = scope.get_local_name();
@@ -976,7 +980,7 @@ impl<'context> InlineExpression<'context> for CompilableStructApplication<'_> {
     }
 }
 
-pub struct CompiledProgram<'a> {
+pub(crate) struct CompiledProgram<'a> {
     module: UlarModule<'a>,
     main_harness_function: JitFunction<'a, unsafe extern "C" fn() -> u8>,
 }
@@ -991,11 +995,11 @@ impl Debug for CompiledProgram<'_> {
     }
 }
 
-pub struct JitCompilerPhase<'a> {
-    pub context: &'a Context,
-    pub garbage_collection_plan: GarbageCollectionPlan,
-    pub print_stack_map: bool,
-    pub additional_values: HashMap<String, Box<dyn BuiltInValue<'a> + 'a>>,
+pub(crate) struct JitCompilerPhase<'a> {
+    pub(crate) context: &'a Context,
+    pub(crate) garbage_collection_plan: GarbageCollectionPlan,
+    pub(crate) print_stack_map: bool,
+    pub(crate) additional_values: HashMap<String, Box<dyn BuiltInValue<'a> + 'a>>,
 }
 
 impl<'a> JitCompilerPhase<'a> {

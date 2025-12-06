@@ -1,7 +1,7 @@
 use num::traits::FromBytes;
 use std::collections::HashMap;
 
-pub trait Parseable: Sized {
+pub(crate) trait Parseable: Sized {
     fn parse(section: &[u8]) -> (Self, &[u8]);
 }
 
@@ -16,13 +16,13 @@ impl<const SIZE: usize, Integer: FromBytes<Bytes = [u8; SIZE]>> Parseable for In
 }
 
 #[derive(Debug)]
-pub struct IndexableStackMap {
-    pub constants: Vec<StackMapConstant>,
-    pub records_by_address: HashMap<u64, StackMapRecord>,
+pub(crate) struct IndexableStackMap {
+    pub(crate) constants: Vec<StackMapConstant>,
+    pub(crate) records_by_address: HashMap<u64, StackMapRecord>,
 }
 
 impl IndexableStackMap {
-    pub fn from_stack_map(stack_map: &StackMap) -> Self {
+    pub(crate) fn from_stack_map(stack_map: &StackMap) -> Self {
         let mut result = Self {
             constants: stack_map.constants.clone(),
             records_by_address: HashMap::new(),
@@ -45,10 +45,10 @@ impl IndexableStackMap {
     }
 }
 
-pub struct StackMap {
-    pub functions: Vec<StackMapFunction>,
-    pub constants: Vec<StackMapConstant>,
-    pub records: Vec<StackMapRecord>,
+pub(crate) struct StackMap {
+    pub(crate) functions: Vec<StackMapFunction>,
+    pub(crate) constants: Vec<StackMapConstant>,
+    pub(crate) records: Vec<StackMapRecord>,
 }
 
 impl Parseable for StackMap {
@@ -79,7 +79,7 @@ impl Parseable for StackMap {
 }
 
 #[derive(Clone, Copy, Debug)]
-pub struct StackMapConstant(pub u64);
+pub(crate) struct StackMapConstant(pub(crate) u64);
 
 impl Parseable for StackMapConstant {
     fn parse(section: &[u8]) -> (Self, &[u8]) {
@@ -89,9 +89,9 @@ impl Parseable for StackMapConstant {
     }
 }
 
-pub struct StackMapFunction {
-    pub address: u64,
-    pub record_count: u64,
+pub(crate) struct StackMapFunction {
+    pub(crate) address: u64,
+    pub(crate) record_count: u64,
 }
 
 impl Parseable for StackMapFunction {
@@ -114,7 +114,7 @@ impl Parseable for StackMapFunction {
 }
 
 #[derive(Clone, Debug)]
-pub enum StackMapLocation {
+pub(crate) enum StackMapLocation {
     Register(u16),
     Direct { register: u16, offset: i32 },
     Indirect { register: u16, offset: i32 },
@@ -149,9 +149,9 @@ impl Parseable for StackMapLocation {
 }
 
 #[derive(Clone, Debug)]
-pub struct StackMapRecord {
-    pub instruction_offset: u32,
-    pub locations: Vec<StackMapLocation>,
+pub(crate) struct StackMapRecord {
+    pub(crate) instruction_offset: u32,
+    pub(crate) locations: Vec<StackMapLocation>,
 }
 
 impl Parseable for StackMapRecord {

@@ -96,7 +96,7 @@ use std::{
 /// SELECT = "."
 /// ```
 #[derive(Clone, Debug, PartialEq)]
-pub enum Token {
+pub(crate) enum Token {
     Arrow,
     Comma,
     Definition,
@@ -144,19 +144,19 @@ pub enum Token {
 }
 
 #[derive(Clone, Debug)]
-pub struct PositionedToken {
-    pub token: Token,
-    pub position: Position,
+pub(crate) struct PositionedToken {
+    pub(crate) token: Token,
+    pub(crate) position: Position,
 }
 
 #[derive(Copy, Clone)]
-pub struct Tokens<'a> {
-    pub tokens: &'a [PositionedToken],
-    pub source: &'a str,
+pub(crate) struct Tokens<'a> {
+    pub(crate) tokens: &'a [PositionedToken],
+    pub(crate) source: &'a str,
 }
 
 impl Tokens<'_> {
-    pub fn position(&self) -> Position {
+    pub(crate) fn position(&self) -> Position {
         Position(match (self.tokens.first(), self.tokens.last()) {
             (Some(first_token), Some(last_token)) => {
                 first_token.position.0.start..last_token.position.0.end

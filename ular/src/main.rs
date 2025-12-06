@@ -4,9 +4,7 @@ use log::LevelFilter;
 use simplelog::{ColorChoice, ConfigBuilder, TermLogger, TerminalMode};
 use std::collections::HashMap;
 use std::{io::Read, process::ExitCode};
-use ular::arguments::Arguments;
-use ular::error_reporting::report_error;
-use ular::run_phases;
+use ular::{arguments::Arguments, error_reporting::report_error, run_phases};
 
 fn main() -> std::io::Result<ExitCode> {
     let arguments = Arguments::parse();

@@ -1,4 +1,4 @@
-pub mod token;
+pub(crate) mod token;
 
 use crate::{
     arguments::PhaseName,
@@ -228,7 +228,7 @@ impl InputTakeAtPosition for PositionedSource<'_> {
     }
 }
 
-pub struct LexerPhase;
+pub(crate) struct LexerPhase;
 
 impl Phase<&str> for LexerPhase {
     type Output = Vec<PositionedToken>;

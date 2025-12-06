@@ -1,4 +1,4 @@
-pub mod analyzed_program;
+pub(crate) mod analyzed_program;
 mod scope;
 
 use crate::{
@@ -710,8 +710,8 @@ impl AnalyzerFunctions {
     }
 }
 
-pub struct AnalyzerPhase {
-    pub additional_values: HashMap<String, Type>,
+pub(crate) struct AnalyzerPhase {
+    pub(crate) additional_values: HashMap<String, Type>,
 }
 
 impl Phase<&TypedProgram> for AnalyzerPhase {

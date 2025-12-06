@@ -1,6 +1,6 @@
-pub mod object_descriptor_store;
+pub(crate) mod object_descriptor_store;
 pub mod runtime;
-pub mod stack_map;
+pub(crate) mod stack_map;
 
 use crate::mmtk::runtime::{
     is_mutator, mmtk_copy_object, mmtk_copy_object_to, mmtk_get_object_size,

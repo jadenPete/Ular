@@ -1,6 +1,6 @@
-pub mod built_in_values;
+pub(crate) mod built_in_values;
 mod scope;
-pub mod typed_program;
+pub(crate) mod typed_program;
 
 use crate::{
     arguments::PhaseName,
@@ -773,8 +773,8 @@ impl<'a> Typechecker<'a> {
     }
 }
 
-pub struct TypecheckerPhase {
-    pub additional_values: HashMap<String, Type>,
+pub(crate) struct TypecheckerPhase {
+    pub(crate) additional_values: HashMap<String, Type>,
 }
 
 impl Phase<&SimpleProgram> for TypecheckerPhase {

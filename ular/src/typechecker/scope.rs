@@ -8,20 +8,20 @@ use crate::{
 };
 use std::collections::HashMap;
 
-pub struct IndexableStructDefinition<'a> {
-    pub underlying: &'a SimpleStructDefinition,
-    pub field_indices: HashMap<&'a str, usize>,
-    pub method_indices: HashMap<&'a str, usize>,
+pub(super) struct IndexableStructDefinition<'a> {
+    pub(super) underlying: &'a SimpleStructDefinition,
+    pub(super) field_indices: HashMap<&'a str, usize>,
+    pub(super) method_indices: HashMap<&'a str, usize>,
 }
 
-pub struct TypecheckerScope<'a> {
+pub(super) struct TypecheckerScope<'a> {
     parent: Option<&'a TypecheckerScope<'a>>,
     structs: HashMap<&'a str, IndexableStructDefinition<'a>>,
     variable_types: HashMap<String, Type>,
 }
 
 impl<'a> TypecheckerScope<'a> {
-    pub fn with_parent(parent: &'a TypecheckerScope<'a>) -> Self {
+    pub(super) fn with_parent(parent: &'a TypecheckerScope<'a>) -> Self {
         Self {
             parent: Some(parent),
             structs: HashMap::new(),
@@ -29,7 +29,7 @@ impl<'a> TypecheckerScope<'a> {
         }
     }
 
-    pub fn without_parent() -> Self {
+    pub(super) fn without_parent() -> Self {
         Self {
             parent: None,
             structs: HashMap::new(),
@@ -37,7 +37,7 @@ impl<'a> TypecheckerScope<'a> {
         }
     }
 
-    pub fn declare_and_validate_struct(
+    pub(super) fn declare_and_validate_struct(
         &mut self,
         definition: &'a SimpleStructDefinition,
     ) -> Result<(), CompilationError> {
@@ -92,7 +92,7 @@ impl<'a> TypecheckerScope<'a> {
         }
     }
 
-    pub fn declare_variable(
+    pub(super) fn declare_variable(
         &mut self,
         name: &Identifier,
         type_: Type,
@@ -110,14 +110,14 @@ impl<'a> TypecheckerScope<'a> {
         }
     }
 
-    pub fn get_struct_definition(&self, name: &str) -> Option<&IndexableStructDefinition> {
+    pub(super) fn get_struct_definition(&self, name: &str) -> Option<&IndexableStructDefinition> {
         self.structs.get(name).or_else(|| {
             self.parent
                 .and_then(|parent| parent.get_struct_definition(name))
         })
     }
 
-    pub fn get_variable_type(&self, name: &str) -> Option<Type> {
+    pub(super) fn get_variable_type(&self, name: &str) -> Option<Type> {
         self.variable_types.get(name).cloned().or_else(|| {
             self.parent
                 .and_then(|parent| parent.get_variable_type(name))

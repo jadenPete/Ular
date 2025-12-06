@@ -17,7 +17,7 @@ use crate::{
 };
 use std::collections::HashMap;
 
-pub struct AnalyzerScope<'a> {
+pub(super) struct AnalyzerScope<'a> {
     built_in_values: &'a TypecheckerBuiltInValues,
     parent: Option<&'a AnalyzerScope<'a>>,
     struct_indices: HashMap<String, usize>,
@@ -25,7 +25,7 @@ pub struct AnalyzerScope<'a> {
 }
 
 impl<'a> AnalyzerScope<'a> {
-    pub fn analyze_function_type(
+    pub(super) fn analyze_function_type(
         &self,
         function_type: &FunctionType,
     ) -> Result<AnalyzedFunctionType, CompilationError> {
@@ -40,7 +40,7 @@ impl<'a> AnalyzerScope<'a> {
         })
     }
 
-    pub fn analyze_type(&self, type_: &Type) -> Result<AnalyzedType, CompilationError> {
+    pub(super) fn analyze_type(&self, type_: &Type) -> Result<AnalyzedType, CompilationError> {
         Ok(match type_ {
             Type::Bool => AnalyzedType::Bool,
             Type::Function(function_type) => {
@@ -68,7 +68,11 @@ impl<'a> AnalyzerScope<'a> {
         })
     }
 
-    pub fn declare_struct(&mut self, name: String, context: &mut AnalyzerScopeContext) -> usize {
+    pub(super) fn declare_struct(
+        &mut self,
+        name: String,
+        context: &mut AnalyzerScopeContext,
+    ) -> usize {
         let i = context.struct_count;
 
         context.struct_count += 1;
@@ -78,7 +82,7 @@ impl<'a> AnalyzerScope<'a> {
         i
     }
 
-    pub fn declare_variable(
+    pub(super) fn declare_variable(
         &mut self,
         name: &Identifier,
         reference: AnalyzedExpressionRef,
@@ -96,7 +100,7 @@ impl<'a> AnalyzerScope<'a> {
         }
     }
 
-    pub fn define_struct(
+    pub(super) fn define_struct(
         &mut self,
         i: usize,
         definition: AnalyzedStructDefinition,
@@ -105,14 +109,14 @@ impl<'a> AnalyzerScope<'a> {
         context.structs.insert(i, definition);
     }
 
-    pub fn get_struct_index(&self, name: &str) -> Option<usize> {
+    pub(super) fn get_struct_index(&self, name: &str) -> Option<usize> {
         self.struct_indices
             .get(name)
             .copied()
             .or_else(|| self.parent.and_then(|parent| parent.get_struct_index(name)))
     }
 
-    pub fn get_variable(
+    pub(super) fn get_variable(
         &self,
         name: &TypedIdentifier,
     ) -> Result<Option<AnalyzedExpressionRef>, CompilationError> {
@@ -142,11 +146,11 @@ impl<'a> AnalyzerScope<'a> {
         )
     }
 
-    pub fn has_parent(&self) -> bool {
+    pub(super) fn has_parent(&self) -> bool {
         self.parent.is_some()
     }
 
-    pub fn with_parent(parent: &'a AnalyzerScope<'a>) -> Self {
+    pub(super) fn with_parent(parent: &'a AnalyzerScope<'a>) -> Self {
         Self {
             built_in_values: parent.built_in_values,
             parent: Some(parent),
@@ -155,7 +159,7 @@ impl<'a> AnalyzerScope<'a> {
         }
     }
 
-    pub fn without_parent(built_in_values: &'a TypecheckerBuiltInValues) -> Self {
+    pub(super) fn without_parent(built_in_values: &'a TypecheckerBuiltInValues) -> Self {
         Self {
             built_in_values,
             parent: None,
@@ -165,7 +169,7 @@ impl<'a> AnalyzerScope<'a> {
     }
 }
 
-pub struct AnalyzerScopeContext {
+pub(super) struct AnalyzerScopeContext {
     functions: AnalyzerFunctions,
     string_literals: Vec<String>,
     struct_count: usize,
@@ -173,7 +177,7 @@ pub struct AnalyzerScopeContext {
 }
 
 impl AnalyzerScopeContext {
-    pub fn add_string_literal(&mut self, string_literal: String) -> usize {
+    pub(super) fn add_string_literal(&mut self, string_literal: String) -> usize {
         let i = self.string_literals.len();
 
         self.string_literals.push(string_literal);
@@ -181,11 +185,11 @@ impl AnalyzerScopeContext {
         i
     }
 
-    pub fn functions_mut(&mut self) -> &mut AnalyzerFunctions {
+    pub(super) fn functions_mut(&mut self) -> &mut AnalyzerFunctions {
         &mut self.functions
     }
 
-    pub fn into_program(
+    pub(super) fn into_program(
         self,
         expression_graph: DirectedGraph<AnalyzedExpression>,
         position: Position,
@@ -211,7 +215,7 @@ impl AnalyzerScopeContext {
         })
     }
 
-    pub fn new() -> Self {
+    pub(super) fn new() -> Self {
         Self {
             functions: AnalyzerFunctions::new(),
             string_literals: Vec::new(),

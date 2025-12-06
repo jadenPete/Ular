@@ -1,3 +1,6 @@
 [workspace]
 members = ["ular", "ular/tests/common", "ular-derive", "ular-scheduler"]
 resolver = "2"
+
+[workspace.lints.rust]
+unreachable_pub = "warn"

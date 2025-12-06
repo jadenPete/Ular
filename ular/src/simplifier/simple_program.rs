@@ -11,13 +11,13 @@ use crate::{
 use ular_derive::Node;
 
 #[derive(Debug, Node)]
-pub struct SimpleProgram {
-    pub statements: Vec<SimpleStatement>,
-    pub position: Position,
+pub(crate) struct SimpleProgram {
+    pub(crate) statements: Vec<SimpleStatement>,
+    pub(crate) position: Position,
 }
 
 #[derive(Debug, Node)]
-pub enum SimpleStatement {
+pub(crate) enum SimpleStatement {
     StructDefinition(SimpleStructDefinition),
     VariableDefinition(SimpleVariableDefinition),
     FunctionDefinition(SimpleFunctionDefinition),
@@ -26,31 +26,31 @@ pub enum SimpleStatement {
 }
 
 #[derive(Debug, Node)]
-pub struct SimpleStructDefinition {
-    pub name: Identifier,
-    pub fields: Vec<StructDefinitionField>,
-    pub methods: Vec<SimpleFunctionDefinition>,
-    pub position: Position,
+pub(crate) struct SimpleStructDefinition {
+    pub(crate) name: Identifier,
+    pub(crate) fields: Vec<StructDefinitionField>,
+    pub(crate) methods: Vec<SimpleFunctionDefinition>,
+    pub(crate) position: Position,
 }
 
 #[derive(Debug, Node)]
-pub struct SimpleVariableDefinition {
-    pub name: Identifier,
-    pub value: Box<SimpleExpression>,
-    pub position: Position,
+pub(crate) struct SimpleVariableDefinition {
+    pub(crate) name: Identifier,
+    pub(crate) value: Box<SimpleExpression>,
+    pub(crate) position: Position,
 }
 
 #[derive(Debug, Node)]
-pub struct SimpleFunctionDefinition {
-    pub name: Identifier,
-    pub parameters: Vec<Parameter>,
-    pub return_type: Type,
-    pub body: SimpleBlock,
-    pub position: Position,
+pub(crate) struct SimpleFunctionDefinition {
+    pub(crate) name: Identifier,
+    pub(crate) parameters: Vec<Parameter>,
+    pub(crate) return_type: Type,
+    pub(crate) body: SimpleBlock,
+    pub(crate) position: Position,
 }
 
 impl SimpleFunctionDefinition {
-    pub fn reference_type(&self) -> Type {
+    pub(crate) fn reference_type(&self) -> Type {
         Type::Function(FunctionType {
             parameters: self
                 .parameters
@@ -64,14 +64,14 @@ impl SimpleFunctionDefinition {
 }
 
 #[derive(Debug, Node)]
-pub struct SimpleBlock {
-    pub statements: Vec<SimpleStatement>,
-    pub result: Option<Box<SimpleExpression>>,
-    pub position: Position,
+pub(crate) struct SimpleBlock {
+    pub(crate) statements: Vec<SimpleStatement>,
+    pub(crate) result: Option<Box<SimpleExpression>>,
+    pub(crate) position: Position,
 }
 
 #[derive(Debug, Node)]
-pub enum SimpleExpression {
+pub(crate) enum SimpleExpression {
     If(SimpleIf),
     InfixOperation(SimpleInfixOperation),
     Select(SimpleSelect),
@@ -87,57 +87,57 @@ pub enum SimpleExpression {
 }
 
 #[derive(Debug, Node)]
-pub struct SimpleIf {
-    pub condition: Box<SimpleExpression>,
-    pub then_block: SimpleBlock,
-    pub else_block: SimpleBlock,
-    pub position: Position,
+pub(crate) struct SimpleIf {
+    pub(crate) condition: Box<SimpleExpression>,
+    pub(crate) then_block: SimpleBlock,
+    pub(crate) else_block: SimpleBlock,
+    pub(crate) position: Position,
 }
 
 #[derive(Debug, Node)]
-pub struct SimpleInfixOperation {
-    pub left: Box<SimpleExpression>,
-    pub operator: InfixOperator,
-    pub right: Box<SimpleExpression>,
-    pub position: Position,
+pub(crate) struct SimpleInfixOperation {
+    pub(crate) left: Box<SimpleExpression>,
+    pub(crate) operator: InfixOperator,
+    pub(crate) right: Box<SimpleExpression>,
+    pub(crate) position: Position,
 }
 
 #[derive(Debug, Node)]
-pub struct SimplePrefixOperation {
-    pub operator: SimplePrefixOperator,
-    pub expression: Box<SimpleExpression>,
-    pub position: Position,
+pub(crate) struct SimplePrefixOperation {
+    pub(crate) operator: SimplePrefixOperator,
+    pub(crate) expression: Box<SimpleExpression>,
+    pub(crate) position: Position,
 }
 
 #[derive(Clone, Copy, Debug)]
-pub enum SimplePrefixOperator {
+pub(crate) enum SimplePrefixOperator {
     Not,
 }
 
 #[derive(Debug, Node)]
-pub struct SimpleSelect {
-    pub left_hand_side: Box<SimpleExpression>,
-    pub right_hand_side: Identifier,
-    pub position: Position,
+pub(crate) struct SimpleSelect {
+    pub(crate) left_hand_side: Box<SimpleExpression>,
+    pub(crate) right_hand_side: Identifier,
+    pub(crate) position: Position,
 }
 
 #[derive(Debug, Node)]
-pub struct SimpleCall {
-    pub function: Box<SimpleExpression>,
-    pub arguments: Vec<SimpleExpression>,
-    pub position: Position,
+pub(crate) struct SimpleCall {
+    pub(crate) function: Box<SimpleExpression>,
+    pub(crate) arguments: Vec<SimpleExpression>,
+    pub(crate) position: Position,
 }
 
 #[derive(Debug, Node)]
-pub struct SimpleStructApplication {
-    pub name: Identifier,
-    pub fields: Vec<SimpleStructApplicationField>,
-    pub position: Position,
+pub(crate) struct SimpleStructApplication {
+    pub(crate) name: Identifier,
+    pub(crate) fields: Vec<SimpleStructApplicationField>,
+    pub(crate) position: Position,
 }
 
 #[derive(Debug, Node)]
-pub struct SimpleStructApplicationField {
-    pub name: Identifier,
-    pub value: Box<SimpleExpression>,
-    pub position: Position,
+pub(crate) struct SimpleStructApplicationField {
+    pub(crate) name: Identifier,
+    pub(crate) value: Box<SimpleExpression>,
+    pub(crate) position: Position,
 }

@@ -26,7 +26,7 @@ pub enum UlarFunction<'a> {
 }
 
 impl<'a> UlarFunction<'a> {
-    pub fn build_call(
+    pub(super) fn build_call(
         &self,
         context: &'a Context,
         builder: &Builder<'a>,
@@ -54,14 +54,14 @@ impl<'a> UlarFunction<'a> {
         UlarValue::from_call_site_value(context, type_, result, position)
     }
 
-    pub fn get_pointer_value(&self) -> PointerValue<'a> {
+    pub(super) fn get_pointer_value(&self) -> PointerValue<'a> {
         match self {
             Self::DirectReference(function) => function.as_global_value().as_pointer_value(),
             Self::IndirectReference { pointer, .. } => *pointer,
         }
     }
 
-    pub fn get_type(&self) -> FunctionType<'a> {
+    pub(super) fn get_type(&self) -> FunctionType<'a> {
         match self {
             Self::DirectReference(function) => function.get_type(),
             Self::IndirectReference { type_, .. } => *type_,
@@ -98,7 +98,7 @@ pub enum UlarValue<'a> {
 }
 
 impl<'a> UlarValue<'a> {
-    pub fn build_phi(
+    pub(super) fn build_phi(
         context: &'a Context,
         builder: &Builder<'a>,
         type_: &AnalyzedType,
@@ -123,7 +123,7 @@ impl<'a> UlarValue<'a> {
         }
     }
 
-    pub fn from_basic_value<A: BasicValue<'a>>(
+    pub(super) fn from_basic_value<A: BasicValue<'a>>(
         context: &'a Context,
         type_: &AnalyzedType,
         value: A,
@@ -157,7 +157,7 @@ impl<'a> UlarValue<'a> {
         }
     }
 
-    pub fn from_call_site_value(
+    pub(super) fn from_call_site_value(
         context: &'a Context,
         type_: &AnalyzedType,
         value: CallSiteValue<'a>,
