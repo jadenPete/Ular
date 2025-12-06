@@ -261,10 +261,6 @@ pub(super) unsafe fn mmtk_copy_object_to(from: ObjectReference, region: Address)
     from_address + size
 }
 
-pub(super) fn mmtk_get_object_align(object: ObjectReference) -> usize {
-    get_object_descriptor(object).align()
-}
-
 pub(super) fn mmtk_get_object_size(object: ObjectReference) -> usize {
     // SAFETY: We assume the object descriptor is valid
     unsafe { get_object_descriptor(object).get_size(object) }

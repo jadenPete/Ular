@@ -26,34 +26,6 @@ pub enum UlarFunction<'a> {
 }
 
 impl<'a> UlarFunction<'a> {
-    pub(super) fn build_call(
-        &self,
-        context: &'a Context,
-        builder: &Builder<'a>,
-        arguments: &[UlarValue<'a>],
-        name: LocalName,
-        type_: &AnalyzedType,
-        position: Position,
-    ) -> Result<UlarValue<'a>, CompilationError> {
-        let mut non_unit_arguments = Vec::with_capacity(arguments.len());
-
-        for argument in arguments {
-            non_unit_arguments.push(BasicValueEnum::try_from(*argument)?.into());
-        }
-
-        let result = match self {
-            Self::DirectReference(function) => builder
-                .build_call(*function, &non_unit_arguments, &name.to_string())
-                .unwrap(),
-
-            Self::IndirectReference { pointer, type_ } => builder
-                .build_indirect_call(*type_, *pointer, &non_unit_arguments, &name.to_string())
-                .unwrap(),
-        };
-
-        UlarValue::from_call_site_value(context, type_, result, position)
-    }
-
     pub(super) fn get_pointer_value(&self) -> PointerValue<'a> {
         match self {
             Self::DirectReference(function) => function.as_global_value().as_pointer_value(),

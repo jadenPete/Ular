@@ -27,13 +27,6 @@ pub(crate) enum AnalyzedType {
 }
 
 impl AnalyzedType {
-    pub(crate) fn debug<'a, A: FnMut(usize) -> &'a AnalyzedStructDefinition + Copy>(
-        &self,
-        struct_definition: A,
-    ) -> impl Debug {
-        self.debug_display_underlying(struct_definition)
-    }
-
     fn debug_display_underlying<'a, A: FnMut(usize) -> &'a AnalyzedStructDefinition + Copy>(
         &self,
         mut struct_definition: A,

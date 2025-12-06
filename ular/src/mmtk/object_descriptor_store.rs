@@ -127,31 +127,14 @@ impl ObjectDescriptorStore {
         let inner_references = definition
             .fields
             .iter()
+            .filter(|field| matches!(field.type_, AnalyzedType::Struct(_)))
             .enumerate()
-            .flat_map(|(i, field)| match field.type_ {
-                AnalyzedType::Struct(j) => Some((i, j)),
-                _ => None,
-            })
-            .map(|(field_index, field_struct_index)| {
-                let offset = target_data
-                    // Add 1 to offset for the object descriptor reference
-                    .offset_of_element(struct_type, field_index as u32 + 1)
-                    .unwrap() as usize;
-
-                let field_descriptor = if field_struct_index == struct_index {
-                    reference
-                } else {
-                    self.get_or_set_descriptor_for_struct(
-                        program,
-                        struct_types,
-                        target_data,
-                        field_struct_index,
-                    )?
-                };
-
+            .map(|(field_index, _)| {
                 Ok(ObjectInnerReference {
-                    offset,
-                    descriptor: field_descriptor,
+                    offset: target_data
+                        // Add 1 to offset for the object descriptor reference
+                        .offset_of_element(struct_type, field_index as u32 + 1)
+                        .unwrap() as usize,
                 })
             })
             .collect::<Result<Vec<_>, _>>()?;
@@ -213,11 +196,4 @@ impl ObjectDescriptorStore {
 #[derive(Clone, Debug)]
 pub(crate) struct ObjectInnerReference {
     pub(crate) offset: usize,
-    pub(crate) descriptor: ObjectDescriptorReference,
-}
-
-#[derive(Clone, Debug)]
-pub enum ObjectSize {
-    Fixed(usize),
-    StoredAtOffset(usize),
 }
