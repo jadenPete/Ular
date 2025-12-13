@@ -127,15 +127,27 @@ impl ObjectDescriptorStore {
         let inner_references = definition
             .fields
             .iter()
-            .filter(|field| matches!(field.type_, AnalyzedType::Struct(_)))
             .enumerate()
-            .map(|(field_index, _)| {
-                Ok(ObjectInnerReference {
-                    offset: target_data
-                        // Add 1 to offset for the object descriptor reference
-                        .offset_of_element(struct_type, field_index as u32 + 1)
-                        .unwrap() as usize,
-                })
+            .flat_map(|(i, field)| match field.type_ {
+                AnalyzedType::Struct(j) => Some((i, j)),
+                _ => None,
+            })
+            .map(|(field_index, field_struct_index)| {
+                let offset = target_data
+                    // Add 1 to offset for the object descriptor reference
+                    .offset_of_element(struct_type, field_index as u32 + 1)
+                    .unwrap() as usize;
+
+                if field_struct_index != struct_index {
+                    self.get_or_set_descriptor_for_struct(
+                        program,
+                        struct_types,
+                        target_data,
+                        field_struct_index,
+                    )?;
+                }
+
+                Ok(ObjectInnerReference { offset })
             })
             .collect::<Result<Vec<_>, _>>()?;
 
