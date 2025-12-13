@@ -109,22 +109,12 @@ struct CompilableCall<'a>(&'a AnalyzedCall);
 impl<'context> CompilableCall<'_> {
     fn get_function_and_arguments(
         &self,
-        compiler: &mut JitFunctionCompiler<'_, 'context>,
         builder: &Builder<'context>,
         scope: &mut JitCompilerScope<'_, 'context>,
     ) -> Result<(UlarFunction<'context>, Vec<UlarValue<'context>>), CompilationError> {
         let function_name = scope.get_local_name();
         let function: UlarFunction = scope
-            .get(
-                &self.0.function,
-                function_name,
-                compiler.scope_context,
-                compiler.context,
-                builder,
-                compiler.built_in_values,
-                compiler.execution_engine,
-                compiler.module,
-            )?
+            .get(&self.0.function, function_name, builder)?
             .try_into()?;
 
         let mut arguments = Vec::with_capacity(self.0.arguments.len());
@@ -132,16 +122,7 @@ impl<'context> CompilableCall<'_> {
         for argument_reference in &self.0.arguments {
             let name = scope.get_local_name();
 
-            arguments.push(scope.get(
-                argument_reference,
-                name,
-                compiler.scope_context,
-                compiler.context,
-                builder,
-                compiler.built_in_values,
-                compiler.execution_engine,
-                compiler.module,
-            )?);
+            arguments.push(scope.get(argument_reference, name, builder)?);
         }
 
         Ok((function, arguments))
@@ -155,12 +136,8 @@ impl<'a, 'context: 'a> CompilableExpression<'a, 'context> for CompilableCall<'a>
         builder: &Builder<'context>,
         scope: &mut JitCompilerScope<'_, 'context>,
     ) -> Result<Box<dyn ForkedExpression<'context> + 'a>, CompilationError> {
-        let (function, arguments) = self.get_function_and_arguments(compiler, builder, scope)?;
-        let fork_function =
-            compiler
-                .fork_function_cache
-                .get_or_build(function, compiler.context, compiler.module);
-
+        let (function, arguments) = self.get_function_and_arguments(builder, scope)?;
+        let fork_function = compiler.fork_function_cache.get_or_build(function);
         let fork_function_pointer = fork_function
             .function()
             .as_global_value()
@@ -178,11 +155,10 @@ impl<'a, 'context: 'a> CompilableExpression<'a, 'context> for CompilableCall<'a>
 
         builder
             .build_call(
-                compiler.built_in_values._job_new.get_inkwell_function(
-                    compiler.context,
-                    compiler.execution_engine,
-                    compiler.module,
-                ),
+                compiler
+                    .built_in_values
+                    ._job_new
+                    .get_inkwell_function(compiler.built_in_values),
                 &[job_pointer.into()],
                 "",
             )
@@ -190,11 +166,10 @@ impl<'a, 'context: 'a> CompilableExpression<'a, 'context> for CompilableCall<'a>
 
         builder
             .build_call(
-                compiler.built_in_values._worker_fork.get_inkwell_function(
-                    compiler.context,
-                    compiler.execution_engine,
-                    compiler.module,
-                ),
+                compiler
+                    .built_in_values
+                    ._worker_fork
+                    .get_inkwell_function(compiler.built_in_values),
                 &[
                     scope.worker.into(),
                     job_pointer.into(),
@@ -219,7 +194,7 @@ impl<'a, 'context: 'a> CompilableExpression<'a, 'context> for CompilableCall<'a>
         builder: &Builder<'context>,
         scope: &mut JitCompilerScope<'_, 'context>,
     ) -> Result<UlarValue<'context>, CompilationError> {
-        let (function, arguments) = self.get_function_and_arguments(compiler, builder, scope)?;
+        let (function, arguments) = self.get_function_and_arguments(builder, scope)?;
 
         compiler.compile_inline_call(
             builder,
@@ -256,11 +231,7 @@ impl<'context> ForkedExpression<'context> for ForkedCall<'_, 'context> {
                 compiler
                     .built_in_values
                     ._worker_try_join
-                    .get_inkwell_function(
-                        compiler.context,
-                        compiler.execution_engine,
-                        compiler.module,
-                    ),
+                    .get_inkwell_function(compiler.built_in_values),
                 &[scope.worker.into(), self.job_pointer.into()],
                 &join_result_name.to_string(),
             )
@@ -387,17 +358,7 @@ impl<'context> InlineExpression<'context> for CompilableIf<'_> {
         scope: &mut JitCompilerScope<'_, 'context>,
     ) -> Result<UlarValue<'context>, CompilationError> {
         let condition_name = scope.get_local_name();
-        let condition = scope.get(
-            &self.0.condition,
-            condition_name,
-            compiler.scope_context,
-            compiler.context,
-            builder,
-            compiler.built_in_values,
-            compiler.execution_engine,
-            compiler.module,
-        )?;
-
+        let condition = scope.get(&self.0.condition, condition_name, builder)?;
         let then_block = compiler.append_basic_block(scope);
         let else_block = compiler.append_basic_block(scope);
 
@@ -521,11 +482,7 @@ impl<'context> CompilableInfixOperation<'_> {
                 let division_function = compiler
                     .built_in_values
                     .get_division_function(argument_numeric_type)
-                    .get_inkwell_function(
-                        compiler.context,
-                        compiler.execution_engine,
-                        compiler.module,
-                    );
+                    .get_inkwell_function(compiler.built_in_values);
 
                 UlarValue::from_call_site_value(
                     compiler.context,
@@ -647,28 +604,9 @@ impl<'context> InlineExpression<'context> for CompilableInfixOperation<'_> {
         scope: &mut JitCompilerScope<'_, 'context>,
     ) -> Result<UlarValue<'context>, CompilationError> {
         let left_name = scope.get_local_name();
-        let left_value = scope.get(
-            &self.0.left,
-            left_name,
-            compiler.scope_context,
-            compiler.context,
-            builder,
-            compiler.built_in_values,
-            compiler.execution_engine,
-            compiler.module,
-        )?;
-
+        let left_value = scope.get(&self.0.left, left_name, builder)?;
         let right_name = scope.get_local_name();
-        let right_value = scope.get(
-            &self.0.right,
-            right_name,
-            compiler.scope_context,
-            compiler.context,
-            builder,
-            compiler.built_in_values,
-            compiler.execution_engine,
-            compiler.module,
-        )?;
+        let right_value = scope.get(&self.0.right, right_name, builder)?;
 
         match self.0.operator {
             InfixOperator::Logical(operator) => {
@@ -708,17 +646,7 @@ impl<'context> InlineExpression<'context> for CompilablePrefixOperation<'_> {
         scope: &mut JitCompilerScope<'_, 'context>,
     ) -> Result<UlarValue<'context>, CompilationError> {
         let expression_name = scope.get_local_name();
-        let expression = scope.get(
-            &self.0.expression,
-            expression_name,
-            compiler.scope_context,
-            compiler.context,
-            builder,
-            compiler.built_in_values,
-            compiler.execution_engine,
-            compiler.module,
-        )?;
-
+        let expression = scope.get(&self.0.expression, expression_name, builder)?;
         let name = scope.get_local_name();
 
         match self.0.operator {
@@ -764,17 +692,7 @@ impl<'context> InlineExpression<'context> for CompilableSelect<'_> {
 
         let struct_information = &compiler.struct_information[struct_index];
         let struct_value_name = scope.get_local_name();
-        let struct_value = scope.get(
-            &self.0.left_hand_side,
-            struct_value_name,
-            compiler.scope_context,
-            compiler.context,
-            builder,
-            compiler.built_in_values,
-            compiler.execution_engine,
-            compiler.module,
-        )?;
-
+        let struct_value = scope.get(&self.0.left_hand_side, struct_value_name, builder)?;
         let field_pointer_name = scope.get_local_name();
         let field_pointer = builder
             .build_struct_gep(
@@ -848,11 +766,10 @@ impl<'context> InlineExpression<'context> for CompilableStructApplication<'_> {
         let struct_pointer_name = scope.get_local_name();
         let struct_pointer = builder
             .build_direct_call(
-                compiler.built_in_values._mmtk_alloc.build_function(
-                    compiler.context,
-                    compiler.execution_engine,
-                    compiler.module,
-                ),
+                compiler
+                    .built_in_values
+                    ._mmtk_alloc
+                    .get_inkwell_function(compiler.built_in_values),
                 &[allocated_size.into(), allocated_align.into()],
                 &struct_pointer_name.to_string(),
             )
@@ -870,16 +787,7 @@ impl<'context> InlineExpression<'context> for CompilableStructApplication<'_> {
 
                 Ok((
                     field.name.clone(),
-                    scope.get(
-                        &field.value,
-                        field_value_name,
-                        compiler.scope_context,
-                        compiler.context,
-                        builder,
-                        compiler.built_in_values,
-                        compiler.execution_engine,
-                        compiler.module,
-                    )?,
+                    scope.get(&field.value, field_value_name, builder)?,
                 ))
             })
             .collect::<Result<HashMap<_, _>, _>>()?;
@@ -939,10 +847,10 @@ impl<'context> InlineExpression<'context> for CompilableStructApplication<'_> {
 }
 
 pub(super) struct JitFunctionCompiler<'a, 'context> {
-    pub(super) built_in_values: &'a JitCompilerBuiltInValues<'context>,
+    pub(super) built_in_values: &'a JitCompilerBuiltInValues<'a, 'context>,
     pub(super) context: &'context Context,
     pub(super) execution_engine: &'a ExecutionEngine<'context>,
-    pub(super) fork_function_cache: &'a ForkFunctionCache<'context>,
+    pub(super) fork_function_cache: &'a ForkFunctionCache<'a, 'context>,
     pub(super) module: &'a UlarModule<'context>,
     pub(super) scope_context: &'a JitCompilerScopeContext<'context>,
     pub(super) struct_information: &'a [StructInformation<'a, 'context>],
@@ -971,16 +879,7 @@ impl<'context> JitFunctionCompiler<'_, 'context> {
                 Some(result_reference) => {
                     let result_name = child_scope.get_local_name();
 
-                    child_scope.get(
-                        result_reference,
-                        result_name,
-                        self.scope_context,
-                        self.context,
-                        builder,
-                        self.built_in_values,
-                        self.execution_engine,
-                        self.module,
-                    )?
+                    child_scope.get(result_reference, result_name, builder)?
                 }
 
                 None => UlarValue::Unit,
@@ -1185,12 +1084,7 @@ impl<'context> JitFunctionCompiler<'_, 'context> {
                 BasicValueEnum::try_from(function_scope.get(
                     result_reference,
                     result_name,
-                    self.scope_context,
-                    self.context,
                     &function_builder,
-                    self.built_in_values,
-                    self.execution_engine,
-                    self.module,
                 )?)
                 .ok()
             }
@@ -1219,11 +1113,9 @@ impl<'context> JitFunctionCompiler<'_, 'context> {
     ) -> Result<UlarValue<'context>, CompilationError> {
         builder
             .build_call(
-                self.built_in_values._worker_tick.get_inkwell_function(
-                    self.context,
-                    self.execution_engine,
-                    self.module,
-                ),
+                self.built_in_values
+                    ._worker_tick
+                    .get_inkwell_function(self.built_in_values),
                 &[scope.worker.into()],
                 "",
             )

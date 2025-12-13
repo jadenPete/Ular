@@ -3,14 +3,13 @@ use crate::{
     dependency_analyzer::analyzed_program::AnalyzedExpressionRef,
     error_reporting::{CompilationError, CompilationErrorMessage, InternalError},
     jit_compiler::{
-        module::{built_in_values::JitCompilerBuiltInValues, UlarModule},
+        module::built_in_values::JitCompilerBuiltInValues,
         value::{UlarFunction, UlarValue},
     },
 };
 use inkwell::{
     builder::Builder,
     context::Context,
-    execution_engine::ExecutionEngine,
     values::{FunctionValue, PointerValue},
 };
 use std::{
@@ -19,6 +18,9 @@ use std::{
 };
 
 pub(super) struct JitCompilerScope<'a, 'context> {
+    context: &'context Context,
+    built_in_values: &'a JitCompilerBuiltInValues<'a, 'context>,
+    scope_context: &'a JitCompilerScopeContext<'context>,
     parent: Option<&'a JitCompilerScope<'a, 'context>>,
     parameter_values: Option<&'a [UlarValue<'context>]>,
     next_local_name: LocalName,
@@ -40,24 +42,19 @@ impl<'a, 'context> JitCompilerScope<'a, 'context> {
         &self,
         reference: &AnalyzedExpressionRef,
         local_name: LocalName,
-        scope_context: &JitCompilerScopeContext<'context>,
-        context: &'context Context,
         builder: &Builder<'context>,
-        built_in_values: &JitCompilerBuiltInValues<'context>,
-        execution_engine: &ExecutionEngine<'context>,
-        module: &UlarModule<'context>,
     ) -> Result<UlarValue<'context>, CompilationError> {
         match reference {
-            AnalyzedExpressionRef::BuiltIn { path, .. } => Ok(built_in_values
-                .get(path, local_name, context, builder, execution_engine, module)
-                .unwrap()),
+            AnalyzedExpressionRef::BuiltIn { path, .. } => {
+                Ok(self.built_in_values.get(path, local_name, builder).unwrap())
+            }
 
             AnalyzedExpressionRef::Expression { index, .. } => self
                 .get_expression(*index)
                 .ok_or(InternalError::JitCompilerUnknownExpression { index: *index }),
 
             AnalyzedExpressionRef::Function { index, .. } => {
-                match scope_context.function_values.get(*index) {
+                match self.scope_context.function_values.get(*index) {
                     Some(value) => Ok(UlarValue::Function(UlarFunction::DirectReference(*value))),
                     None => Err(InternalError::JitCompilerUnknownFunction { index: *index }),
                 }
@@ -71,7 +68,7 @@ impl<'a, 'context> JitCompilerScope<'a, 'context> {
             AnalyzedExpressionRef::Number(number) => Ok(UlarValue::Int(
                 number
                     .type_
-                    .inkwell_type(context)
+                    .inkwell_type(self.context)
                     .const_int(number.value as u64, number.type_.is_signed()),
             )),
 
@@ -80,7 +77,8 @@ impl<'a, 'context> JitCompilerScope<'a, 'context> {
                 method_index,
                 ..
             } => {
-                match scope_context
+                match self
+                    .scope_context
                     .struct_method_values
                     .get(*struct_index)
                     .and_then(|method_values| method_values.get(*method_index))
@@ -137,6 +135,9 @@ impl<'a, 'context> JitCompilerScope<'a, 'context> {
         worker: PointerValue<'context>,
     ) -> Self {
         Self {
+            context: parent.context,
+            built_in_values: parent.built_in_values,
+            scope_context: parent.scope_context,
             parent: Some(parent),
             parameter_values,
             next_local_name: parent.next_local_name,
@@ -146,10 +147,16 @@ impl<'a, 'context> JitCompilerScope<'a, 'context> {
     }
 
     pub(super) fn new_without_parent(
+        context: &'context Context,
+        built_in_values: &'a JitCompilerBuiltInValues<'a, 'context>,
+        scope_context: &'a JitCompilerScopeContext<'context>,
         parameter_values: Option<&'a [UlarValue<'context>]>,
         worker: PointerValue<'context>,
     ) -> Self {
         Self {
+            context,
+            built_in_values,
+            scope_context,
             parent: None,
             parameter_values,
             next_local_name: LocalName(0),

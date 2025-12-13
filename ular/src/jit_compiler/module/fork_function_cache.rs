@@ -75,17 +75,14 @@ impl<'a> ForkFunction<'a> {
     }
 }
 
-pub(in crate::jit_compiler) struct ForkFunctionCache<'a> {
-    function_cache: Cache<ForkFunctionKey<'a>, ForkFunctionValue<'a>>,
+pub(in crate::jit_compiler) struct ForkFunctionCache<'a, 'context> {
+    context: &'context Context,
+    module: &'a UlarModule<'context>,
+    function_cache: Cache<ForkFunctionKey<'context>, ForkFunctionValue<'context>>,
 }
 
-impl<'a> ForkFunctionCache<'a> {
-    fn get_or_insert_value(
-        &self,
-        key: ForkFunctionKey<'a>,
-        context: &'a Context,
-        module: &UlarModule<'a>,
-    ) -> ForkFunctionValue<'a> {
+impl<'a, 'context> ForkFunctionCache<'a, 'context> {
+    fn get_or_insert_value(&self, key: ForkFunctionKey<'context>) -> ForkFunctionValue<'context> {
         let cache_length = self.function_cache.len();
 
         self.function_cache.get_or_compute(key, || {
@@ -94,29 +91,29 @@ impl<'a> ForkFunctionCache<'a> {
             let mut context_field_types = Vec::new();
 
             if let ForkFunctionKey::Indirect { .. } = key {
-                context_field_types.push(context.ptr_type(AddressSpace::default()).into());
+                context_field_types.push(self.context.ptr_type(AddressSpace::default()).into());
             }
 
             for &parameter_type in parameter_types {
                 context_field_types.push(parameter_type.try_into().unwrap());
             }
 
-            let context_type = context.struct_type(&context_field_types, false);
-            let value_buffer_type = get_value_buffer_type(context);
-            let function = module.underlying.add_function(
+            let context_type = self.context.struct_type(&context_field_types, false);
+            let value_buffer_type = get_value_buffer_type(self.context);
+            let function = self.module.underlying.add_function(
                 &format!("fork_{}", cache_length),
                 value_buffer_type.fn_type(
                     &[
-                        context.ptr_type(AddressSpace::default()).into(),
-                        context.ptr_type(AddressSpace::default()).into(),
+                        self.context.ptr_type(AddressSpace::default()).into(),
+                        self.context.ptr_type(AddressSpace::default()).into(),
                     ],
                     false,
                 ),
                 None,
             );
 
-            let builder = context.create_builder();
-            let entry_block = context.append_basic_block(function, "entry");
+            let builder = self.context.create_builder();
+            let entry_block = self.context.append_basic_block(function, "entry");
 
             builder.position_at_end(entry_block);
 
@@ -133,7 +130,7 @@ impl<'a> ForkFunctionCache<'a> {
 
                     let pointer = builder
                         .build_load(
-                            context.ptr_type(AddressSpace::default()),
+                            self.context.ptr_type(AddressSpace::default()),
                             pointer_pointer,
                             "underlying_value",
                         )
@@ -206,12 +203,9 @@ impl<'a> ForkFunctionCache<'a> {
 
     pub(in crate::jit_compiler) fn get_or_build(
         &self,
-        function: UlarFunction<'a>,
-        context: &'a Context,
-        module: &UlarModule<'a>,
-    ) -> ForkFunction<'a> {
-        let value =
-            self.get_or_insert_value(ForkFunctionKey::for_function(function), context, module);
+        function: UlarFunction<'context>,
+    ) -> ForkFunction<'context> {
+        let value = self.get_or_insert_value(ForkFunctionKey::for_function(function));
 
         ForkFunction {
             function: value.function,
@@ -223,8 +217,13 @@ impl<'a> ForkFunctionCache<'a> {
         }
     }
 
-    pub(in crate::jit_compiler) fn new() -> Self {
+    pub(in crate::jit_compiler) fn new(
+        context: &'context Context,
+        module: &'a UlarModule<'context>,
+    ) -> Self {
         Self {
+            context,
+            module,
             function_cache: Cache::new(),
         }
     }

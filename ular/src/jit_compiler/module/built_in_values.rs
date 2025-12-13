@@ -42,14 +42,18 @@ extern "C" {
     ) -> !;
 }
 
+pub struct BuiltInDependencies<'a, 'context> {
+    context: &'context Context,
+    execution_engine: &'a ExecutionEngine<'context>,
+    module: &'a UlarModule<'context>,
+}
+
 pub trait BuiltInValue<'a>: DynClone {
     fn get_value(
         &self,
+        dependencies: &BuiltInDependencies<'_, 'a>,
         local_name: LocalName,
-        context: &'a Context,
         builder: &Builder<'a>,
-        execution_engine: &ExecutionEngine<'a>,
-        module: &UlarModule<'a>,
     ) -> UlarValue<'a>;
 }
 
@@ -73,12 +77,14 @@ impl BuiltInBool<'_> {
 impl<'a> BuiltInValue<'a> for BuiltInBool<'a> {
     fn get_value(
         &self,
+        dependencies: &BuiltInDependencies<'_, 'a>,
         local_name: LocalName,
-        context: &'a Context,
         builder: &Builder<'a>,
-        _execution_engine: &ExecutionEngine,
-        module: &UlarModule<'a>,
     ) -> UlarValue<'a> {
+        let BuiltInDependencies {
+            context, module, ..
+        } = dependencies;
+
         *self.computed_value.get_or_init(|| {
             let global = module.add_global(context.i8_type());
 
@@ -105,41 +111,36 @@ impl<'a> BuiltInValue<'a> for BuiltInBool<'a> {
 }
 
 pub trait BuiltInFunction<'a> {
-    fn build_function(
-        &self,
-        context: &'a Context,
-        execution_engine: &ExecutionEngine<'a>,
-        module: &UlarModule<'a>,
-    ) -> FunctionValue<'a>;
-
+    fn build_function(&self, dependencies: &BuiltInDependencies<'_, 'a>) -> FunctionValue<'a>;
     fn stored_function(&self) -> &OnceCell<FunctionValue<'a>>;
 
     fn get_inkwell_function(
         &self,
-        context: &'a Context,
-        execution_engine: &ExecutionEngine<'a>,
-        module: &UlarModule<'a>,
+        built_in_values: &JitCompilerBuiltInValues<'_, 'a>,
+    ) -> FunctionValue<'a> {
+        self.get_inkwell_function_with_dependencies(&built_in_values.dependencies)
+    }
+
+    fn get_inkwell_function_with_dependencies(
+        &self,
+        dependencies: &BuiltInDependencies<'_, 'a>,
     ) -> FunctionValue<'a> {
         *self
             .stored_function()
-            .get_or_init(|| self.build_function(context, execution_engine, module))
+            .get_or_init(|| self.build_function(dependencies))
     }
 }
 
 impl<'a, A: BuiltInFunction<'a> + DynClone> BuiltInValue<'a> for A {
     fn get_value(
         &self,
+        dependencies: &BuiltInDependencies<'_, 'a>,
         _local_name: LocalName,
-        context: &'a Context,
         _builder: &Builder<'a>,
-        execution_engine: &ExecutionEngine<'a>,
-        module: &UlarModule<'a>,
     ) -> UlarValue<'a> {
-        UlarValue::Function(UlarFunction::DirectReference(self.get_inkwell_function(
-            context,
-            execution_engine,
-            module,
-        )))
+        UlarValue::Function(UlarFunction::DirectReference(
+            self.get_inkwell_function_with_dependencies(dependencies),
+        ))
     }
 }
 
@@ -161,15 +162,12 @@ impl<'a> BuiltInLinkedFunction<'a> {
 }
 
 impl<'a> BuiltInFunction<'a> for BuiltInLinkedFunction<'a> {
-    fn build_function(
-        &self,
-        _context: &'a Context,
-        _execution_engine: &ExecutionEngine<'a>,
-        module: &UlarModule<'a>,
-    ) -> FunctionValue<'a> {
-        module
-            .underlying
-            .add_function(&self.name, self.signature, Some(Linkage::External))
+    fn build_function(&self, dependencies: &BuiltInDependencies<'_, 'a>) -> FunctionValue<'a> {
+        dependencies.module.underlying.add_function(
+            &self.name,
+            self.signature,
+            Some(Linkage::External),
+        )
     }
 
     fn stored_function(&self) -> &OnceCell<FunctionValue<'a>> {
@@ -197,12 +195,13 @@ impl<'a> BuiltInMappedFunction<'a> {
 }
 
 impl<'a> BuiltInFunction<'a> for BuiltInMappedFunction<'a> {
-    fn build_function(
-        &self,
-        _context: &'a Context,
-        execution_engine: &ExecutionEngine<'a>,
-        module: &UlarModule<'a>,
-    ) -> FunctionValue<'a> {
+    fn build_function(&self, dependencies: &BuiltInDependencies<'_, 'a>) -> FunctionValue<'a> {
+        let BuiltInDependencies {
+            execution_engine,
+            module,
+            ..
+        } = dependencies;
+
         let result = module
             .underlying
             .add_function(&self.name, self.signature, None);
@@ -287,62 +286,58 @@ impl<'a> BuiltInValueProducer for JitCompilerBuiltInValueProvider<'a> {
     }
 }
 
-pub(in crate::jit_compiler) struct JitCompilerBuiltInValues<'a> {
-    underlying: BuiltInValues<JitCompilerBuiltInValueProvider<'a>>,
-    pub(in crate::jit_compiler) __cxa_allocate_exception: BuiltInLinkedFunction<'a>,
-    pub(in crate::jit_compiler) __cxa_begin_catch: BuiltInLinkedFunction<'a>,
-    pub(in crate::jit_compiler) __cxa_end_catch: BuiltInLinkedFunction<'a>,
-    pub(in crate::jit_compiler) __cxa_throw: BuiltInLinkedFunction<'a>,
-    pub(in crate::jit_compiler) __gxx_personality_v0: BuiltInLinkedFunction<'a>,
-    pub(in crate::jit_compiler) _divide_i8: BuiltInMappedFunction<'a>,
-    pub(in crate::jit_compiler) _divide_i16: BuiltInMappedFunction<'a>,
-    pub(in crate::jit_compiler) _divide_i32: BuiltInMappedFunction<'a>,
-    pub(in crate::jit_compiler) _divide_i64: BuiltInMappedFunction<'a>,
-    pub(in crate::jit_compiler) _divide_u8: BuiltInMappedFunction<'a>,
-    pub(in crate::jit_compiler) _divide_u16: BuiltInMappedFunction<'a>,
-    pub(in crate::jit_compiler) _divide_u32: BuiltInMappedFunction<'a>,
-    pub(in crate::jit_compiler) _divide_u64: BuiltInMappedFunction<'a>,
-    pub(in crate::jit_compiler) _garbage_collection_plan_type: IntType<'a>,
-    pub(in crate::jit_compiler) _job_new: BuiltInMappedFunction<'a>,
-    pub(in crate::jit_compiler) _job_type: StructType<'a>,
-    pub(in crate::jit_compiler) _mmtk_alloc: BuiltInMappedFunction<'a>,
-    pub(in crate::jit_compiler) _mmtk_bind_current_mutator: BuiltInMappedFunction<'a>,
-    pub(in crate::jit_compiler) _mmtk_init: BuiltInMappedFunction<'a>,
-    pub(in crate::jit_compiler) _print_c_string: BuiltInMappedFunction<'a>,
-    pub(in crate::jit_compiler) _value_buffer_option_type: StructType<'a>,
-    pub(in crate::jit_compiler) _value_buffer_type: ArrayType<'a>,
-    pub(in crate::jit_compiler) _workerpool_join: BuiltInMappedFunction<'a>,
-    pub(in crate::jit_compiler) _workerpool_new: BuiltInMappedFunction<'a>,
-    pub(in crate::jit_compiler) _workerpool_worker: BuiltInMappedFunction<'a>,
-    pub(in crate::jit_compiler) _worker_fork: BuiltInMappedFunction<'a>,
-    pub(in crate::jit_compiler) _worker_free: BuiltInMappedFunction<'a>,
-    pub(in crate::jit_compiler) _worker_tick: BuiltInMappedFunction<'a>,
-    pub(in crate::jit_compiler) _worker_try_join: BuiltInMappedFunction<'a>,
+pub struct JitCompilerBuiltInValues<'a, 'context> {
+    dependencies: BuiltInDependencies<'a, 'context>,
+    underlying: BuiltInValues<JitCompilerBuiltInValueProvider<'context>>,
+    pub(in crate::jit_compiler) __cxa_allocate_exception: BuiltInLinkedFunction<'context>,
+    pub(in crate::jit_compiler) __cxa_begin_catch: BuiltInLinkedFunction<'context>,
+    pub(in crate::jit_compiler) __cxa_end_catch: BuiltInLinkedFunction<'context>,
+    pub(in crate::jit_compiler) __cxa_throw: BuiltInLinkedFunction<'context>,
+    pub(in crate::jit_compiler) __gxx_personality_v0: BuiltInLinkedFunction<'context>,
+    pub(in crate::jit_compiler) _divide_i8: BuiltInMappedFunction<'context>,
+    pub(in crate::jit_compiler) _divide_i16: BuiltInMappedFunction<'context>,
+    pub(in crate::jit_compiler) _divide_i32: BuiltInMappedFunction<'context>,
+    pub(in crate::jit_compiler) _divide_i64: BuiltInMappedFunction<'context>,
+    pub(in crate::jit_compiler) _divide_u8: BuiltInMappedFunction<'context>,
+    pub(in crate::jit_compiler) _divide_u16: BuiltInMappedFunction<'context>,
+    pub(in crate::jit_compiler) _divide_u32: BuiltInMappedFunction<'context>,
+    pub(in crate::jit_compiler) _divide_u64: BuiltInMappedFunction<'context>,
+    pub(in crate::jit_compiler) _garbage_collection_plan_type: IntType<'context>,
+    pub(in crate::jit_compiler) _job_new: BuiltInMappedFunction<'context>,
+    pub(in crate::jit_compiler) _job_type: StructType<'context>,
+    pub(in crate::jit_compiler) _mmtk_alloc: BuiltInMappedFunction<'context>,
+    pub(in crate::jit_compiler) _mmtk_bind_current_mutator: BuiltInMappedFunction<'context>,
+    pub(in crate::jit_compiler) _mmtk_init: BuiltInMappedFunction<'context>,
+    pub(in crate::jit_compiler) _print_c_string: BuiltInMappedFunction<'context>,
+    pub(in crate::jit_compiler) _value_buffer_option_type: StructType<'context>,
+    pub(in crate::jit_compiler) _value_buffer_type: ArrayType<'context>,
+    pub(in crate::jit_compiler) _workerpool_join: BuiltInMappedFunction<'context>,
+    pub(in crate::jit_compiler) _workerpool_new: BuiltInMappedFunction<'context>,
+    pub(in crate::jit_compiler) _workerpool_worker: BuiltInMappedFunction<'context>,
+    pub(in crate::jit_compiler) _worker_fork: BuiltInMappedFunction<'context>,
+    pub(in crate::jit_compiler) _worker_free: BuiltInMappedFunction<'context>,
+    pub(in crate::jit_compiler) _worker_tick: BuiltInMappedFunction<'context>,
+    pub(in crate::jit_compiler) _worker_try_join: BuiltInMappedFunction<'context>,
 }
 
-impl<'a> JitCompilerBuiltInValues<'a> {
+impl<'a, 'context> JitCompilerBuiltInValues<'a, 'context> {
     pub(in crate::jit_compiler) fn get<Path: Equivalent<BuiltInPathBuf> + Hash>(
         &self,
         path: &Path,
         local_name: LocalName,
-        context: &'a Context,
-        builder: &Builder<'a>,
-        execution_engine: &ExecutionEngine<'a>,
-        module: &UlarModule<'a>,
-    ) -> Option<UlarValue<'a>> {
-        Some(self.underlying.get(path)?.get_value(
-            local_name,
-            context,
-            builder,
-            execution_engine,
-            module,
-        ))
+        builder: &Builder<'context>,
+    ) -> Option<UlarValue<'context>> {
+        Some(
+            self.underlying
+                .get(path)?
+                .get_value(&self.dependencies, local_name, builder),
+        )
     }
 
     pub(in crate::jit_compiler) fn get_division_function(
         &self,
         numeric_type: NumericType,
-    ) -> &BuiltInMappedFunction<'a> {
+    ) -> &BuiltInMappedFunction<'context> {
         match numeric_type {
             NumericType::I8 => &self._divide_i8,
             NumericType::I16 => &self._divide_i16,
@@ -356,10 +351,17 @@ impl<'a> JitCompilerBuiltInValues<'a> {
     }
 
     pub(in crate::jit_compiler) fn new(
-        context: &'a Context,
-        execution_engine: &ExecutionEngine<'a>,
-        additional_values: HashMap<String, Box<dyn BuiltInValue<'a> + 'a>>,
+        context: &'context Context,
+        execution_engine: &'a ExecutionEngine<'context>,
+        module: &'a UlarModule<'context>,
+        additional_values: HashMap<String, Box<dyn BuiltInValue<'context> + 'context>>,
     ) -> Self {
+        let dependencies = BuiltInDependencies {
+            context,
+            execution_engine,
+            module,
+        };
+
         let provider = JitCompilerBuiltInValueProvider { context };
         let underlying = BuiltInValues::new(provider, additional_values);
         let __cxa_allocate_exception = BuiltInLinkedFunction::new(
@@ -557,6 +559,7 @@ impl<'a> JitCompilerBuiltInValues<'a> {
         );
 
         Self {
+            dependencies,
             underlying,
             __cxa_allocate_exception,
             __cxa_begin_catch,

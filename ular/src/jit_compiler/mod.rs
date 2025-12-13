@@ -88,9 +88,9 @@ impl<'a> JitCompilerPhase<'a> {
     fn compile_main_function(
         &self,
         builder: &Builder<'a>,
-        built_in_values: &JitCompilerBuiltInValues<'a>,
+        built_in_values: &JitCompilerBuiltInValues<'_, 'a>,
         execution_engine: &ExecutionEngine<'a>,
-        fork_function_cache: &ForkFunctionCache<'a>,
+        fork_function_cache: &ForkFunctionCache<'_, 'a>,
         module: &UlarModule<'a>,
         struct_information: &[StructInformation<'_, 'a>],
         program: &AnalyzedProgram,
@@ -173,7 +173,14 @@ impl<'a> JitCompilerPhase<'a> {
             struct_method_values,
         };
 
-        let mut scope = JitCompilerScope::new_without_parent(None, worker);
+        let mut scope = JitCompilerScope::new_without_parent(
+            self.context,
+            built_in_values,
+            &scope_context,
+            None,
+            worker,
+        );
+
         let mut function_compiler = JitFunctionCompiler {
             built_in_values,
             context: self.context,
@@ -257,8 +264,7 @@ impl<'a> JitCompilerPhase<'a> {
     fn compile_main_harness_function(
         &self,
         builder: &Builder<'a>,
-        built_in_values: &JitCompilerBuiltInValues<'a>,
-        execution_engine: &ExecutionEngine<'a>,
+        built_in_values: &JitCompilerBuiltInValues<'_, 'a>,
         module: &UlarModule<'a>,
         main_function: FunctionValue<'a>,
     ) {
@@ -283,11 +289,9 @@ impl<'a> JitCompilerPhase<'a> {
         builder.position_at_end(entry_block);
         builder
             .build_call(
-                built_in_values._mmtk_init.get_inkwell_function(
-                    self.context,
-                    execution_engine,
-                    module,
-                ),
+                built_in_values
+                    ._mmtk_init
+                    .get_inkwell_function(built_in_values),
                 &[built_in_values
                     ._garbage_collection_plan_type
                     .const_int(self.garbage_collection_plan as u64, false)
@@ -298,11 +302,9 @@ impl<'a> JitCompilerPhase<'a> {
 
         let worker_pool = builder
             .build_call(
-                built_in_values._workerpool_new.get_inkwell_function(
-                    self.context,
-                    execution_engine,
-                    module,
-                ),
+                built_in_values
+                    ._workerpool_new
+                    .get_inkwell_function(built_in_values),
                 &[],
                 "worker_pool",
             )
@@ -313,11 +315,9 @@ impl<'a> JitCompilerPhase<'a> {
 
         let worker = builder
             .build_call(
-                built_in_values._workerpool_worker.get_inkwell_function(
-                    self.context,
-                    execution_engine,
-                    module,
-                ),
+                built_in_values
+                    ._workerpool_worker
+                    .get_inkwell_function(built_in_values),
                 &[worker_pool],
                 "worker",
             )
@@ -329,7 +329,7 @@ impl<'a> JitCompilerPhase<'a> {
             .build_call(
                 built_in_values
                     ._mmtk_bind_current_mutator
-                    .get_inkwell_function(self.context, execution_engine, module),
+                    .get_inkwell_function(built_in_values),
                 &[],
                 "",
             )
@@ -352,11 +352,9 @@ impl<'a> JitCompilerPhase<'a> {
         let landing_pad_result = builder
             .build_landing_pad(
                 landing_pad_result_type,
-                built_in_values.__gxx_personality_v0.get_inkwell_function(
-                    self.context,
-                    execution_engine,
-                    module,
-                ),
+                built_in_values
+                    .__gxx_personality_v0
+                    .get_inkwell_function(built_in_values),
                 &[self
                     .context
                     .ptr_type(AddressSpace::default())
@@ -374,11 +372,9 @@ impl<'a> JitCompilerPhase<'a> {
 
         let exception_object = builder
             .build_call(
-                built_in_values.__cxa_begin_catch.get_inkwell_function(
-                    self.context,
-                    execution_engine,
-                    module,
-                ),
+                built_in_values
+                    .__cxa_begin_catch
+                    .get_inkwell_function(built_in_values),
                 &[exception_structure.into()],
                 "exception_object",
             )
@@ -397,11 +393,9 @@ impl<'a> JitCompilerPhase<'a> {
 
         builder
             .build_call(
-                built_in_values._print_c_string.get_inkwell_function(
-                    self.context,
-                    execution_engine,
-                    module,
-                ),
+                built_in_values
+                    ._print_c_string
+                    .get_inkwell_function(built_in_values),
                 &[exception_value.into()],
                 "",
             )
@@ -409,11 +403,9 @@ impl<'a> JitCompilerPhase<'a> {
 
         builder
             .build_call(
-                built_in_values.__cxa_end_catch.get_inkwell_function(
-                    self.context,
-                    execution_engine,
-                    module,
-                ),
+                built_in_values
+                    .__cxa_end_catch
+                    .get_inkwell_function(built_in_values),
                 &[],
                 "",
             )
@@ -433,11 +425,9 @@ impl<'a> JitCompilerPhase<'a> {
 
         builder
             .build_call(
-                built_in_values._worker_free.get_inkwell_function(
-                    self.context,
-                    execution_engine,
-                    module,
-                ),
+                built_in_values
+                    ._worker_free
+                    .get_inkwell_function(built_in_values),
                 &[worker.into()],
                 "",
             )
@@ -445,11 +435,9 @@ impl<'a> JitCompilerPhase<'a> {
 
         builder
             .build_call(
-                built_in_values._workerpool_join.get_inkwell_function(
-                    self.context,
-                    execution_engine,
-                    module,
-                ),
+                built_in_values
+                    ._workerpool_join
+                    .get_inkwell_function(built_in_values),
                 &[worker_pool],
                 "",
             )
@@ -460,9 +448,9 @@ impl<'a> JitCompilerPhase<'a> {
 
     fn compile_program(
         &self,
-        built_in_values: &JitCompilerBuiltInValues<'a>,
+        built_in_values: &JitCompilerBuiltInValues<'_, 'a>,
         execution_engine: &ExecutionEngine<'a>,
-        fork_function_cache: &ForkFunctionCache<'a>,
+        fork_function_cache: &ForkFunctionCache<'_, 'a>,
         module: &UlarModule<'a>,
         program: &AnalyzedProgram,
     ) -> Result<JitFunction<'a, MainFunction>, CompilationError> {
@@ -541,13 +529,7 @@ impl<'a> JitCompilerPhase<'a> {
             program,
         )?;
 
-        self.compile_main_harness_function(
-            &builder,
-            built_in_values,
-            execution_engine,
-            module,
-            main_function,
-        );
+        self.compile_main_harness_function(&builder, built_in_values, module, main_function);
 
         module
             .underlying
@@ -636,10 +618,11 @@ impl<'a> Phase<&AnalyzedProgram> for JitCompilerPhase<'a> {
         let built_in_values = JitCompilerBuiltInValues::new(
             self.context,
             &execution_engine,
+            &module,
             self.additional_values.clone(),
         );
 
-        let fork_function_cache = ForkFunctionCache::new();
+        let fork_function_cache = ForkFunctionCache::new(self.context, &module);
         let main_harness_function = self.compile_program(
             &built_in_values,
             &execution_engine,
