@@ -6,7 +6,7 @@ use mmtk::{
 use std::{collections::HashMap, sync::Once};
 use ular::{
     arguments::Arguments,
-    jit_compiler::built_in_values::BuiltInMappedFunction,
+    jit_compiler::module::built_in_values::BuiltInMappedFunction,
     mmtk::runtime::mmtk_scan_object,
     parser::type_::{FunctionType, Type},
     run_phases, AdditionalValue,

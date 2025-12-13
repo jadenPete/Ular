@@ -3,8 +3,7 @@ use crate::{
     dependency_analyzer::analyzed_program::AnalyzedExpressionRef,
     error_reporting::{CompilationError, CompilationErrorMessage, InternalError},
     jit_compiler::{
-        built_in_values::JitCompilerBuiltInValues,
-        module::UlarModule,
+        module::{built_in_values::JitCompilerBuiltInValues, UlarModule},
         value::{UlarFunction, UlarValue},
     },
 };

@@ -15,7 +15,7 @@ use crate::{
     arguments::Arguments,
     dependency_analyzer::AnalyzerPhase,
     error_reporting::CompilationError,
-    jit_compiler::{built_in_values::BuiltInValue, ExecutorPhase, JitCompilerPhase},
+    jit_compiler::{module::built_in_values::BuiltInValue, ExecutorPhase, JitCompilerPhase},
     lexer::{token::Tokens, LexerPhase},
     parser::{type_::Type, ParserPhase},
     phase::Phase,

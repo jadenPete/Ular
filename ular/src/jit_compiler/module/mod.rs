@@ -1,8 +1,22 @@
+pub mod built_in_values;
+pub(super) mod fork_function_cache;
+pub(super) mod memory_manager;
+
+use crate::{
+    dependency_analyzer::analyzed_program::AnalyzedStructDefinition,
+    mmtk::object_descriptor_store::ObjectDescriptorReference,
+};
 use inkwell::{
     module::{Linkage, Module},
-    types::{BasicType, FunctionType},
+    types::{BasicType, FunctionType, StructType},
     values::{FunctionValue, GlobalValue},
 };
+
+pub(super) struct StructInformation<'a, 'context> {
+    pub(super) definition: &'a AnalyzedStructDefinition,
+    pub(super) inkwell_type: StructType<'context>,
+    pub(super) descriptor_reference: ObjectDescriptorReference,
+}
 
 pub struct UlarModule<'a> {
     pub(super) underlying: Module<'a>,

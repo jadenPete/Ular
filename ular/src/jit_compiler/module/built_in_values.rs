@@ -233,7 +233,7 @@ impl<'a> BuiltInFunction<'a> for BuiltInMappedFunction<'a> {
     }
 }
 
-pub(super) struct JitCompilerBuiltInValueProvider<'a> {
+struct JitCompilerBuiltInValueProvider<'a> {
     context: &'a Context,
 }
 
@@ -303,41 +303,41 @@ impl<'a> BuiltInValueProducer for JitCompilerBuiltInValueProvider<'a> {
     }
 }
 
-pub(super) struct JitCompilerBuiltInValues<'a> {
+pub(in crate::jit_compiler) struct JitCompilerBuiltInValues<'a> {
     underlying: BuiltInValues<JitCompilerBuiltInValueProvider<'a>>,
-    pub(super) __cxa_allocate_exception: BuiltInLinkedFunction<'a>,
-    pub(super) __cxa_begin_catch: BuiltInLinkedFunction<'a>,
-    pub(super) __cxa_end_catch: BuiltInLinkedFunction<'a>,
-    pub(super) __cxa_throw: BuiltInLinkedFunction<'a>,
-    pub(super) __gxx_personality_v0: BuiltInLinkedFunction<'a>,
-    pub(super) _divide_i8: BuiltInMappedFunction<'a>,
-    pub(super) _divide_i16: BuiltInMappedFunction<'a>,
-    pub(super) _divide_i32: BuiltInMappedFunction<'a>,
-    pub(super) _divide_i64: BuiltInMappedFunction<'a>,
-    pub(super) _divide_u8: BuiltInMappedFunction<'a>,
-    pub(super) _divide_u16: BuiltInMappedFunction<'a>,
-    pub(super) _divide_u32: BuiltInMappedFunction<'a>,
-    pub(super) _divide_u64: BuiltInMappedFunction<'a>,
-    pub(super) _garbage_collection_plan_type: IntType<'a>,
-    pub(super) _job_new: BuiltInMappedFunction<'a>,
-    pub(super) _job_type: StructType<'a>,
-    pub(super) _mmtk_alloc: BuiltInMappedFunction<'a>,
-    pub(super) _mmtk_bind_current_mutator: BuiltInMappedFunction<'a>,
-    pub(super) _mmtk_init: BuiltInMappedFunction<'a>,
-    pub(super) _print_c_string: BuiltInMappedFunction<'a>,
-    pub(super) _value_buffer_option_type: StructType<'a>,
-    pub(super) _value_buffer_type: ArrayType<'a>,
-    pub(super) _workerpool_join: BuiltInMappedFunction<'a>,
-    pub(super) _workerpool_new: BuiltInMappedFunction<'a>,
-    pub(super) _workerpool_worker: BuiltInMappedFunction<'a>,
-    pub(super) _worker_fork: BuiltInMappedFunction<'a>,
-    pub(super) _worker_free: BuiltInMappedFunction<'a>,
-    pub(super) _worker_tick: BuiltInMappedFunction<'a>,
-    pub(super) _worker_try_join: BuiltInMappedFunction<'a>,
+    pub(in crate::jit_compiler) __cxa_allocate_exception: BuiltInLinkedFunction<'a>,
+    pub(in crate::jit_compiler) __cxa_begin_catch: BuiltInLinkedFunction<'a>,
+    pub(in crate::jit_compiler) __cxa_end_catch: BuiltInLinkedFunction<'a>,
+    pub(in crate::jit_compiler) __cxa_throw: BuiltInLinkedFunction<'a>,
+    pub(in crate::jit_compiler) __gxx_personality_v0: BuiltInLinkedFunction<'a>,
+    pub(in crate::jit_compiler) _divide_i8: BuiltInMappedFunction<'a>,
+    pub(in crate::jit_compiler) _divide_i16: BuiltInMappedFunction<'a>,
+    pub(in crate::jit_compiler) _divide_i32: BuiltInMappedFunction<'a>,
+    pub(in crate::jit_compiler) _divide_i64: BuiltInMappedFunction<'a>,
+    pub(in crate::jit_compiler) _divide_u8: BuiltInMappedFunction<'a>,
+    pub(in crate::jit_compiler) _divide_u16: BuiltInMappedFunction<'a>,
+    pub(in crate::jit_compiler) _divide_u32: BuiltInMappedFunction<'a>,
+    pub(in crate::jit_compiler) _divide_u64: BuiltInMappedFunction<'a>,
+    pub(in crate::jit_compiler) _garbage_collection_plan_type: IntType<'a>,
+    pub(in crate::jit_compiler) _job_new: BuiltInMappedFunction<'a>,
+    pub(in crate::jit_compiler) _job_type: StructType<'a>,
+    pub(in crate::jit_compiler) _mmtk_alloc: BuiltInMappedFunction<'a>,
+    pub(in crate::jit_compiler) _mmtk_bind_current_mutator: BuiltInMappedFunction<'a>,
+    pub(in crate::jit_compiler) _mmtk_init: BuiltInMappedFunction<'a>,
+    pub(in crate::jit_compiler) _print_c_string: BuiltInMappedFunction<'a>,
+    pub(in crate::jit_compiler) _value_buffer_option_type: StructType<'a>,
+    pub(in crate::jit_compiler) _value_buffer_type: ArrayType<'a>,
+    pub(in crate::jit_compiler) _workerpool_join: BuiltInMappedFunction<'a>,
+    pub(in crate::jit_compiler) _workerpool_new: BuiltInMappedFunction<'a>,
+    pub(in crate::jit_compiler) _workerpool_worker: BuiltInMappedFunction<'a>,
+    pub(in crate::jit_compiler) _worker_fork: BuiltInMappedFunction<'a>,
+    pub(in crate::jit_compiler) _worker_free: BuiltInMappedFunction<'a>,
+    pub(in crate::jit_compiler) _worker_tick: BuiltInMappedFunction<'a>,
+    pub(in crate::jit_compiler) _worker_try_join: BuiltInMappedFunction<'a>,
 }
 
 impl<'a> JitCompilerBuiltInValues<'a> {
-    pub(super) fn get<Path: Equivalent<BuiltInPathBuf> + Hash>(
+    pub(in crate::jit_compiler) fn get<Path: Equivalent<BuiltInPathBuf> + Hash>(
         &mut self,
         path: &Path,
         local_name: LocalName,
@@ -355,7 +355,7 @@ impl<'a> JitCompilerBuiltInValues<'a> {
         ))
     }
 
-    pub(super) fn get_division_function_mut(
+    pub(in crate::jit_compiler) fn get_division_function_mut(
         &mut self,
         numeric_type: NumericType,
     ) -> &mut BuiltInMappedFunction<'a> {
@@ -371,7 +371,7 @@ impl<'a> JitCompilerBuiltInValues<'a> {
         }
     }
 
-    pub(super) fn new(
+    pub(in crate::jit_compiler) fn new(
         context: &'a Context,
         execution_engine: &ExecutionEngine<'a>,
         additional_values: HashMap<String, Box<dyn BuiltInValue<'a> + 'a>>,

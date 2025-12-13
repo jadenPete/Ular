@@ -9,7 +9,7 @@ use std::{
 };
 use ular::{
     arguments::Arguments,
-    jit_compiler::built_in_values::BuiltInMappedFunction,
+    jit_compiler::module::built_in_values::BuiltInMappedFunction,
     mmtk::runtime::{
         mmtk_pause_all_mutators, mmtk_pause_at_safepoint, mmtk_register_roots,
         mmtk_resume_all_mutators,

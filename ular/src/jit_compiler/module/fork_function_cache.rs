@@ -20,14 +20,14 @@ use std::{
     hash::{Hash, Hasher},
 };
 
-pub(super) struct ForkFunction<'a> {
+pub(in crate::jit_compiler) struct ForkFunction<'a> {
     function: FunctionValue<'a>,
     context_type: StructType<'a>,
     underlying_pointer: Option<PointerValue<'a>>,
 }
 
 impl<'a> ForkFunction<'a> {
-    pub(super) fn build_context(
+    pub(in crate::jit_compiler) fn build_context(
         self,
         builder: &Builder<'a>,
         scope: &mut JitCompilerScope<'_, 'a>,
@@ -72,12 +72,12 @@ impl<'a> ForkFunction<'a> {
         Ok(context)
     }
 
-    pub(super) fn function(&self) -> FunctionValue<'a> {
+    pub(in crate::jit_compiler) fn function(&self) -> FunctionValue<'a> {
         self.function
     }
 }
 
-pub(super) struct ForkFunctionCache<'a> {
+pub(in crate::jit_compiler) struct ForkFunctionCache<'a> {
     function_cache: HashMap<ForkFunctionKey<'a>, ForkFunctionValue<'a>>,
 }
 
@@ -206,7 +206,7 @@ impl<'a> ForkFunctionCache<'a> {
         })
     }
 
-    pub(super) fn get_or_build(
+    pub(in crate::jit_compiler) fn get_or_build(
         &mut self,
         function: UlarFunction<'a>,
         context: &'a Context,
@@ -225,7 +225,7 @@ impl<'a> ForkFunctionCache<'a> {
         }
     }
 
-    pub(super) fn new() -> Self {
+    pub(in crate::jit_compiler) fn new() -> Self {
         Self {
             function_cache: HashMap::new(),
         }
