@@ -23,6 +23,7 @@ use inkwell::{
 };
 use num::Zero;
 use std::{
+    cell::OnceCell,
     collections::HashMap,
     ffi::{c_char, CString},
     fmt::{Display, Formatter},
@@ -43,12 +44,12 @@ extern "C" {
 
 pub trait BuiltInValue<'a>: DynClone {
     fn get_value(
-        &mut self,
+        &self,
         local_name: LocalName,
         context: &'a Context,
         builder: &Builder<'a>,
         execution_engine: &ExecutionEngine<'a>,
-        module: &mut UlarModule<'a>,
+        module: &UlarModule<'a>,
     ) -> UlarValue<'a>;
 }
 
@@ -57,28 +58,28 @@ dyn_clone::clone_trait_object!(BuiltInValue<'_>);
 #[derive(Clone)]
 pub struct BuiltInBool<'a> {
     value: u64,
-    computed_value: Option<UlarValue<'a>>,
+    computed_value: OnceCell<UlarValue<'a>>,
 }
 
 impl BuiltInBool<'_> {
     pub fn new(value: u64) -> Self {
         Self {
             value,
-            computed_value: None,
+            computed_value: OnceCell::new(),
         }
     }
 }
 
 impl<'a> BuiltInValue<'a> for BuiltInBool<'a> {
     fn get_value(
-        &mut self,
+        &self,
         local_name: LocalName,
         context: &'a Context,
         builder: &Builder<'a>,
         _execution_engine: &ExecutionEngine,
-        module: &mut UlarModule<'a>,
+        module: &UlarModule<'a>,
     ) -> UlarValue<'a> {
-        self.computed_value.unwrap_or_else(|| {
+        *self.computed_value.get_or_init(|| {
             let global = module.add_global(context.i8_type());
 
             global.set_visibility(GlobalVisibility::Hidden);
@@ -90,7 +91,7 @@ impl<'a> BuiltInValue<'a> for BuiltInBool<'a> {
                     .as_basic_value_enum(),
             );
 
-            let result = builder
+            builder
                 .build_load(
                     context.i8_type(),
                     global.as_pointer_value(),
@@ -98,11 +99,7 @@ impl<'a> BuiltInValue<'a> for BuiltInBool<'a> {
                 )
                 .unwrap()
                 .into_int_value()
-                .into();
-
-            self.computed_value = Some(result);
-
-            result
+                .into()
         })
     }
 }
@@ -112,36 +109,31 @@ pub trait BuiltInFunction<'a> {
         &self,
         context: &'a Context,
         execution_engine: &ExecutionEngine<'a>,
-        module: &mut UlarModule<'a>,
+        module: &UlarModule<'a>,
     ) -> FunctionValue<'a>;
 
-    fn get_stored_function(&self) -> Option<FunctionValue<'a>>;
-    fn set_stored_function(&mut self, function: FunctionValue<'a>);
+    fn stored_function(&self) -> &OnceCell<FunctionValue<'a>>;
 
     fn get_inkwell_function(
-        &mut self,
+        &self,
         context: &'a Context,
         execution_engine: &ExecutionEngine<'a>,
-        module: &mut UlarModule<'a>,
+        module: &UlarModule<'a>,
     ) -> FunctionValue<'a> {
-        self.get_stored_function().unwrap_or_else(|| {
-            let function = self.build_function(context, execution_engine, module);
-
-            self.set_stored_function(function);
-
-            function
-        })
+        *self
+            .stored_function()
+            .get_or_init(|| self.build_function(context, execution_engine, module))
     }
 }
 
 impl<'a, A: BuiltInFunction<'a> + DynClone> BuiltInValue<'a> for A {
     fn get_value(
-        &mut self,
+        &self,
         _local_name: LocalName,
         context: &'a Context,
         _builder: &Builder<'a>,
         execution_engine: &ExecutionEngine<'a>,
-        module: &mut UlarModule<'a>,
+        module: &UlarModule<'a>,
     ) -> UlarValue<'a> {
         UlarValue::Function(UlarFunction::DirectReference(self.get_inkwell_function(
             context,
@@ -155,7 +147,7 @@ impl<'a, A: BuiltInFunction<'a> + DynClone> BuiltInValue<'a> for A {
 pub struct BuiltInLinkedFunction<'a> {
     name: String,
     signature: FunctionType<'a>,
-    stored_function: Option<FunctionValue<'a>>,
+    stored_function: OnceCell<FunctionValue<'a>>,
 }
 
 impl<'a> BuiltInLinkedFunction<'a> {
@@ -163,7 +155,7 @@ impl<'a> BuiltInLinkedFunction<'a> {
         Self {
             name,
             signature,
-            stored_function: None,
+            stored_function: OnceCell::new(),
         }
     }
 }
@@ -173,19 +165,15 @@ impl<'a> BuiltInFunction<'a> for BuiltInLinkedFunction<'a> {
         &self,
         _context: &'a Context,
         _execution_engine: &ExecutionEngine<'a>,
-        module: &mut UlarModule<'a>,
+        module: &UlarModule<'a>,
     ) -> FunctionValue<'a> {
         module
             .underlying
             .add_function(&self.name, self.signature, Some(Linkage::External))
     }
 
-    fn get_stored_function(&self) -> Option<FunctionValue<'a>> {
-        self.stored_function
-    }
-
-    fn set_stored_function(&mut self, function: FunctionValue<'a>) {
-        let _ = self.stored_function.insert(function);
+    fn stored_function(&self) -> &OnceCell<FunctionValue<'a>> {
+        &self.stored_function
     }
 }
 
@@ -194,7 +182,7 @@ pub struct BuiltInMappedFunction<'a> {
     name: String,
     signature: FunctionType<'a>,
     address: usize,
-    stored_function: Option<FunctionValue<'a>>,
+    stored_function: OnceCell<FunctionValue<'a>>,
 }
 
 impl<'a> BuiltInMappedFunction<'a> {
@@ -203,7 +191,7 @@ impl<'a> BuiltInMappedFunction<'a> {
             name,
             signature,
             address,
-            stored_function: None,
+            stored_function: OnceCell::new(),
         }
     }
 }
@@ -213,7 +201,7 @@ impl<'a> BuiltInFunction<'a> for BuiltInMappedFunction<'a> {
         &self,
         _context: &'a Context,
         execution_engine: &ExecutionEngine<'a>,
-        module: &mut UlarModule<'a>,
+        module: &UlarModule<'a>,
     ) -> FunctionValue<'a> {
         let result = module
             .underlying
@@ -224,12 +212,8 @@ impl<'a> BuiltInFunction<'a> for BuiltInMappedFunction<'a> {
         result
     }
 
-    fn get_stored_function(&self) -> Option<FunctionValue<'a>> {
-        self.stored_function
-    }
-
-    fn set_stored_function(&mut self, function: FunctionValue<'a>) {
-        let _ = self.stored_function.insert(function);
+    fn stored_function(&self) -> &OnceCell<FunctionValue<'a>> {
+        &self.stored_function
     }
 }
 
@@ -338,15 +322,15 @@ pub(in crate::jit_compiler) struct JitCompilerBuiltInValues<'a> {
 
 impl<'a> JitCompilerBuiltInValues<'a> {
     pub(in crate::jit_compiler) fn get<Path: Equivalent<BuiltInPathBuf> + Hash>(
-        &mut self,
+        &self,
         path: &Path,
         local_name: LocalName,
         context: &'a Context,
         builder: &Builder<'a>,
         execution_engine: &ExecutionEngine<'a>,
-        module: &mut UlarModule<'a>,
+        module: &UlarModule<'a>,
     ) -> Option<UlarValue<'a>> {
-        Some(self.underlying.get_mut(path)?.get_value(
+        Some(self.underlying.get(path)?.get_value(
             local_name,
             context,
             builder,
@@ -355,19 +339,19 @@ impl<'a> JitCompilerBuiltInValues<'a> {
         ))
     }
 
-    pub(in crate::jit_compiler) fn get_division_function_mut(
-        &mut self,
+    pub(in crate::jit_compiler) fn get_division_function(
+        &self,
         numeric_type: NumericType,
-    ) -> &mut BuiltInMappedFunction<'a> {
+    ) -> &BuiltInMappedFunction<'a> {
         match numeric_type {
-            NumericType::I8 => &mut self._divide_i8,
-            NumericType::I16 => &mut self._divide_i16,
-            NumericType::I32 => &mut self._divide_i32,
-            NumericType::I64 => &mut self._divide_i64,
-            NumericType::U8 => &mut self._divide_u8,
-            NumericType::U16 => &mut self._divide_u16,
-            NumericType::U32 => &mut self._divide_u32,
-            NumericType::U64 => &mut self._divide_u64,
+            NumericType::I8 => &self._divide_i8,
+            NumericType::I16 => &self._divide_i16,
+            NumericType::I32 => &self._divide_i32,
+            NumericType::I64 => &self._divide_i64,
+            NumericType::U8 => &self._divide_u8,
+            NumericType::U16 => &self._divide_u16,
+            NumericType::U32 => &self._divide_u32,
+            NumericType::U64 => &self._divide_u64,
         }
     }
 

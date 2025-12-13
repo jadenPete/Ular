@@ -88,10 +88,10 @@ impl<'a> JitCompilerPhase<'a> {
     fn compile_main_function(
         &self,
         builder: &Builder<'a>,
-        built_in_values: &mut JitCompilerBuiltInValues<'a>,
+        built_in_values: &JitCompilerBuiltInValues<'a>,
         execution_engine: &ExecutionEngine<'a>,
-        fork_function_cache: &mut ForkFunctionCache<'a>,
-        module: &mut UlarModule<'a>,
+        fork_function_cache: &ForkFunctionCache<'a>,
+        module: &UlarModule<'a>,
         struct_information: &[StructInformation<'_, 'a>],
         program: &AnalyzedProgram,
     ) -> Result<FunctionValue<'a>, CompilationError> {
@@ -257,9 +257,9 @@ impl<'a> JitCompilerPhase<'a> {
     fn compile_main_harness_function(
         &self,
         builder: &Builder<'a>,
-        built_in_values: &mut JitCompilerBuiltInValues<'a>,
+        built_in_values: &JitCompilerBuiltInValues<'a>,
         execution_engine: &ExecutionEngine<'a>,
-        module: &mut UlarModule<'a>,
+        module: &UlarModule<'a>,
         main_function: FunctionValue<'a>,
     ) {
         let main_harness_function = module.add_garbage_collecting_function(
@@ -460,10 +460,10 @@ impl<'a> JitCompilerPhase<'a> {
 
     fn compile_program(
         &self,
-        built_in_values: &mut JitCompilerBuiltInValues<'a>,
+        built_in_values: &JitCompilerBuiltInValues<'a>,
         execution_engine: &ExecutionEngine<'a>,
-        fork_function_cache: &mut ForkFunctionCache<'a>,
-        module: &mut UlarModule<'a>,
+        fork_function_cache: &ForkFunctionCache<'a>,
+        module: &UlarModule<'a>,
         program: &AnalyzedProgram,
     ) -> Result<JitFunction<'a, MainFunction>, CompilationError> {
         let target_triple = TargetMachine::get_default_triple();
@@ -567,7 +567,7 @@ impl<'a> JitCompilerPhase<'a> {
 
     fn get_string_values(
         &self,
-        module: &mut UlarModule<'a>,
+        module: &UlarModule<'a>,
         target_data: &TargetData,
         program: &AnalyzedProgram,
     ) -> Vec<UlarValue<'a>> {
@@ -616,7 +616,7 @@ impl<'a> Phase<&AnalyzedProgram> for JitCompilerPhase<'a> {
     type Output = CompiledProgram<'a>;
 
     fn execute(&self, program: &AnalyzedProgram) -> Result<CompiledProgram<'a>, CompilationError> {
-        let mut module: UlarModule = self.context.create_module("main").into();
+        let module: UlarModule = self.context.create_module("main").into();
 
         // SAFETY: `memory_manager` is passed directly to
         // `Module::create_mcjit_execution_engine_with_memory_manager`, which we assume doesn't use
@@ -633,18 +633,18 @@ impl<'a> Phase<&AnalyzedProgram> for JitCompilerPhase<'a> {
             )
             .unwrap();
 
-        let mut built_in_values = JitCompilerBuiltInValues::new(
+        let built_in_values = JitCompilerBuiltInValues::new(
             self.context,
             &execution_engine,
             self.additional_values.clone(),
         );
 
-        let mut fork_function_cache = ForkFunctionCache::new();
+        let fork_function_cache = ForkFunctionCache::new();
         let main_harness_function = self.compile_program(
-            &mut built_in_values,
+            &built_in_values,
             &execution_engine,
-            &mut fork_function_cache,
-            &mut module,
+            &fork_function_cache,
+            &module,
             program,
         )?;
 

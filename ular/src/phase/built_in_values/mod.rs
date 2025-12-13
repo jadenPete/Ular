@@ -53,13 +53,6 @@ impl<A: BuiltInValueProducer> BuiltInValues<A> {
         self.values_by_path.get(path)
     }
 
-    pub(crate) fn get_mut<Path: Equivalent<BuiltInPathBuf> + Hash>(
-        &mut self,
-        path: &Path,
-    ) -> Option<&mut A::Value> {
-        self.values_by_path.get_mut(path)
-    }
-
     pub(crate) fn new<AdditionalValues: IntoIterator<Item = (String, A::Value)>>(
         built_in_values: A,
         additional_values: AdditionalValues,

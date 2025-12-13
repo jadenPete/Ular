@@ -1,3 +1,4 @@
+pub(crate) mod cache;
 pub(crate) mod graph;
 pub(crate) mod number_map;
 

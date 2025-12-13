@@ -1,4 +1,5 @@
 use crate::{
+    data_structures::cache::Cache,
     error_reporting::CompilationError,
     jit_compiler::{
         get_value_buffer_type,
@@ -15,10 +16,7 @@ use inkwell::{
     values::{BasicMetadataValueEnum, BasicValueEnum, FunctionValue, PointerValue},
     AddressSpace,
 };
-use std::{
-    collections::HashMap,
-    hash::{Hash, Hasher},
-};
+use std::hash::{Hash, Hasher};
 
 pub(in crate::jit_compiler) struct ForkFunction<'a> {
     function: FunctionValue<'a>,
@@ -78,19 +76,19 @@ impl<'a> ForkFunction<'a> {
 }
 
 pub(in crate::jit_compiler) struct ForkFunctionCache<'a> {
-    function_cache: HashMap<ForkFunctionKey<'a>, ForkFunctionValue<'a>>,
+    function_cache: Cache<ForkFunctionKey<'a>, ForkFunctionValue<'a>>,
 }
 
 impl<'a> ForkFunctionCache<'a> {
     fn get_or_insert_value(
-        &mut self,
+        &self,
         key: ForkFunctionKey<'a>,
         context: &'a Context,
         module: &UlarModule<'a>,
     ) -> ForkFunctionValue<'a> {
         let cache_length = self.function_cache.len();
 
-        *self.function_cache.entry(key).or_insert_with(|| {
+        self.function_cache.get_or_compute(key, || {
             // Skip the first parameter, which is the worker pointer
             let parameter_types = &key.get_function_type().get_param_types()[1..];
             let mut context_field_types = Vec::new();
@@ -207,7 +205,7 @@ impl<'a> ForkFunctionCache<'a> {
     }
 
     pub(in crate::jit_compiler) fn get_or_build(
-        &mut self,
+        &self,
         function: UlarFunction<'a>,
         context: &'a Context,
         module: &UlarModule<'a>,
@@ -227,7 +225,7 @@ impl<'a> ForkFunctionCache<'a> {
 
     pub(in crate::jit_compiler) fn new() -> Self {
         Self {
-            function_cache: HashMap::new(),
+            function_cache: Cache::new(),
         }
     }
 }

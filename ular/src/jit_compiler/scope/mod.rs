@@ -43,9 +43,9 @@ impl<'a, 'context> JitCompilerScope<'a, 'context> {
         scope_context: &JitCompilerScopeContext<'context>,
         context: &'context Context,
         builder: &Builder<'context>,
-        built_in_values: &mut JitCompilerBuiltInValues<'context>,
+        built_in_values: &JitCompilerBuiltInValues<'context>,
         execution_engine: &ExecutionEngine<'context>,
-        module: &mut UlarModule<'context>,
+        module: &UlarModule<'context>,
     ) -> Result<UlarValue<'context>, CompilationError> {
         match reference {
             AnalyzedExpressionRef::BuiltIn { path, .. } => Ok(built_in_values

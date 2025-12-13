@@ -520,7 +520,7 @@ impl<'context> CompilableInfixOperation<'_> {
             NumericInfixOperator::Division => {
                 let division_function = compiler
                     .built_in_values
-                    .get_division_function_mut(argument_numeric_type)
+                    .get_division_function(argument_numeric_type)
                     .get_inkwell_function(
                         compiler.context,
                         compiler.execution_engine,
@@ -939,11 +939,11 @@ impl<'context> InlineExpression<'context> for CompilableStructApplication<'_> {
 }
 
 pub(super) struct JitFunctionCompiler<'a, 'context> {
-    pub(super) built_in_values: &'a mut JitCompilerBuiltInValues<'context>,
+    pub(super) built_in_values: &'a JitCompilerBuiltInValues<'context>,
     pub(super) context: &'context Context,
     pub(super) execution_engine: &'a ExecutionEngine<'context>,
-    pub(super) fork_function_cache: &'a mut ForkFunctionCache<'context>,
-    pub(super) module: &'a mut UlarModule<'context>,
+    pub(super) fork_function_cache: &'a ForkFunctionCache<'context>,
+    pub(super) module: &'a UlarModule<'context>,
     pub(super) scope_context: &'a JitCompilerScopeContext<'context>,
     pub(super) struct_information: &'a [StructInformation<'a, 'context>],
     pub(super) function: FunctionValue<'context>,
