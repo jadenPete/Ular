@@ -2,7 +2,7 @@ use crate::{
     arguments::GarbageCollectionPlan,
     jit_compiler::{
         get_value_buffer_type,
-        module::UlarModule,
+        module::global_value_registry::GlobalValueRegistry,
         scope::LocalName,
         value::{UlarFunction, UlarValue},
     },
@@ -16,7 +16,7 @@ use inkwell::{
     builder::Builder,
     context::Context,
     execution_engine::ExecutionEngine,
-    module::Linkage,
+    module::{Linkage, Module},
     types::{ArrayType, FunctionType, IntType, StructType},
     values::{BasicValue, FunctionValue},
     AddressSpace, GlobalVisibility,
@@ -44,8 +44,9 @@ extern "C" {
 
 pub struct BuiltInDependencies<'a, 'context> {
     context: &'context Context,
+    global_value_registry: &'a GlobalValueRegistry<'a, 'context>,
     execution_engine: &'a ExecutionEngine<'context>,
-    module: &'a UlarModule<'context>,
+    module: &'a Module<'context>,
 }
 
 pub trait BuiltInValue<'a>: DynClone {
@@ -82,11 +83,13 @@ impl<'a> BuiltInValue<'a> for BuiltInBool<'a> {
         builder: &Builder<'a>,
     ) -> UlarValue<'a> {
         let BuiltInDependencies {
-            context, module, ..
+            context,
+            global_value_registry,
+            ..
         } = dependencies;
 
         *self.computed_value.get_or_init(|| {
-            let global = module.add_global(context.i8_type());
+            let global = global_value_registry.add_global(context.i8_type());
 
             global.set_visibility(GlobalVisibility::Hidden);
             global.set_constant(true);
@@ -163,11 +166,9 @@ impl<'a> BuiltInLinkedFunction<'a> {
 
 impl<'a> BuiltInFunction<'a> for BuiltInLinkedFunction<'a> {
     fn build_function(&self, dependencies: &BuiltInDependencies<'_, 'a>) -> FunctionValue<'a> {
-        dependencies.module.underlying.add_function(
-            &self.name,
-            self.signature,
-            Some(Linkage::External),
-        )
+        dependencies
+            .module
+            .add_function(&self.name, self.signature, Some(Linkage::External))
     }
 
     fn stored_function(&self) -> &OnceCell<FunctionValue<'a>> {
@@ -202,9 +203,7 @@ impl<'a> BuiltInFunction<'a> for BuiltInMappedFunction<'a> {
             ..
         } = dependencies;
 
-        let result = module
-            .underlying
-            .add_function(&self.name, self.signature, None);
+        let result = module.add_function(&self.name, self.signature, None);
 
         execution_engine.add_global_mapping(&result, self.address);
 
@@ -353,12 +352,14 @@ impl<'a, 'context> JitCompilerBuiltInValues<'a, 'context> {
     pub(in crate::jit_compiler) fn new(
         context: &'context Context,
         execution_engine: &'a ExecutionEngine<'context>,
-        module: &'a UlarModule<'context>,
+        global_value_registry: &'a GlobalValueRegistry<'a, 'context>,
+        module: &'a Module<'context>,
         additional_values: HashMap<String, Box<dyn BuiltInValue<'context> + 'context>>,
     ) -> Self {
         let dependencies = BuiltInDependencies {
             context,
             execution_engine,
+            global_value_registry,
             module,
         };
 

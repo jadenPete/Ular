@@ -1,5 +1,6 @@
 pub mod built_in_values;
 pub(super) mod fork_function_cache;
+pub(super) mod global_value_registry;
 pub(super) mod memory_manager;
 
 use crate::{
@@ -8,10 +9,9 @@ use crate::{
 };
 use inkwell::{
     module::{Linkage, Module},
-    types::{BasicType, FunctionType, StructType},
-    values::{FunctionValue, GlobalValue},
+    types::{FunctionType, StructType},
+    values::FunctionValue,
 };
-use std::cell::Cell;
 
 pub(super) struct StructInformation<'a, 'context> {
     pub(super) definition: &'a AnalyzedStructDefinition,
@@ -19,40 +19,14 @@ pub(super) struct StructInformation<'a, 'context> {
     pub(super) descriptor_reference: ObjectDescriptorReference,
 }
 
-pub struct UlarModule<'a> {
-    pub(super) underlying: Module<'a>,
-    next_global_value: Cell<u32>,
-}
+pub(super) fn add_garbage_collecting_function<'a>(
+    module: &Module<'a>,
+    name: &str,
+    type_: FunctionType<'a>,
+    linkage: Option<Linkage>,
+) -> FunctionValue<'a> {
+    let result = module.add_function(name, type_, linkage);
 
-impl<'a> UlarModule<'a> {
-    pub(super) fn add_garbage_collecting_function(
-        &self,
-        name: &str,
-        type_: FunctionType<'a>,
-        linkage: Option<Linkage>,
-    ) -> FunctionValue<'a> {
-        let result = self.underlying.add_function(name, type_, linkage);
-
-        result.set_gc("statepoint-example");
-        result
-    }
-
-    pub(super) fn add_global<A: BasicType<'a>>(&self, type_: A) -> GlobalValue<'a> {
-        let name = self.next_global_value.get();
-
-        self.next_global_value.set(self.next_global_value.get() + 1);
-
-        let result = self.underlying.add_global(type_, None, &name.to_string());
-
-        result
-    }
-}
-
-impl<'a> From<Module<'a>> for UlarModule<'a> {
-    fn from(module: Module<'a>) -> Self {
-        Self {
-            underlying: module,
-            next_global_value: Cell::new(0),
-        }
-    }
+    result.set_gc("statepoint-example");
+    result
 }

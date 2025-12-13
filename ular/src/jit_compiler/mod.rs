@@ -9,12 +9,13 @@ use crate::{
     error_reporting::{CompilationError, CompilationErrorMessage},
     jit_compiler::{
         function::JitFunctionCompiler,
-        module::StructInformation,
         module::{
+            add_garbage_collecting_function,
             built_in_values::{BuiltInFunction, BuiltInValue, JitCompilerBuiltInValues},
             fork_function_cache::ForkFunctionCache,
+            global_value_registry::GlobalValueRegistry,
             memory_manager::UlarMemoryManager,
-            UlarModule,
+            StructInformation,
         },
         scope::{JitCompilerScope, JitCompilerScopeContext},
         value::UlarValue,
@@ -30,6 +31,7 @@ use inkwell::{
     builder::Builder,
     context::Context,
     execution_engine::{ExecutionEngine, JitFunction},
+    module::Module,
     passes::PassBuilderOptions,
     targets::{CodeModel, RelocMode, Target, TargetData, TargetMachine},
     types::{ArrayType, BasicType},
@@ -62,7 +64,7 @@ impl Phase<&CompiledProgram<'_>> for ExecutorPhase {
 }
 
 pub(crate) struct CompiledProgram<'a> {
-    module: UlarModule<'a>,
+    module: Module<'a>,
     main_harness_function: JitFunction<'a, unsafe extern "C" fn() -> u8>,
 }
 
@@ -71,7 +73,7 @@ impl Debug for CompiledProgram<'_> {
         write!(
             formatter,
             "{}",
-            self.module.underlying.print_to_string().to_str().unwrap()
+            self.module.print_to_string().to_str().unwrap()
         )
     }
 }
@@ -91,11 +93,13 @@ impl<'a> JitCompilerPhase<'a> {
         built_in_values: &JitCompilerBuiltInValues<'_, 'a>,
         execution_engine: &ExecutionEngine<'a>,
         fork_function_cache: &ForkFunctionCache<'_, 'a>,
-        module: &UlarModule<'a>,
+        global_value_registry: &GlobalValueRegistry<'_, 'a>,
+        module: &Module<'a>,
         struct_information: &[StructInformation<'_, 'a>],
         program: &AnalyzedProgram,
     ) -> Result<FunctionValue<'a>, CompilationError> {
-        let main_function = module.add_garbage_collecting_function(
+        let main_function = add_garbage_collecting_function(
+            module,
             MAIN_FUNCTION_NAME,
             self.context.void_type().fn_type(
                 &[self.context.ptr_type(AddressSpace::default()).into()],
@@ -134,7 +138,8 @@ impl<'a> JitCompilerPhase<'a> {
                             struct_definition.name.value, method_definition.name.value
                         );
 
-                        Ok(module.add_garbage_collecting_function(
+                        Ok(add_garbage_collecting_function(
+                            module,
                             &function_name,
                             function_type,
                             None,
@@ -156,7 +161,8 @@ impl<'a> JitCompilerPhase<'a> {
                         }
                     })?;
 
-                Ok(module.add_garbage_collecting_function(
+                Ok(add_garbage_collecting_function(
+                    module,
                     &definition.name.value,
                     function_type,
                     None,
@@ -164,8 +170,11 @@ impl<'a> JitCompilerPhase<'a> {
             })
             .collect::<Result<_, _>>()?;
 
-        let string_values =
-            self.get_string_values(module, execution_engine.get_target_data(), program);
+        let string_values = self.get_string_values(
+            global_value_registry,
+            execution_engine.get_target_data(),
+            program,
+        );
 
         let scope_context = JitCompilerScopeContext {
             function_values,
@@ -186,7 +195,6 @@ impl<'a> JitCompilerPhase<'a> {
             context: self.context,
             execution_engine,
             fork_function_cache,
-            module,
             scope_context: &scope_context,
             struct_information,
             function: main_function,
@@ -265,10 +273,11 @@ impl<'a> JitCompilerPhase<'a> {
         &self,
         builder: &Builder<'a>,
         built_in_values: &JitCompilerBuiltInValues<'_, 'a>,
-        module: &UlarModule<'a>,
+        module: &Module<'a>,
         main_function: FunctionValue<'a>,
     ) {
-        let main_harness_function = module.add_garbage_collecting_function(
+        let main_harness_function = add_garbage_collecting_function(
+            module,
             MAIN_HARNESS_FUNCTION_NAME,
             self.context.i8_type().fn_type(&[], false),
             None,
@@ -451,7 +460,8 @@ impl<'a> JitCompilerPhase<'a> {
         built_in_values: &JitCompilerBuiltInValues<'_, 'a>,
         execution_engine: &ExecutionEngine<'a>,
         fork_function_cache: &ForkFunctionCache<'_, 'a>,
-        module: &UlarModule<'a>,
+        global_value_registry: &GlobalValueRegistry<'_, 'a>,
+        module: &Module<'a>,
         program: &AnalyzedProgram,
     ) -> Result<JitFunction<'a, MainFunction>, CompilationError> {
         let target_triple = TargetMachine::get_default_triple();
@@ -524,6 +534,7 @@ impl<'a> JitCompilerPhase<'a> {
             built_in_values,
             execution_engine,
             fork_function_cache,
+            global_value_registry,
             module,
             &struct_information,
             program,
@@ -532,7 +543,6 @@ impl<'a> JitCompilerPhase<'a> {
         self.compile_main_harness_function(&builder, built_in_values, module, main_function);
 
         module
-            .underlying
             .run_passes(
                 "rewrite-statepoints-for-gc",
                 &target_machine,
@@ -549,7 +559,7 @@ impl<'a> JitCompilerPhase<'a> {
 
     fn get_string_values(
         &self,
-        module: &UlarModule<'a>,
+        global_value_registry: &GlobalValueRegistry<'_, 'a>,
         target_data: &TargetData,
         program: &AnalyzedProgram,
     ) -> Vec<UlarValue<'a>> {
@@ -582,7 +592,7 @@ impl<'a> JitCompilerPhase<'a> {
                     string_array.into(),
                 ]);
 
-                let string_global = module.add_global(string_type);
+                let string_global = global_value_registry.add_global(string_type);
 
                 string_global.set_name(&format!(".str{}", i));
                 string_global.set_constant(true);
@@ -598,14 +608,14 @@ impl<'a> Phase<&AnalyzedProgram> for JitCompilerPhase<'a> {
     type Output = CompiledProgram<'a>;
 
     fn execute(&self, program: &AnalyzedProgram) -> Result<CompiledProgram<'a>, CompilationError> {
-        let module: UlarModule = self.context.create_module("main").into();
+        let module = self.context.create_module("main");
+        let global_value_registry = GlobalValueRegistry::new(&module);
 
         // SAFETY: `memory_manager` is passed directly to
         // `Module::create_mcjit_execution_engine_with_memory_manager`, which we assume doesn't use
         // the allocated code or data sections after `UlarMemoryManager::destroy` is called
         let memory_manager = unsafe { UlarMemoryManager::new(self.print_stack_map) };
         let execution_engine = module
-            .underlying
             .create_mcjit_execution_engine_with_memory_manager(
                 memory_manager,
                 OptimizationLevel::None,
@@ -618,6 +628,7 @@ impl<'a> Phase<&AnalyzedProgram> for JitCompilerPhase<'a> {
         let built_in_values = JitCompilerBuiltInValues::new(
             self.context,
             &execution_engine,
+            &global_value_registry,
             &module,
             self.additional_values.clone(),
         );
@@ -627,6 +638,7 @@ impl<'a> Phase<&AnalyzedProgram> for JitCompilerPhase<'a> {
             &built_in_values,
             &execution_engine,
             &fork_function_cache,
+            &global_value_registry,
             &module,
             program,
         )?;

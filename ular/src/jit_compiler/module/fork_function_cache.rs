@@ -3,7 +3,6 @@ use crate::{
     error_reporting::CompilationError,
     jit_compiler::{
         get_value_buffer_type,
-        module::UlarModule,
         scope::JitCompilerScope,
         value::{UlarFunction, UlarValue},
     },
@@ -12,6 +11,7 @@ use either::Left;
 use inkwell::{
     builder::Builder,
     context::Context,
+    module::Module,
     types::{BasicTypeEnum, FunctionType, StructType},
     values::{BasicMetadataValueEnum, BasicValueEnum, FunctionValue, PointerValue},
     AddressSpace,
@@ -77,7 +77,7 @@ impl<'a> ForkFunction<'a> {
 
 pub(in crate::jit_compiler) struct ForkFunctionCache<'a, 'context> {
     context: &'context Context,
-    module: &'a UlarModule<'context>,
+    module: &'a Module<'context>,
     function_cache: Cache<ForkFunctionKey<'context>, ForkFunctionValue<'context>>,
 }
 
@@ -100,7 +100,7 @@ impl<'a, 'context> ForkFunctionCache<'a, 'context> {
 
             let context_type = self.context.struct_type(&context_field_types, false);
             let value_buffer_type = get_value_buffer_type(self.context);
-            let function = self.module.underlying.add_function(
+            let function = self.module.add_function(
                 &format!("fork_{}", cache_length),
                 value_buffer_type.fn_type(
                     &[
@@ -219,7 +219,7 @@ impl<'a, 'context> ForkFunctionCache<'a, 'context> {
 
     pub(in crate::jit_compiler) fn new(
         context: &'context Context,
-        module: &'a UlarModule<'context>,
+        module: &'a Module<'context>,
     ) -> Self {
         Self {
             context,

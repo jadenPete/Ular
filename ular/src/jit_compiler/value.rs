@@ -3,7 +3,6 @@ use crate::{
     error_reporting::{CompilationError, CompilationErrorMessage, InternalError, Position},
     jit_compiler::scope::LocalName,
 };
-
 use either::Either::{Left, Right};
 use inkwell::{
     basic_block::BasicBlock,
