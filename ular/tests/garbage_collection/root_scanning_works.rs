@@ -1,4 +1,4 @@
-use inkwell::context::Context;
+use inkwell::{context::Context, AddressSpace};
 use mmtk::{
     util::{Address, ObjectReference},
     vm::{slot::SimpleSlot, RootsWorkFactory},
@@ -62,7 +62,7 @@ impl RootsWorkFactory<SimpleSlot> for MockRootsWorkFactory {
     }
 }
 
-extern "C" fn __pause_for_garbage_collection(_worker: *mut Worker) {
+extern "C" fn __pause_for_garbage_collection(_worker: &Worker) {
     let (mutex, conditional_variable) = &*PAUSING_FOR_GARBAGE_COLLECTION;
 
     *mutex.lock().unwrap() = true;
@@ -110,7 +110,11 @@ seq {
             AdditionalValue {
                 built_in_value: Box::new(BuiltInMappedFunction::new(
                     String::from("__pause_for_garbage_collection"),
-                    context.void_type().fn_type(&[], false),
+                    context.void_type().fn_type(
+                        // Add an extra parameter for the worker pointer
+                        &[context.ptr_type(AddressSpace::default()).into()],
+                        false,
+                    ),
                     __pause_for_garbage_collection as usize,
                 )),
 
@@ -147,14 +151,23 @@ seq {
         let unique_roots = roots.iter().collect::<HashSet<_>>();
 
         // Within the first call, we expect three roots:
-        // - `newborn`
-        // - `one_year_old`
-        // - `person`
+        // 1. `newborn`
+        // 2. `one_year_old`
+        // 3. The closure context value for the first `print_person_age` reference
+        // 4. The closure context value for the second `print_person_age` reference
+        // 5. `person`
+        // 6. The context parameter of `print_person_age`'s closure
+        // 7. The closure context value for the `__pause_for_garbage_collection` reference
+        // 8. The context parameter of `__pause_for_garbage_collection`'s closure
         //
-        // Within the second call, we expect two roots (`newborn` will have gone out of scope):
-        // - `one_year_old`
-        // - `person`
-        assert_eq!(unique_roots.len(), if i == 0 { 3 } else { 2 });
+        // Within the second call, we expect two roots (roots 1 and 4 will have gone out of scope):
+        // 1. `one_year_old`
+        // 2. The closure context value for the first `print_person_age` reference
+        // 3. `person`
+        // 4. The context parameter of `print_person_age`'s closure
+        // 5. The closure context value for the `__pause_for_garbage_collection` reference
+        // 6. The context parameter of `__pause_for_garbage_collection`'s closure
+        assert_eq!(unique_roots.len(), if i == 0 { 8 } else { 6 });
 
         mmtk_resume_all_mutators();
     }

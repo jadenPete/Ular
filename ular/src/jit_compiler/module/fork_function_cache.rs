@@ -2,7 +2,7 @@ use crate::{
     data_structures::cache::Cache,
     error_reporting::CompilationError,
     jit_compiler::{
-        get_value_buffer_type,
+        compile_inline_call_without_tick, get_value_buffer_type,
         scope::JitCompilerScope,
         value::{UlarFunction, UlarValue},
     },
@@ -82,7 +82,7 @@ pub(in crate::jit_compiler) struct ForkFunctionCache<'a, 'context> {
 }
 
 impl<'a, 'context> ForkFunctionCache<'a, 'context> {
-    fn get_or_insert_value(&self, key: ForkFunctionKey<'context>) -> ForkFunctionValue<'context> {
+    fn get_or_insert_value(&self, key: &ForkFunctionKey<'context>) -> ForkFunctionValue<'context> {
         let cache_length = self.function_cache.len();
 
         self.function_cache.get_or_compute(key, || {
@@ -90,7 +90,10 @@ impl<'a, 'context> ForkFunctionCache<'a, 'context> {
             let parameter_types = &key.get_function_type().get_param_types()[1..];
             let mut context_field_types = Vec::new();
 
-            if let ForkFunctionKey::Indirect { .. } = key {
+            // The scheduler supports passing a context value to the fork function that's called. Our
+            // context value will be a struct containing a pointer to the function we're working with
+            // (if it isn't known at compile-time) and the arguments it's called with
+            if let ForkFunctionKey::Closure { .. } = key {
                 context_field_types.push(self.context.ptr_type(AddressSpace::default()).into());
             }
 
@@ -120,62 +123,73 @@ impl<'a, 'context> ForkFunctionCache<'a, 'context> {
             let parameters = function.get_params();
             let worker_parameter = parameters[0];
             let context_parameter = parameters[1].into_pointer_value();
-            let mut arguments: Vec<BasicMetadataValueEnum> = vec![worker_parameter.into()];
             let underlying_function = match key {
-                ForkFunctionKey::Direct { function } => UlarFunction::DirectReference(function),
-                ForkFunctionKey::Indirect { type_ } => {
-                    let pointer_pointer = builder
-                        .build_struct_gep(context_type, context_parameter, 0, "underlying_pointer")
+                ForkFunctionKey::Function { function } => UlarFunction::Function(*function),
+                ForkFunctionKey::Closure { type_ } => {
+                    let context_pointer_pointer = builder
+                        .build_struct_gep(
+                            context_type,
+                            context_parameter,
+                            0,
+                            "underlying_function_context_pointer_pointer",
+                        )
                         .unwrap();
 
-                    let pointer = builder
+                    let context_pointer = builder
                         .build_load(
                             self.context.ptr_type(AddressSpace::default()),
-                            pointer_pointer,
-                            "underlying_value",
+                            context_pointer_pointer,
+                            "underlying_function_context_pointer",
                         )
                         .unwrap()
                         .into_pointer_value();
 
-                    UlarFunction::IndirectReference { pointer, type_ }
+                    UlarFunction::Closure {
+                        context_pointer,
+                        type_: *type_,
+                    }
                 }
             };
 
-            for (i, parameter_type) in parameter_types.iter().enumerate() {
-                let pointer = builder
-                    .build_struct_gep(
-                        context_type,
-                        context_parameter,
-                        match key {
-                            ForkFunctionKey::Direct { .. } => i as u32,
-                            ForkFunctionKey::Indirect { .. } => i as u32 + 1,
-                        },
-                        &format!("{}_pointer", i),
-                    )
-                    .unwrap();
+            let arguments: Vec<BasicMetadataValueEnum> = parameter_types
+                .iter()
+                .enumerate()
+                .map(|(i, parameter_type)| {
+                    let pointer = builder
+                        .build_struct_gep(
+                            context_type,
+                            context_parameter,
+                            match key {
+                                ForkFunctionKey::Function { .. } => i as u32,
+                                ForkFunctionKey::Closure { .. } => i as u32 + 1,
+                            },
+                            &format!("{}_pointer", i),
+                        )
+                        .unwrap();
 
-                let value = builder
-                    .build_load(
-                        BasicTypeEnum::try_from(*parameter_type).unwrap(),
-                        pointer,
-                        &format!("{}_value", i),
-                    )
-                    .unwrap()
-                    .into();
+                    let value = builder
+                        .build_load(
+                            BasicTypeEnum::try_from(*parameter_type).unwrap(),
+                            pointer,
+                            &format!("{}_value", i),
+                        )
+                        .unwrap()
+                        .into();
 
-                arguments.push(value);
-            }
+                    value
+                })
+                .collect();
 
-            let underlying_result = match underlying_function {
-                UlarFunction::DirectReference(underlying_value) => {
-                    builder.build_call(underlying_value, &arguments, "result")
-                }
-
-                UlarFunction::IndirectReference { pointer, type_ } => {
-                    builder.build_indirect_call(type_, pointer, &arguments, "result")
-                }
-            }
-            .unwrap()
+            let underlying_result = compile_inline_call_without_tick(
+                self.context,
+                &builder,
+                underlying_function,
+                worker_parameter.into_pointer_value(),
+                arguments,
+                "underlying_function_pointer_pointer",
+                "underlying_function_pointer",
+                "underlying_result",
+            )
             .try_as_basic_value();
 
             let result_buffer_pointer = builder
@@ -205,14 +219,16 @@ impl<'a, 'context> ForkFunctionCache<'a, 'context> {
         &self,
         function: UlarFunction<'context>,
     ) -> ForkFunction<'context> {
-        let value = self.get_or_insert_value(ForkFunctionKey::for_function(function));
+        let value = self.get_or_insert_value(&ForkFunctionKey::for_function(function));
 
         ForkFunction {
             function: value.function,
             context_type: value.context_type,
             underlying_pointer: match function {
-                UlarFunction::DirectReference(_) => None,
-                UlarFunction::IndirectReference { pointer, .. } => Some(pointer),
+                UlarFunction::Function(_) => None,
+                UlarFunction::Closure {
+                    context_pointer, ..
+                } => Some(context_pointer),
             },
         }
     }
@@ -231,22 +247,22 @@ impl<'a, 'context> ForkFunctionCache<'a, 'context> {
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 enum ForkFunctionKey<'a> {
-    Direct { function: FunctionValue<'a> },
-    Indirect { type_: FunctionType<'a> },
+    Function { function: FunctionValue<'a> },
+    Closure { type_: FunctionType<'a> },
 }
 
 impl<'a> ForkFunctionKey<'a> {
     fn for_function(function: UlarFunction<'a>) -> Self {
         match function {
-            UlarFunction::DirectReference(function) => ForkFunctionKey::Direct { function },
-            UlarFunction::IndirectReference { type_, .. } => ForkFunctionKey::Indirect { type_ },
+            UlarFunction::Function(function) => ForkFunctionKey::Function { function },
+            UlarFunction::Closure { type_, .. } => ForkFunctionKey::Closure { type_ },
         }
     }
 
     fn get_function_type(&self) -> FunctionType<'a> {
         match self {
-            Self::Direct { function } => function.get_type(),
-            Self::Indirect { type_ } => *type_,
+            Self::Function { function } => function.get_type(),
+            Self::Closure { type_ } => *type_,
         }
     }
 }
@@ -254,13 +270,13 @@ impl<'a> ForkFunctionKey<'a> {
 impl Hash for ForkFunctionKey<'_> {
     fn hash<A: Hasher>(&self, state: &mut A) {
         match self {
-            ForkFunctionKey::Direct { function } => {
+            ForkFunctionKey::Function { function } => {
                 state.write_u8(0);
 
                 function.get_name().hash(state);
             }
 
-            ForkFunctionKey::Indirect { type_ } => {
+            ForkFunctionKey::Closure { type_ } => {
                 state.write_u8(1);
 
                 HashableFunctionType(*type_).hash(state);

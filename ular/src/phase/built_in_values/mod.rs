@@ -1,4 +1,7 @@
-use crate::parser::type_::NumericType;
+use crate::{
+    data_structures::cache::{FlexibleBorrow, FlexibleToOwned},
+    parser::type_::NumericType,
+};
 use dashmap::Equivalent;
 use std::hash::Hash;
 
@@ -8,20 +11,23 @@ pub(crate) enum BuiltInPath<'a> {
     Method(&'a str, &'a str),
 }
 
+impl<'a> FlexibleToOwned<'a> for BuiltInPath<'a> {
+    type Owned = BuiltInPathBuf;
+
+    fn to_flexible_owned(&'a self) -> Self::Owned {
+        match self {
+            Self::Identifier(value) => BuiltInPathBuf::Identifier((*value).to_flexible_owned()),
+            Self::Method(left_hand_side, right_hand_side) => BuiltInPathBuf::Method(
+                (*left_hand_side).to_flexible_owned(),
+                (*right_hand_side).to_flexible_owned(),
+            ),
+        }
+    }
+}
+
 impl Equivalent<BuiltInPathBuf> for BuiltInPath<'_> {
     fn equivalent(&self, key: &BuiltInPathBuf) -> bool {
-        match (self, key) {
-            (BuiltInPath::Identifier(value1), BuiltInPathBuf::Identifier(value2)) => {
-                value1 == value2
-            }
-
-            (
-                BuiltInPath::Method(left_hand_side1, right_hand_side1),
-                BuiltInPathBuf::Method(left_hand_side2, right_hand_side2),
-            ) => left_hand_side1 == left_hand_side2 && right_hand_side1 == right_hand_side2,
-
-            _ => false,
-        }
+        self == &key.flexible_borrow()
     }
 }
 
@@ -29,6 +35,18 @@ impl Equivalent<BuiltInPathBuf> for BuiltInPath<'_> {
 pub(crate) enum BuiltInPathBuf {
     Identifier(String),
     Method(String, String),
+}
+
+impl<'a> FlexibleBorrow<'a, BuiltInPath<'a>> for BuiltInPathBuf {
+    fn flexible_borrow(&'a self) -> BuiltInPath<'a> {
+        match self {
+            Self::Identifier(value) => BuiltInPath::Identifier(value.flexible_borrow()),
+            Self::Method(left_hand_side, right_hand_side) => BuiltInPath::Method(
+                left_hand_side.flexible_borrow(),
+                right_hand_side.flexible_borrow(),
+            ),
+        }
+    }
 }
 
 pub(crate) trait BuiltInValueProducer {

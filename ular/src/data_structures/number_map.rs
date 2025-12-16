@@ -121,14 +121,6 @@ impl<A: Debug> Debug for NumberMap<A> {
     }
 }
 
-impl<A> Extend<(usize, A)> for NumberMap<A> {
-    fn extend<T: IntoIterator<Item = (usize, A)>>(&mut self, iter: T) {
-        for (i, value) in iter {
-            self.insert(i, value);
-        }
-    }
-}
-
 pub(crate) struct IndexUndefinedError {
     pub(crate) index: usize,
 }

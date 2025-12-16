@@ -17,9 +17,9 @@ use inkwell::{
 
 #[derive(Clone, Copy, Debug)]
 pub enum UlarFunction<'a> {
-    DirectReference(FunctionValue<'a>),
-    IndirectReference {
-        pointer: PointerValue<'a>,
+    Function(FunctionValue<'a>),
+    Closure {
+        context_pointer: PointerValue<'a>,
         type_: FunctionType<'a>,
     },
 }
@@ -27,34 +27,17 @@ pub enum UlarFunction<'a> {
 impl<'a> UlarFunction<'a> {
     pub(super) fn get_pointer_value(&self) -> PointerValue<'a> {
         match self {
-            Self::DirectReference(function) => function.as_global_value().as_pointer_value(),
-            Self::IndirectReference { pointer, .. } => *pointer,
+            Self::Function(function) => function.as_global_value().as_pointer_value(),
+            Self::Closure {
+                context_pointer, ..
+            } => *context_pointer,
         }
     }
 
     pub(super) fn get_type(&self) -> FunctionType<'a> {
         match self {
-            Self::DirectReference(function) => function.get_type(),
-            Self::IndirectReference { type_, .. } => *type_,
-        }
-    }
-}
-
-impl<'a> TryFrom<UlarFunction<'a>> for FunctionValue<'a> {
-    type Error = CompilationError;
-
-    fn try_from(function: UlarFunction<'a>) -> Result<Self, Self::Error> {
-        match function {
-            UlarFunction::DirectReference(result) => Ok(result),
-            UlarFunction::IndirectReference { .. } => Err(CompilationError {
-                message: CompilationErrorMessage::InternalError(
-                    InternalError::JitCompilerTypeMismatch {
-                        expected_type: String::from("FunctionValue"),
-                        actual_value: format!("{:?}", function),
-                    },
-                ),
-                position: None,
-            }),
+            Self::Function(function) => function.get_type(),
+            Self::Closure { type_, .. } => *type_,
         }
     }
 }
@@ -108,17 +91,23 @@ impl<'a> UlarValue<'a> {
             }
 
             AnalyzedType::Struct(_) => Ok(UlarValue::Struct(basic_value_enum.into_pointer_value())),
-            AnalyzedType::Function(function_type) => {
-                Ok(Self::Function(UlarFunction::IndirectReference {
-                    pointer: basic_value_enum.into_pointer_value(),
-                    type_: function_type
-                        .inkwell_type(context)
-                        .ok_or(CompilationError {
-                            message: CompilationErrorMessage::UnitPassedAsValue,
-                            position: Some(value_position),
-                        })?,
-                }))
-            }
+            AnalyzedType::Function(function_type) => Ok(Self::Function(UlarFunction::Closure {
+                context_pointer: basic_value_enum.into_pointer_value(),
+                type_: function_type
+                    .closure_type(context)
+                    .ok_or(CompilationError {
+                        message: CompilationErrorMessage::UnitPassedAsValue,
+                        position: Some(value_position),
+                    })?,
+            })),
+
+            AnalyzedType::RawFunction => Err(CompilationError {
+                message: CompilationErrorMessage::InternalError(
+                    InternalError::JitCompilerRawFunctionFromBasicValue,
+                ),
+
+                position: Some(value_position),
+            }),
 
             AnalyzedType::Str => Ok(UlarValue::String(basic_value_enum.into_pointer_value())),
             AnalyzedType::Unit => Err(CompilationError {

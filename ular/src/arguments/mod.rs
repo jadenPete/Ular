@@ -63,6 +63,7 @@ pub enum PhaseName {
     Simplifier,
     Typechecker,
     Analyzer,
+    ClosureConverter,
     JitCompiler,
     Executor,
 }
@@ -78,6 +79,7 @@ impl Display for PhaseName {
                 Self::Simplifier => "simplifier",
                 Self::Typechecker => "typechecker",
                 Self::Analyzer => "analyzer",
+                Self::ClosureConverter => "closure_converter",
                 Self::JitCompiler => "jit_compiler",
                 Self::Executor => "executor",
             }

@@ -77,10 +77,15 @@ pub trait Node {
 ///
 /// if =
 ///     | 'if' expression block else_if_clause* else_clause?
-///     | primary;
+///     | closure;
 ///
 /// else_if_clause = 'else' 'if' expression block;
 /// else_clause = 'else' block;
+/// closure =
+///     | 'fn' identifier '(' (closure_parameter (',' parameter)*)? ')' (':' type)? block
+///     | primary;
+///
+/// closure_parameter = identifier | parameter;
 /// primary =
 ///     | struct_application
 ///     | path
@@ -165,6 +170,7 @@ pub enum Expression {
     InfixOperation(InfixOperation),
     Select(Select),
     Call(Call),
+    Closure(Closure),
     StructApplication(StructApplication),
     Path(Path),
     Identifier(Identifier),
@@ -261,6 +267,21 @@ pub struct Select {
 pub struct Call {
     pub function: Box<Expression>,
     pub arguments: Vec<Expression>,
+    pub position: Position,
+}
+
+#[derive(Debug, Node)]
+pub struct Closure {
+    pub parameters: Vec<ClosureParameter>,
+    pub return_type: Option<Type>,
+    pub body: Block,
+    pub position: Position,
+}
+
+#[derive(Clone, Debug, Node)]
+pub struct ClosureParameter {
+    pub name: Identifier,
+    pub type_: Option<Type>,
     pub position: Position,
 }
 

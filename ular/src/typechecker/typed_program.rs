@@ -64,6 +64,7 @@ pub(crate) enum TypedExpression {
     InfixOperation(TypedInfixOperation),
     Select(TypedSelect),
     Call(TypedCall),
+    Closure(TypedClosure),
     StructApplication(TypedStructApplication),
     Path(TypedPath),
     Number(TypedNumber),
@@ -129,6 +130,20 @@ pub(crate) struct TypedCall {
     pub(crate) arguments: Vec<TypedExpression>,
     pub(crate) type_: Type,
     pub(crate) position: Position,
+}
+
+#[derive(Clone, Debug, Node)]
+pub(crate) struct TypedClosure {
+    pub(crate) parameters: Vec<TypedIdentifier>,
+    pub(crate) body: TypedBlock,
+    pub(crate) type_: FunctionType,
+    pub(crate) position: Position,
+}
+
+impl Typed for TypedClosure {
+    fn get_type(&self) -> Type {
+        Type::Function(self.type_.clone())
+    }
 }
 
 #[derive(Clone, Debug, Node)]

@@ -22,8 +22,16 @@ impl Error for CompilationError {}
 
 #[derive(Debug)]
 pub enum CompilationErrorMessage {
+    CannotInferClosureParameterTypes {
+        missing_types: Vec<String>,
+    },
+
     DuplicateField {
         field: String,
+    },
+
+    ExpectedClosureResult {
+        return_type: String,
     },
 
     ExpectedFunctionResult {
@@ -106,8 +114,30 @@ pub enum CompilationErrorMessage {
 impl Display for CompilationErrorMessage {
     fn fmt(&self, formatter: &mut Formatter) -> std::fmt::Result {
         match self {
+            Self::CannotInferClosureParameterTypes { missing_types } => {
+                write!(
+                    formatter,
+                    "\
+Cannot infer the types of this closure's parameters. Please explicitly annotate every parameter's type.
+
+These parameters are missing type annotations: ",
+                )?;
+
+                write!(formatter, "`{}`", &missing_types[0])?;
+
+                for parameter_name in &missing_types[1..missing_types.len()] {
+                    write!(formatter, ", `{}`", parameter_name)?;
+                }
+
+                write!(formatter, ".")
+            }
+
             Self::DuplicateField { field } => {
                 write!(formatter, "The field `{}` was specified more than once.", field)
+            }
+
+            Self::ExpectedClosureResult { return_type } => {
+                write!(formatter, "Expected closure to return a value of type `{}`.", return_type)
             }
 
             Self::ExpectedFunctionResult { function_name, return_type } => {
@@ -269,6 +299,10 @@ pub enum InternalError {
         index: usize,
     },
 
+    ClosureConverterExpectedFunctionType {
+        actual_type: String,
+    },
+
     JitCompilerExpectedNumericType {
         actual_type: String,
     },
@@ -277,6 +311,7 @@ pub enum InternalError {
         actual_type: String,
     },
 
+    JitCompilerRawFunctionFromBasicValue,
     JitCompilerStringComparisonNotRewritten,
     JitCompilerStructComparisonNotRewritten,
     JitCompilerTypeMismatch {
@@ -305,6 +340,7 @@ pub enum InternalError {
         method_index: usize,
     },
 
+    JitCompilerUnexpectedClosure,
     UnknownType {
         name: String,
     },
@@ -337,6 +373,14 @@ impl Display for InternalError {
                 )
             }
 
+            Self::ClosureConverterExpectedFunctionType { actual_type } => {
+                write!(
+                    formatter,
+                    "Expected a function value, but got one of type `{}`. This is most likely the analyzer's fault.",
+                    actual_type,
+                )
+            }
+
             Self::JitCompilerExpectedNumericType { actual_type } => {
                 write!(
                     formatter,
@@ -350,6 +394,13 @@ impl Display for InternalError {
                     formatter,
                     "Expected a struct value, but got one of type `{}`. This should've been caught by the typechecker.",
                     actual_type,
+                )
+            }
+
+            Self::JitCompilerRawFunctionFromBasicValue => {
+                write!(
+                    formatter,
+                    "Attempted to convert a basic value into a raw function. We don't have enough information to perform this transformation.",
                 )
             }
 
@@ -375,6 +426,13 @@ impl Display for InternalError {
                     formatter,
                     "Attempted to coerce `{}` into a `{}`.",
                     actual_value, expected_type,
+                )
+            }
+
+            Self::JitCompilerUnexpectedClosure => {
+                write!(
+                    formatter,
+                    "JIT compiler encountered a closure, but the closure converter phase should've removed it.",
                 )
             }
 
@@ -451,6 +509,12 @@ impl Display for InternalError {
 
 #[derive(Clone, Debug)]
 pub struct Position(pub Range<usize>);
+
+impl Position {
+    pub fn empty() -> Self {
+        Self(0..0)
+    }
+}
 
 fn print_numbered_lines(numbered_lines: &[(usize, String)]) {
     if let Some((last_line_number, _)) = numbered_lines.last() {

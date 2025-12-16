@@ -1,4 +1,5 @@
 pub mod arguments;
+mod closure_converter;
 mod data_structures;
 mod dependency_analyzer;
 pub mod error_reporting;
@@ -13,6 +14,7 @@ mod typechecker;
 
 use crate::{
     arguments::Arguments,
+    closure_converter::ClosureConverterPhase,
     dependency_analyzer::AnalyzerPhase,
     error_reporting::CompilationError,
     jit_compiler::{module::built_in_values::BuiltInValue, ExecutorPhase, JitCompilerPhase},
@@ -61,6 +63,9 @@ pub fn run_phases<'a>(
     };
 
     let analyzed_program = analyzer_phase.execute_and_debug(&typed_program, arguments)?;
+    let analyzed_program_without_closures =
+        ClosureConverterPhase.execute_and_debug(&analyzed_program, arguments)?;
+
     let jit_compiler_phase = JitCompilerPhase {
         context,
         garbage_collection_plan: arguments.gc_plan,
@@ -71,7 +76,8 @@ pub fn run_phases<'a>(
             .collect(),
     };
 
-    let compiled_program = jit_compiler_phase.execute_and_debug(&analyzed_program, arguments)?;
+    let compiled_program =
+        jit_compiler_phase.execute_and_debug(&analyzed_program_without_closures, arguments)?;
 
     ExecutorPhase.execute_and_debug(&compiled_program, arguments)
 }

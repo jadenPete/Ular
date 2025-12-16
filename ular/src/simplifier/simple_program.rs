@@ -2,8 +2,8 @@ use crate::{
     error_reporting::Position,
     parser::{
         program::{
-            Identifier, InfixOperator, Node, Number, Parameter, Path, StringLiteral,
-            StructDefinitionField, Unit,
+            ClosureParameter, Identifier, InfixOperator, Node, Number, Parameter, Path,
+            StringLiteral, StructDefinitionField, Unit,
         },
         type_::{FunctionType, Type},
     },
@@ -76,6 +76,7 @@ pub(crate) enum SimpleExpression {
     InfixOperation(SimpleInfixOperation),
     Select(SimpleSelect),
     Call(SimpleCall),
+    Closure(SimpleClosure),
     StructApplication(SimpleStructApplication),
     Path(Path),
     Identifier(Identifier),
@@ -125,6 +126,14 @@ pub(crate) struct SimpleSelect {
 pub(crate) struct SimpleCall {
     pub(crate) function: Box<SimpleExpression>,
     pub(crate) arguments: Vec<SimpleExpression>,
+    pub(crate) position: Position,
+}
+
+#[derive(Debug, Node)]
+pub(crate) struct SimpleClosure {
+    pub(crate) parameters: Vec<ClosureParameter>,
+    pub(crate) return_type: Option<Type>,
+    pub(crate) body: SimpleBlock,
     pub(crate) position: Position,
 }
 

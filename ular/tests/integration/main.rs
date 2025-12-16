@@ -1,4 +1,5 @@
 mod boolean;
+mod closures;
 mod error_reporting;
 mod function;
 mod if_expression;

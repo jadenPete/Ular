@@ -3,14 +3,18 @@ mod scope;
 
 use crate::{
     arguments::PhaseName,
-    data_structures::{graph::DirectedGraph, number_map::NumberMap},
+    data_structures::{
+        graph::DirectedGraph,
+        number_map::{IndexUndefinedError, NumberMap},
+    },
     dependency_analyzer::{
         analyzed_program::{
-            AnalyzedBlock, AnalyzedCall, AnalyzedExpression, AnalyzedExpressionRef,
-            AnalyzedFunctionDefinition, AnalyzedIf, AnalyzedInfixOperation, AnalyzedNumber,
-            AnalyzedParameter, AnalyzedPrefixOperation, AnalyzedProgram, AnalyzedSelect,
-            AnalyzedStringLiteral, AnalyzedStructApplication, AnalyzedStructApplicationField,
-            AnalyzedStructDefinition, AnalyzedStructDefinitionField, AnalyzedType, AnalyzedUnit,
+            AnalyzedBlock, AnalyzedCall, AnalyzedClosure, AnalyzedExpression,
+            AnalyzedExpressionGraphRef, AnalyzedExpressionRef, AnalyzedFunctionDefinition,
+            AnalyzedIf, AnalyzedInfixOperation, AnalyzedNumber, AnalyzedParameter,
+            AnalyzedPrefixOperation, AnalyzedProgram, AnalyzedSelect, AnalyzedStringLiteral,
+            AnalyzedStructApplication, AnalyzedStructApplicationField, AnalyzedStructDefinition,
+            AnalyzedStructDefinitionField, AnalyzedType, AnalyzedUnit,
         },
         scope::{AnalyzerScope, AnalyzerScopeContext},
     },
@@ -23,27 +27,27 @@ use crate::{
     typechecker::{
         built_in_values::{TypecheckerBuiltInValueProducer, TypecheckerBuiltInValues},
         typed_program::{
-            TypedBlock, TypedCall, TypedExpression, TypedFunctionDefinition, TypedIf,
+            TypedBlock, TypedCall, TypedClosure, TypedExpression, TypedFunctionDefinition, TypedIf,
             TypedInfixOperation, TypedNumber, TypedPath, TypedPrefixOperation, TypedProgram,
             TypedSelect, TypedStatement, TypedStructApplication, TypedStructDefinition, TypedUnit,
         },
     },
 };
-use std::collections::HashMap;
+use std::{collections::HashMap, ops::Range};
 
-struct Analyzer<'a> {
-    scope_context: &'a mut AnalyzerScopeContext,
-    scope: AnalyzerScope<'a>,
-    expression_graph: AnalyzerExpressionGraph<'a>,
+struct Analyzer<'parent, 'phase> {
+    scope_context: &'phase mut AnalyzerScopeContext,
+    scope: AnalyzerScope<'phase>,
+    expression_graph: AnalyzerExpressionGraph<'parent>,
 }
 
-impl<'a> Analyzer<'a> {
+impl<'phase> Analyzer<'_, 'phase> {
     fn analyze_block(
         &mut self,
         block: &TypedBlock,
         surrounding_expression: usize,
     ) -> Result<AnalyzedBlock, CompilationError> {
-        let mut analyzer = Analyzer::with_parent(self, Some(surrounding_expression));
+        let mut analyzer = self.new_child(Some(surrounding_expression));
 
         analyzer.analyze_statements_with_hoisting(&block.statements, false)?;
 
@@ -89,6 +93,72 @@ impl<'a> Analyzer<'a> {
         Ok(result)
     }
 
+    fn analyze_closure(
+        &mut self,
+        closure: &TypedClosure,
+    ) -> Result<AnalyzedExpressionRef, CompilationError> {
+        let expression_index = self.expression_graph.reserve_node();
+        let mut analyzed_parameters = Vec::with_capacity(closure.parameters.len());
+
+        for parameter in &closure.parameters {
+            let analyzed_type = self.scope.analyze_type(&parameter.type_)?;
+
+            analyzed_parameters.push(AnalyzedParameter {
+                name: parameter.underlying.value.clone(),
+                type_: analyzed_type.clone(),
+                position: parameter.get_position(),
+            });
+        }
+
+        let mut parent_expression_graph =
+            AnalyzerClosureExpressionGraphParent::new(&mut self.expression_graph, expression_index);
+
+        let mut analyzer = Analyzer {
+            scope_context: self.scope_context,
+            scope: AnalyzerScope::with_parent(&self.scope),
+            expression_graph: parent_expression_graph.new_child(Some(expression_index)),
+        };
+
+        for (i, parameter) in closure.parameters.iter().enumerate() {
+            analyzer.scope.declare_variable(
+                &parameter.underlying,
+                AnalyzedExpressionRef::Parameter {
+                    index: i,
+                    type_: analyzed_parameters[i].type_.clone(),
+                    position: parameter.get_position(),
+                },
+            )?;
+        }
+
+        analyzer.analyze_statements_with_hoisting(&closure.body.statements, false)?;
+
+        let result_reference = match &closure.body.result {
+            Some(result) => Some(analyzer.analyze_expression(result)?),
+            None => None,
+        };
+
+        let expression_graph = analyzer.into_expression_graph();
+        let analyzed_body = AnalyzedBlock {
+            expression_graph,
+            result: result_reference,
+            position: closure.body.get_position(),
+        };
+
+        let dependencies = parent_expression_graph.dependencies;
+        let function_type = self.scope.analyze_function_type(&closure.type_)?;
+
+        Ok(self.expression_graph.set_node(
+            expression_index,
+            AnalyzedExpression::Closure(AnalyzedClosure {
+                parameters: analyzed_parameters,
+                body: analyzed_body,
+                dependencies,
+                type_: function_type,
+                position: closure.get_position(),
+            }),
+        ))
+    }
+
     fn analyze_expression(
         &mut self,
         expression: &TypedExpression,
@@ -101,6 +171,7 @@ impl<'a> Analyzer<'a> {
 
             TypedExpression::Select(select) => self.analyze_select(select),
             TypedExpression::Call(call) => self.analyze_call(call),
+            TypedExpression::Closure(closure) => self.analyze_closure(closure),
             TypedExpression::StructApplication(struct_application) => {
                 self.analyze_struct_application(struct_application)
             }
@@ -125,10 +196,10 @@ impl<'a> Analyzer<'a> {
                 };
 
                 if let (
-                    Some(AnalyzedExpressionRef::Expression {
+                    Some(AnalyzedExpressionRef::Expression(AnalyzedExpressionGraphRef {
                         index: result_index,
                         ..
-                    }),
+                    })),
                     Some(last_statement_index),
                 ) = (&result_reference, last_statement_index)
                 {
@@ -165,7 +236,7 @@ impl<'a> Analyzer<'a> {
             });
         }
 
-        let mut analyzer = Analyzer::with_parent(self, None);
+        let mut analyzer = self.new_child(None);
 
         for (j, parameter) in definition.parameters.iter().enumerate() {
             analyzer.scope.declare_variable(
@@ -404,7 +475,7 @@ impl<'a> Analyzer<'a> {
                         });
                     }
 
-                    let i = self.scope_context.functions_mut().reserve_function();
+                    let i = self.scope_context.functions_mut().reserve_definition();
 
                     function_indices.push(i);
 
@@ -456,7 +527,7 @@ impl<'a> Analyzer<'a> {
 
             self.scope_context
                 .functions_mut()
-                .set_function(function_indices[i], analyzed_definition);
+                .set_definition(function_indices[i], analyzed_definition);
         }
 
         let mut last_index = None;
@@ -467,7 +538,10 @@ impl<'a> Analyzer<'a> {
             {
             } else {
                 let next_index = match self.analyze_statement(statement)? {
-                    Some(AnalyzedExpressionRef::Expression { index, .. }) => Some(index),
+                    Some(AnalyzedExpressionRef::Expression(expression_graph_ref)) => {
+                        Some(expression_graph_ref.index)
+                    }
+
                     _ => None,
                 };
 
@@ -581,49 +655,56 @@ impl<'a> Analyzer<'a> {
         self.expression_graph.into_graph()
     }
 
-    fn with_parent(parent: &'a mut Analyzer, surrounding_expression: Option<usize>) -> Self {
-        Self {
-            scope_context: parent.scope_context,
-            scope: AnalyzerScope::with_parent(&parent.scope),
-            expression_graph: AnalyzerExpressionGraph::with_parent(
-                &mut parent.expression_graph,
-                surrounding_expression,
-            ),
-        }
-    }
-
-    fn without_parent(
-        built_in_values: &'a TypecheckerBuiltInValues,
-        scope_context: &'a mut AnalyzerScopeContext,
+    fn new(
+        built_in_values: &'phase TypecheckerBuiltInValues,
+        scope_context: &'phase mut AnalyzerScopeContext,
     ) -> Self {
         Self {
             scope_context,
             scope: AnalyzerScope::without_parent(built_in_values),
-            expression_graph: AnalyzerExpressionGraph::without_parent(),
+            expression_graph: AnalyzerExpressionGraph::new(),
+        }
+    }
+
+    fn new_child(&mut self, surrounding_expression: Option<usize>) -> Analyzer<'_, '_> {
+        Analyzer {
+            scope_context: self.scope_context,
+            scope: AnalyzerScope::with_parent(&self.scope),
+            expression_graph: self.expression_graph.new_child(surrounding_expression),
         }
     }
 }
 
 struct AnalyzerExpressionGraph<'a> {
-    parent_add_edge: Option<Box<dyn FnMut(usize, usize) + 'a>>,
+    parent: Option<&'a mut dyn AnalyzerExpressionGraphParent>,
     surrounding_expression: Option<usize>,
     expressions: DirectedGraph<AnalyzedExpression>,
 }
 
-impl<'a> AnalyzerExpressionGraph<'a> {
-    fn add_edge(&mut self, dependent: usize, dependency: usize) {
-        match self.parent_add_edge.as_mut() {
-            Some(parent_add_edge) if dependency < self.expressions.get_offset() => {
-                parent_add_edge(self.surrounding_expression.unwrap(), dependency);
-            }
+impl AnalyzerExpressionGraph<'_> {
+    fn new() -> Self {
+        Self {
+            parent: None,
+            surrounding_expression: None,
+            expressions: DirectedGraph::new(0),
+        }
+    }
+}
 
-            _ => self.expressions.add_edge(dependent, dependency),
+impl AnalyzerExpressionGraph<'_> {
+    fn add_edge_with_reference(&mut self, dependent: usize, dependency: &AnalyzedExpressionRef) {
+        if let AnalyzedExpressionRef::Expression(expression_graph_ref) = dependency {
+            self.add_edge(dependent, expression_graph_ref.index);
         }
     }
 
-    fn add_edge_with_reference(&mut self, dependent: usize, dependency: &AnalyzedExpressionRef) {
-        if let AnalyzedExpressionRef::Expression { index, .. } = dependency {
-            self.add_edge(dependent, *index);
+    fn add_edge(&mut self, dependent: usize, dependency: usize) {
+        match self.parent.as_mut() {
+            Some(parent) if dependency < self.expressions.get_offset() => {
+                parent.add_edge(self.surrounding_expression.unwrap(), dependency);
+            }
+
+            _ => self.expressions.add_edge(dependent, dependency),
         }
     }
 
@@ -635,6 +716,17 @@ impl<'a> AnalyzerExpressionGraph<'a> {
 
     fn get_next_node(&self) -> usize {
         self.expressions.get_next_node()
+    }
+
+    fn get_node_reference(&self, i: usize) -> Option<AnalyzedExpressionGraphRef> {
+        self.expressions
+            .get_node(i)
+            .map(|node_reference| AnalyzedExpressionGraphRef::for_expression(i, node_reference))
+            .or_else(|| {
+                self.parent
+                    .as_ref()
+                    .and_then(|parent| parent.get_node_reference(i))
+            })
     }
 
     fn into_graph(self) -> DirectedGraph<AnalyzedExpression> {
@@ -650,63 +742,83 @@ impl<'a> AnalyzerExpressionGraph<'a> {
 
         AnalyzedExpressionRef::for_expression(i, node_reference)
     }
+}
 
-    fn with_parent(
-        parent: &'a mut AnalyzerExpressionGraph,
-        surrounding_expression: Option<usize>,
+impl AnalyzerExpressionGraphParent for AnalyzerExpressionGraph<'_> {
+    fn add_edge(&mut self, dependent: usize, dependency: usize) {
+        self.add_edge(dependent, dependency);
+    }
+
+    fn as_mut_dyn_ref(&mut self) -> &mut dyn AnalyzerExpressionGraphParent {
+        self
+    }
+
+    fn get_next_node(&self) -> usize {
+        self.get_next_node()
+    }
+
+    fn get_node_reference(&self, i: usize) -> Option<AnalyzedExpressionGraphRef> {
+        self.get_node_reference(i)
+    }
+}
+
+struct AnalyzerClosureExpressionGraphParent<'a> {
+    parent: &'a mut dyn AnalyzerExpressionGraphParent,
+    dependencies: Vec<AnalyzedExpressionGraphRef>,
+    closure_expression_index: usize,
+}
+
+impl<'a> AnalyzerClosureExpressionGraphParent<'a> {
+    fn new(
+        parent: &'a mut dyn AnalyzerExpressionGraphParent,
+        closure_expression_index: usize,
     ) -> Self {
-        let offset = parent.get_next_node();
-
         Self {
-            parent_add_edge: Some(Box::new(|i, j| parent.add_edge(i, j))),
+            parent,
+            dependencies: Vec::new(),
+            closure_expression_index,
+        }
+    }
+}
+
+impl AnalyzerExpressionGraphParent for AnalyzerClosureExpressionGraphParent<'_> {
+    fn add_edge(&mut self, dependent: usize, dependency: usize) {
+        assert_eq!(dependent, self.closure_expression_index);
+
+        self.dependencies
+            .push(self.parent.get_node_reference(dependency).unwrap());
+
+        self.parent
+            .add_edge(self.closure_expression_index, dependency);
+    }
+
+    fn as_mut_dyn_ref(&mut self) -> &mut dyn AnalyzerExpressionGraphParent {
+        self
+    }
+
+    fn get_next_node(&self) -> usize {
+        self.parent.get_next_node()
+    }
+
+    fn get_node_reference(&self, i: usize) -> Option<AnalyzedExpressionGraphRef> {
+        self.parent.get_node_reference(i)
+    }
+}
+
+trait AnalyzerExpressionGraphParent {
+    fn add_edge(&mut self, dependent: usize, dependency: usize);
+    fn as_mut_dyn_ref(&mut self) -> &mut dyn AnalyzerExpressionGraphParent;
+    fn get_next_node(&self) -> usize;
+    fn get_node_reference(&self, i: usize) -> Option<AnalyzedExpressionGraphRef>;
+
+    fn new_child(&mut self, surrounding_expression: Option<usize>) -> AnalyzerExpressionGraph<'_> {
+        let offset = self.get_next_node();
+
+        AnalyzerExpressionGraph {
+            parent: Some(self.as_mut_dyn_ref()),
             surrounding_expression,
             expressions: DirectedGraph::new(offset),
         }
-    }
-
-    fn without_parent() -> Self {
-        Self {
-            parent_add_edge: None,
-            surrounding_expression: None,
-            expressions: DirectedGraph::new(0),
-        }
-    }
-}
-
-struct AnalyzerFunctions {
-    function_count: usize,
-    functions: NumberMap<AnalyzedFunctionDefinition>,
-}
-
-impl AnalyzerFunctions {
-    fn into_vec(self) -> Result<Vec<AnalyzedFunctionDefinition>, CompilationError> {
-        self.functions
-            .into_contiguous_values(self.function_count)
-            .map_err(|error| CompilationError {
-                message: CompilationErrorMessage::InternalError(
-                    InternalError::AnalyzerFunctionNotDefined { index: error.index },
-                ),
-                position: None,
-            })
-    }
-
-    fn new() -> Self {
-        Self {
-            function_count: 0,
-            functions: NumberMap::new(0),
-        }
-    }
-
-    fn reserve_function(&mut self) -> usize {
-        let result = self.function_count;
-
-        self.function_count += 1;
-
-        result
-    }
-
-    fn set_function(&mut self, i: usize, definition: AnalyzedFunctionDefinition) {
-        self.functions.insert(i, definition);
     }
 }
 
@@ -728,12 +840,77 @@ impl Phase<&TypedProgram> for AnalyzerPhase {
         );
 
         let mut analyzer_scope_context = AnalyzerScopeContext::new();
-        let mut analyzer = Analyzer::without_parent(&built_in_values, &mut analyzer_scope_context);
+        let mut analyzer = Analyzer::new(&built_in_values, &mut analyzer_scope_context);
 
         analyzer.analyze_statements_with_hoisting(&program.statements, false)?;
 
         let expression_graph = analyzer.into_expression_graph();
 
         analyzer_scope_context.into_program(expression_graph, program.get_position())
+    }
+}
+
+pub(crate) struct DefinitionMap<A> {
+    definition_count: usize,
+    definitions: NumberMap<A>,
+}
+
+impl<A> DefinitionMap<A> {
+    fn into_vec(self) -> Result<Vec<A>, IndexUndefinedError> {
+        self.definitions
+            .into_contiguous_values(self.definition_count)
+    }
+
+    pub(crate) fn new() -> Self {
+        Self {
+            definition_count: 0,
+            definitions: NumberMap::new(0),
+        }
+    }
+
+    pub(crate) fn reserve_definition(&mut self) -> usize {
+        let result = self.definition_count;
+
+        self.definition_count += 1;
+
+        result
+    }
+
+    pub(crate) fn reserve_definitions(&mut self, count: usize) -> Range<usize> {
+        let result = self.definition_count..self.definition_count + count;
+
+        self.definition_count += count;
+
+        result
+    }
+
+    pub(crate) fn set_definition(&mut self, i: usize, definition: A) {
+        self.definitions.insert(i, definition);
+    }
+}
+
+impl DefinitionMap<AnalyzedFunctionDefinition> {
+    pub(crate) fn into_function_vec(
+        self,
+    ) -> Result<Vec<AnalyzedFunctionDefinition>, CompilationError> {
+        self.into_vec().map_err(|error| CompilationError {
+            message: CompilationErrorMessage::InternalError(
+                InternalError::AnalyzerFunctionNotDefined { index: error.index },
+            ),
+
+            position: None,
+        })
+    }
+}
+
+impl DefinitionMap<AnalyzedStructDefinition> {
+    pub(crate) fn into_struct_vec(self) -> Result<Vec<AnalyzedStructDefinition>, CompilationError> {
+        self.into_vec().map_err(|error| CompilationError {
+            message: CompilationErrorMessage::InternalError(
+                InternalError::AnalyzerFunctionNotDefined { index: error.index },
+            ),
+
+            position: None,
+        })
     }
 }

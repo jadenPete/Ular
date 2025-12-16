@@ -7,11 +7,12 @@ use crate::{
     lexer::token::{PositionedToken, Token, Tokens},
     parser::{
         program::{
-            Block, Call, ElseClause, ElseIfClause, Expression, FunctionDefinition, Identifier, If,
-            InfixOperation, InfixOperator, LogicalInfixOperator, Number, NumericInfixOperator,
-            Parameter, Path, PrefixOperation, PrefixOperator, Program, Select, Statement,
-            StringLiteral, StructApplication, StructApplicationField, StructDefinition,
-            StructDefinitionField, Unit, UniversalInfixOperator, VariableDefinition,
+            Block, Call, Closure, ClosureParameter, ElseClause, ElseIfClause, Expression,
+            FunctionDefinition, Identifier, If, InfixOperation, InfixOperator,
+            LogicalInfixOperator, Number, NumericInfixOperator, Parameter, Path, PrefixOperation,
+            PrefixOperator, Program, Select, Statement, StringLiteral, StructApplication,
+            StructApplicationField, StructDefinition, StructDefinitionField, Unit,
+            UniversalInfixOperator, VariableDefinition,
         },
         type_::{FunctionType, NumericType, Type},
     },
@@ -608,8 +609,52 @@ fn parse_if(input: Tokens) -> IResult<Tokens, Expression> {
                 })
             },
         ),
+        parse_closure,
+    ))(input)
+}
+
+fn parse_closure(input: Tokens) -> IResult<Tokens, Expression> {
+    alt((
+        map(
+            positioned(tuple((
+                parse_token(Token::FnKeyword),
+                parse_token(Token::LeftParenthesis),
+                separated_list0(parse_token(Token::Comma), parse_closure_parameter),
+                parse_token(Token::RightParenthesis),
+                opt(map(
+                    tuple((parse_token(Token::TypeAnnotation), parse_type)),
+                    |(_, return_type)| return_type,
+                )),
+                parse_block,
+            ))),
+            |(position, (_, _, parameters, _, return_type, body))| {
+                Expression::Closure(Closure {
+                    parameters,
+                    return_type,
+                    body,
+                    position,
+                })
+            },
+        ),
         parse_primary,
     ))(input)
+}
+
+fn parse_closure_parameter(input: Tokens) -> IResult<Tokens, ClosureParameter> {
+    map(
+        positioned(tuple((
+            parse_identifier,
+            opt(map(
+                tuple((parse_token(Token::TypeAnnotation), parse_type)),
+                |(_, type_)| type_,
+            )),
+        ))),
+        |(position, (name, type_))| ClosureParameter {
+            name,
+            type_,
+            position,
+        },
+    )(input)
 }
 
 fn parse_primary(input: Tokens) -> IResult<Tokens, Expression> {

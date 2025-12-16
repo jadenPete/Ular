@@ -5,16 +5,16 @@ use crate::{
     error_reporting::{CompilationError, Position},
     parser::{
         program::{
-            Block, Call, Expression, FunctionDefinition, If, InfixOperation, InfixOperator, Node,
-            Number, NumericInfixOperator, PrefixOperation, PrefixOperator, Program, Select,
-            Statement, StructApplication, StructDefinition, VariableDefinition,
+            Block, Call, Closure, Expression, FunctionDefinition, If, InfixOperation,
+            InfixOperator, Node, Number, NumericInfixOperator, PrefixOperation, PrefixOperator,
+            Program, Select, Statement, StructApplication, StructDefinition, VariableDefinition,
         },
         type_::Type,
     },
     phase::Phase,
     simplifier::simple_program::{
-        SimpleBlock, SimpleCall, SimpleExpression, SimpleFunctionDefinition, SimpleIf,
-        SimpleInfixOperation, SimplePrefixOperation, SimplePrefixOperator, SimpleProgram,
+        SimpleBlock, SimpleCall, SimpleClosure, SimpleExpression, SimpleFunctionDefinition,
+        SimpleIf, SimpleInfixOperation, SimplePrefixOperation, SimplePrefixOperator, SimpleProgram,
         SimpleSelect, SimpleStatement, SimpleStructApplication, SimpleStructApplicationField,
         SimpleStructDefinition, SimpleVariableDefinition,
     },
@@ -54,6 +54,15 @@ fn simplify_call(call: &Call) -> SimpleCall {
     }
 }
 
+fn simplify_closure(closure: &Closure) -> SimpleClosure {
+    SimpleClosure {
+        parameters: closure.parameters.clone(),
+        return_type: closure.return_type.clone(),
+        body: simplify_block(&closure.body),
+        position: closure.get_position(),
+    }
+}
+
 fn simplify_expression(expression: &Expression) -> SimpleExpression {
     match expression {
         Expression::If(if_expression) => SimpleExpression::If(simplify_if(if_expression)),
@@ -63,6 +72,7 @@ fn simplify_expression(expression: &Expression) -> SimpleExpression {
 
         Expression::Select(select) => SimpleExpression::Select(simplify_select(select)),
         Expression::Call(call) => SimpleExpression::Call(simplify_call(call)),
+        Expression::Closure(closure) => SimpleExpression::Closure(simplify_closure(closure)),
         Expression::StructApplication(struct_application) => {
             SimpleExpression::StructApplication(simplify_struct_application(struct_application))
         }

@@ -33,7 +33,7 @@ impl SlotVisitor<SimpleSlot> for MockSlotVisitor {
     }
 }
 
-extern "C" fn __test_root_scanning(_worker: *mut Worker, student: ObjectReference) {
+extern "C" fn __test_root_scanning(_worker: &Worker, student: ObjectReference) {
     let mut slot_visitor = MockSlotVisitor::new();
 
     mmtk_scan_object(student, &mut slot_visitor);
@@ -84,9 +84,11 @@ __test_root_scanning(Student {
         AdditionalValue {
             built_in_value: Box::new(BuiltInMappedFunction::new(
                 String::from("__test_root_scanning"),
-                context
-                    .void_type()
-                    .fn_type(&[context.ptr_type(AddressSpace::default()).into()], false),
+                context.void_type().fn_type(
+                    // Add an extra parameter for the worker pointer
+                    &[context.ptr_type(AddressSpace::default()).into()],
+                    false,
+                ),
                 __test_root_scanning as usize,
             )),
 

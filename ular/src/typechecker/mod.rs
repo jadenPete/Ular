@@ -17,8 +17,8 @@ use crate::{
         Phase,
     },
     simplifier::simple_program::{
-        SimpleBlock, SimpleCall, SimpleExpression, SimpleFunctionDefinition, SimpleIf,
-        SimpleInfixOperation, SimplePrefixOperation, SimplePrefixOperator, SimpleProgram,
+        SimpleBlock, SimpleCall, SimpleClosure, SimpleExpression, SimpleFunctionDefinition,
+        SimpleIf, SimpleInfixOperation, SimplePrefixOperation, SimplePrefixOperator, SimpleProgram,
         SimpleSelect, SimpleStatement, SimpleStructApplication, SimpleStructDefinition,
         SimpleVariableDefinition,
     },
@@ -26,7 +26,7 @@ use crate::{
         built_in_values::{TypecheckerBuiltInValueProducer, TypecheckerBuiltInValues},
         scope::TypecheckerScope,
         typed_program::{
-            Typed, TypedBlock, TypedCall, TypedExpression, TypedFunctionDefinition,
+            Typed, TypedBlock, TypedCall, TypedClosure, TypedExpression, TypedFunctionDefinition,
             TypedIdentifier, TypedIf, TypedInfixOperation, TypedNumber, TypedPath,
             TypedPrefixOperation, TypedProgram, TypedSelect, TypedStatement,
             TypedStructApplication, TypedStructApplicationField, TypedStructDefinition, TypedUnit,
@@ -119,6 +119,147 @@ impl<'a> Typechecker<'a> {
         }
     }
 
+    fn typecheck_closure(
+        &self,
+        closure: &SimpleClosure,
+        suggested_type: Option<&Type>,
+    ) -> Result<TypedClosure, CompilationError> {
+        for parameter in &closure.parameters {
+            if let Some(type_) = &parameter.type_ {
+                self.validate_type(type_)?;
+            }
+        }
+
+        if let Some(type_) = &closure.return_type {
+            self.validate_type(type_)?;
+        }
+
+        let inferred_parameter_types = match suggested_type {
+            Some(Type::Function(function_type))
+                if function_type.parameters.len() == closure.parameters.len() =>
+            {
+                closure
+                    .parameters
+                    .iter()
+                    .zip(&function_type.parameters)
+                    .map(|(closure_parameter, expected_parameter_type)| {
+                        closure_parameter
+                            .type_
+                            .as_ref()
+                            .unwrap_or(expected_parameter_type)
+                    })
+                    .collect::<Vec<_>>()
+            }
+
+            _ => {
+                // We don't want to short circuit on failure
+                #[allow(clippy::manual_try_fold)]
+                closure
+                    .parameters
+                    .iter()
+                    .fold::<Result<_, Vec<String>>, _>(Ok(Vec::new()), |result, parameter| {
+                        match (result, &parameter.type_) {
+                            (Ok(mut parameters), Some(type_)) => {
+                                parameters.push(type_);
+
+                                Ok(parameters)
+                            }
+
+                            (Ok(_), None) => Err(vec![parameter.name.value.clone()]),
+                            (Err(mut missing_types), Some(_)) => {
+                                missing_types.push(parameter.name.value.clone());
+
+                                Err(missing_types)
+                            }
+
+                            (Err(missing_types), None) => Err(missing_types),
+                        }
+                    })
+                    .map_err(|missing_types| CompilationError {
+                        message: CompilationErrorMessage::CannotInferClosureParameterTypes {
+                            missing_types,
+                        },
+
+                        position: Some(closure.get_position()),
+                    })?
+            }
+        };
+
+        let inferred_parameters = closure
+            .parameters
+            .iter()
+            .zip(&inferred_parameter_types)
+            .map(|(closure_parameter, &inferred_type)| TypedIdentifier {
+                underlying: closure_parameter.name.clone(),
+                type_: inferred_type.clone(),
+                position: closure_parameter.get_position(),
+            })
+            .collect::<Vec<_>>();
+
+        let mut typechecker = Typechecker::with_parent(self);
+
+        for parameter in &inferred_parameters {
+            typechecker
+                .scope
+                .declare_variable(&parameter.underlying, parameter.get_type())?;
+        }
+
+        let typechecked_statements =
+            typechecker.typecheck_statements_with_hoisting(&closure.body.statements)?;
+
+        let (typechecked_result, inferred_result_type) = match &closure.body.result {
+            Some(result) => {
+                let typechecked_result =
+                    typechecker.typecheck_expression(result, closure.return_type.as_ref())?;
+
+                let inferred_result_type = match &closure.return_type {
+                    Some(return_type) => {
+                        assert_type(&typechecked_result, return_type)?;
+
+                        return_type.clone()
+                    }
+
+                    None => typechecked_result.get_type(),
+                };
+
+                (Some(Box::new(typechecked_result)), inferred_result_type)
+            }
+
+            None => {
+                match &closure.return_type {
+                    Some(Type::Unit) | None => {}
+                    Some(return_type) => {
+                        return Err(CompilationError {
+                            message: CompilationErrorMessage::ExpectedClosureResult {
+                                return_type: format!("{}", return_type),
+                            },
+
+                            position: Some(closure.get_position()),
+                        });
+                    }
+                }
+
+                (None, Type::Unit)
+            }
+        };
+
+        Ok(TypedClosure {
+            parameters: inferred_parameters,
+            body: TypedBlock {
+                statements: typechecked_statements,
+                result: typechecked_result,
+                position: closure.body.get_position(),
+            },
+
+            type_: FunctionType {
+                parameters: inferred_parameter_types.iter().copied().cloned().collect(),
+                return_type: Box::new(inferred_result_type),
+            },
+
+            position: closure.get_position(),
+        })
+    }
+
     fn typecheck_expression(
         &self,
         expression: &SimpleExpression,
@@ -140,6 +281,10 @@ impl<'a> Typechecker<'a> {
             }
 
             SimpleExpression::Call(call) => Ok(TypedExpression::Call(self.typecheck_call(call)?)),
+            SimpleExpression::Closure(closure) => Ok(TypedExpression::Closure(
+                self.typecheck_closure(closure, suggested_type)?,
+            )),
+
             SimpleExpression::StructApplication(struct_application) => {
                 Ok(TypedExpression::StructApplication(
                     self.typecheck_struct_application(struct_application)?,
@@ -592,7 +737,6 @@ impl<'a> Typechecker<'a> {
 
         /*
          * Typecheck the functions first, so they don't yet have access to global variables.
-         * Functions capturing their environment (i.e. closures) aren't yet supported.
          *
          * This won't prevent nested functions from accessing the parameters of the functions within
          * which they're nested, but the analyzer phase will take care of detecting nested functions

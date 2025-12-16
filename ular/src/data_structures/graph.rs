@@ -2,6 +2,7 @@ use crate::data_structures::number_map::NumberMap;
 use std::{
     collections::HashSet,
     fmt::{Debug, Formatter},
+    ops::Range,
 };
 
 pub(crate) struct DirectedGraph<A> {
@@ -21,6 +22,12 @@ impl<A> DirectedGraph<A> {
 
     pub(crate) fn add_edge(&mut self, i: usize, j: usize) {
         self.edges.get_or_insert_with(i, HashSet::new).insert(j);
+    }
+
+    pub(crate) fn edge_iter(&self) -> impl Iterator<Item = (usize, usize)> + use<'_, A> {
+        self.edges
+            .iter()
+            .flat_map(|(i, edges)| edges.iter().map(move |&j| (i, j)))
     }
 
     pub(crate) fn get_next_node(&self) -> usize {
@@ -48,10 +55,22 @@ impl<A> DirectedGraph<A> {
         self.nodes.iter()
     }
 
+    pub(crate) fn number_reserved(&self) -> usize {
+        self.next_node - self.offset
+    }
+
     pub(crate) fn reserve_node(&mut self) -> usize {
         let result = self.next_node;
 
         self.next_node += 1;
+
+        result
+    }
+
+    pub(crate) fn reserve_nodes(&mut self, count: usize) -> Range<usize> {
+        let result = self.next_node..self.next_node + count;
+
+        self.next_node += count;
 
         result
     }
@@ -75,7 +94,7 @@ impl<A> DirectedGraph<A> {
             dependency_counts.insert(i, dependencies.len());
         }
 
-        for i in self.offset..self.next_node {
+        for (i, _) in self.nodes.iter() {
             if !dependency_counts.contains_key(i) {
                 dependency_counts.insert(i, 0);
             }

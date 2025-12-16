@@ -1,11 +1,11 @@
 use crate::{
-    data_structures::{graph::DirectedGraph, number_map::NumberMap},
+    data_structures::graph::DirectedGraph,
     dependency_analyzer::{
         analyzed_program::{
-            AnalyzedExpression, AnalyzedExpressionRef, AnalyzedFunctionType, AnalyzedProgram,
-            AnalyzedStructDefinition, AnalyzedType,
+            AnalyzedExpression, AnalyzedExpressionRef, AnalyzedFunctionDefinition,
+            AnalyzedFunctionType, AnalyzedProgram, AnalyzedStructDefinition, AnalyzedType,
         },
-        AnalyzerFunctions,
+        DefinitionMap,
     },
     error_reporting::{CompilationError, CompilationErrorMessage, InternalError, Position},
     parser::{
@@ -73,9 +73,7 @@ impl<'a> AnalyzerScope<'a> {
         name: String,
         context: &mut AnalyzerScopeContext,
     ) -> usize {
-        let i = context.struct_count;
-
-        context.struct_count += 1;
+        let i = context.structs.reserve_definition();
 
         self.struct_indices.insert(name, i);
 
@@ -106,7 +104,7 @@ impl<'a> AnalyzerScope<'a> {
         definition: AnalyzedStructDefinition,
         context: &mut AnalyzerScopeContext,
     ) {
-        context.structs.insert(i, definition);
+        context.structs.set_definition(i, definition);
     }
 
     pub(super) fn get_struct_index(&self, name: &str) -> Option<usize> {
@@ -170,10 +168,9 @@ impl<'a> AnalyzerScope<'a> {
 }
 
 pub(super) struct AnalyzerScopeContext {
-    functions: AnalyzerFunctions,
+    functions: DefinitionMap<AnalyzedFunctionDefinition>,
     string_literals: Vec<String>,
-    struct_count: usize,
-    structs: NumberMap<AnalyzedStructDefinition>,
+    structs: DefinitionMap<AnalyzedStructDefinition>,
 }
 
 impl AnalyzerScopeContext {
@@ -185,7 +182,7 @@ impl AnalyzerScopeContext {
         i
     }
 
-    pub(super) fn functions_mut(&mut self) -> &mut AnalyzerFunctions {
+    pub(super) fn functions_mut(&mut self) -> &mut DefinitionMap<AnalyzedFunctionDefinition> {
         &mut self.functions
     }
 
@@ -194,17 +191,8 @@ impl AnalyzerScopeContext {
         expression_graph: DirectedGraph<AnalyzedExpression>,
         position: Position,
     ) -> Result<AnalyzedProgram, CompilationError> {
-        let structs = self
-            .structs
-            .into_contiguous_values(self.struct_count)
-            .map_err(|error| CompilationError {
-                message: CompilationErrorMessage::InternalError(
-                    InternalError::AnalyzerStructNotDefined { index: error.index },
-                ),
-                position: None,
-            })?;
-
-        let functions = self.functions.into_vec()?;
+        let structs = self.structs.into_struct_vec()?;
+        let functions = self.functions.into_function_vec()?;
 
         Ok(AnalyzedProgram {
             string_literals: self.string_literals,
@@ -217,10 +205,9 @@ impl AnalyzerScopeContext {
 
     pub(super) fn new() -> Self {
         Self {
-            functions: AnalyzerFunctions::new(),
+            functions: DefinitionMap::new(),
             string_literals: Vec::new(),
-            struct_count: 0,
-            structs: NumberMap::new(0),
+            structs: DefinitionMap::new(),
         }
     }
 }

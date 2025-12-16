@@ -21,6 +21,7 @@ pub(crate) enum AnalyzedType {
     Bool,
     Struct(usize),
     Function(AnalyzedFunctionType),
+    RawFunction,
     Numeric(NumericType),
     Str,
     Unit,
@@ -50,6 +51,7 @@ impl AnalyzedType {
                 ),
             }),
 
+            Self::RawFunction => Type::Identifier("raw_function".to_owned()),
             Self::Numeric(numeric_type) => Type::Numeric(*numeric_type),
             Self::Str => Type::Str,
             Self::Unit => Type::Unit,
@@ -66,12 +68,12 @@ impl AnalyzedType {
     pub(crate) fn inkwell_type<'a>(&self, context: &'a Context) -> Option<BasicTypeEnum<'a>> {
         match self {
             Self::Bool => Some(BasicTypeEnum::IntType(context.i8_type())),
-            Self::Struct(_) | Self::Str => Some(BasicTypeEnum::PointerType(
+            Self::Struct(_) | Self::Function(_) | Self::Str => Some(BasicTypeEnum::PointerType(
                 // https://llvm.org/docs/Statepoints.html#rewritestatepointsforgc
                 context.ptr_type(AddressSpace::from(1)),
             )),
 
-            Self::Function(_) => Some(BasicTypeEnum::PointerType(
+            Self::RawFunction => Some(BasicTypeEnum::PointerType(
                 context.ptr_type(AddressSpace::default()),
             )),
 
@@ -88,7 +90,7 @@ pub(crate) struct AnalyzedFunctionType {
 }
 
 impl AnalyzedFunctionType {
-    pub(crate) fn inkwell_type<'a>(
+    pub(crate) fn closure_type<'a>(
         &self,
         context: &'a Context,
     ) -> Option<inkwell::types::FunctionType<'a>> {
@@ -137,7 +139,7 @@ pub(crate) struct AnalyzedStructDefinition {
     pub(crate) position: Position,
 }
 
-#[derive(Debug, Node)]
+#[derive(Clone, Debug, Node)]
 pub(crate) struct AnalyzedStructDefinitionField {
     pub(crate) name: Identifier,
     pub(crate) type_: AnalyzedType,
@@ -153,7 +155,30 @@ pub(crate) struct AnalyzedFunctionDefinition {
     pub(crate) position: Position,
 }
 
-#[derive(Debug, Node)]
+impl AnalyzedFunctionDefinition {
+    pub(crate) fn inkwell_type<'a>(
+        &self,
+        context: &'a Context,
+    ) -> Option<inkwell::types::FunctionType<'a>> {
+        let mut parameter_types = Vec::with_capacity(self.parameters.len() + 1);
+
+        // Add an extra parameter for the worker pointer
+        parameter_types.push(context.ptr_type(AddressSpace::default()).into());
+
+        for parameter in &self.parameters {
+            parameter_types.push(parameter.type_.inkwell_type(context)?.into());
+        }
+
+        Some(match self.type_.return_type.inkwell_type(context) {
+            Some(return_type) => return_type.fn_type(parameter_types.as_slice(), false),
+            None => context
+                .void_type()
+                .fn_type(parameter_types.as_slice(), false),
+        })
+    }
+}
+
+#[derive(Clone, Debug, Node)]
 pub(crate) struct AnalyzedParameter {
     #[allow(dead_code)]
     pub(crate) name: String,
@@ -167,6 +192,7 @@ pub(crate) enum AnalyzedExpression {
     InfixOperation(AnalyzedInfixOperation),
     Select(AnalyzedSelect),
     Call(AnalyzedCall),
+    Closure(AnalyzedClosure),
     StructApplication(AnalyzedStructApplication),
     PrefixOperation(AnalyzedPrefixOperation),
     String(AnalyzedStringLiteral),
@@ -221,6 +247,21 @@ pub(crate) struct AnalyzedCall {
     pub(crate) position: Position,
 }
 
+#[derive(Debug, Node)]
+pub(crate) struct AnalyzedClosure {
+    pub(crate) parameters: Vec<AnalyzedParameter>,
+    pub(crate) body: AnalyzedBlock,
+    pub(crate) dependencies: Vec<AnalyzedExpressionGraphRef>,
+    pub(crate) type_: AnalyzedFunctionType,
+    pub(crate) position: Position,
+}
+
+impl AnalyzerTyped for AnalyzedClosure {
+    fn get_type(&self) -> AnalyzedType {
+        AnalyzedType::Function(self.type_.clone())
+    }
+}
+
 #[derive(AnalyzerTyped, Debug, Node)]
 pub(crate) struct AnalyzedStructApplication {
     pub(crate) struct_index: usize,
@@ -244,12 +285,7 @@ pub(crate) enum AnalyzedExpressionRef {
         position: Position,
     },
 
-    Expression {
-        index: usize,
-        type_: AnalyzedType,
-        position: Position,
-    },
-
+    Expression(AnalyzedExpressionGraphRef),
     Function {
         index: usize,
         type_: AnalyzedType,
@@ -271,6 +307,23 @@ pub(crate) enum AnalyzedExpressionRef {
     },
 
     Unit(AnalyzedUnit),
+}
+
+#[derive(AnalyzerTyped, Debug, Clone, Node)]
+pub(crate) struct AnalyzedExpressionGraphRef {
+    pub(crate) index: usize,
+    pub(crate) type_: AnalyzedType,
+    pub(crate) position: Position,
+}
+
+impl AnalyzedExpressionGraphRef {
+    pub(super) fn for_expression<A: AnalyzerTyped + Node>(i: usize, expression: &A) -> Self {
+        Self {
+            index: i,
+            type_: expression.get_type(),
+            position: expression.get_position(),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Node)]
@@ -311,11 +364,7 @@ impl AnalyzerTyped for AnalyzedUnit {
 
 impl AnalyzedExpressionRef {
     pub(super) fn for_expression<A: AnalyzerTyped + Node>(i: usize, expression: &A) -> Self {
-        Self::Expression {
-            index: i,
-            type_: expression.get_type(),
-            position: expression.get_position(),
-        }
+        Self::Expression(AnalyzedExpressionGraphRef::for_expression(i, expression))
     }
 
     pub(super) fn with_position(&self, position: Position) -> Self {
@@ -326,11 +375,13 @@ impl AnalyzedExpressionRef {
                 position,
             },
 
-            Self::Expression { index, type_, .. } => Self::Expression {
-                index: *index,
-                type_: type_.clone(),
-                position,
-            },
+            Self::Expression(AnalyzedExpressionGraphRef { index, type_, .. }) => {
+                Self::Expression(AnalyzedExpressionGraphRef {
+                    index: *index,
+                    type_: type_.clone(),
+                    position,
+                })
+            }
 
             Self::Function { index, type_, .. } => Self::Function {
                 index: *index,

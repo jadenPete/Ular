@@ -89,7 +89,7 @@ impl<'a> BuiltInValue<'a> for BuiltInBool<'a> {
         } = dependencies;
 
         *self.computed_value.get_or_init(|| {
-            let global = global_value_registry.add_global(context.i8_type());
+            let global = global_value_registry.add_global(context.i8_type(), None);
 
             global.set_visibility(GlobalVisibility::Hidden);
             global.set_constant(true);
@@ -141,7 +141,7 @@ impl<'a, A: BuiltInFunction<'a> + DynClone> BuiltInValue<'a> for A {
         _local_name: LocalName,
         _builder: &Builder<'a>,
     ) -> UlarValue<'a> {
-        UlarValue::Function(UlarFunction::DirectReference(
+        UlarValue::Function(UlarFunction::Function(
             self.get_inkwell_function_with_dependencies(dependencies),
         ))
     }

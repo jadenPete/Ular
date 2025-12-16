@@ -18,7 +18,7 @@ use crate::{
             StructInformation,
         },
         scope::{JitCompilerScope, JitCompilerScopeContext},
-        value::UlarValue,
+        value::{UlarFunction, UlarValue},
     },
     mmtk::{
         object_descriptor_store::{ObjectDescriptorStore, STRING_LITERAL_DESCRIPTOR_INDEX},
@@ -35,7 +35,7 @@ use inkwell::{
     passes::PassBuilderOptions,
     targets::{CodeModel, RelocMode, Target, TargetData, TargetMachine},
     types::{ArrayType, BasicType},
-    values::FunctionValue,
+    values::{BasicMetadataValueEnum, CallSiteValue, FunctionValue, PointerValue},
     AddressSpace, OptimizationLevel,
 };
 use std::{
@@ -126,7 +126,6 @@ impl<'a> JitCompilerPhase<'a> {
                     .iter()
                     .map(|method_definition| {
                         let function_type = method_definition
-                            .type_
                             .inkwell_type(self.context)
                             .ok_or_else(|| CompilationError {
                                 message: CompilationErrorMessage::UnitPassedAsValue,
@@ -154,12 +153,12 @@ impl<'a> JitCompilerPhase<'a> {
             .iter()
             .map(|definition| {
                 let function_type =
-                    definition.type_.inkwell_type(self.context).ok_or_else(|| {
-                        CompilationError {
+                    definition
+                        .inkwell_type(self.context)
+                        .ok_or_else(|| CompilationError {
                             message: CompilationErrorMessage::UnitPassedAsValue,
                             position: Some(definition.get_position()),
-                        }
-                    })?;
+                        })?;
 
                 Ok(add_garbage_collecting_function(
                     module,
@@ -592,7 +591,8 @@ impl<'a> JitCompilerPhase<'a> {
                     string_array.into(),
                 ]);
 
-                let string_global = global_value_registry.add_global(string_type);
+                let string_global =
+                    global_value_registry.add_global(string_type, Some(AddressSpace::from(1)));
 
                 string_global.set_name(&format!(".str{}", i));
                 string_global.set_constant(true);
@@ -651,6 +651,75 @@ impl<'a> Phase<&AnalyzedProgram> for JitCompilerPhase<'a> {
 
     fn name() -> PhaseName {
         PhaseName::JitCompiler
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn compile_inline_call_without_tick<'a, A: IntoIterator<Item = BasicMetadataValueEnum<'a>>>(
+    context: &'a Context,
+    builder: &Builder<'a>,
+    function: UlarFunction<'a>,
+    worker_argument: PointerValue<'a>,
+    arguments: A,
+    function_pointer_pointer_name: &str,
+    function_pointer_name: &str,
+    result_name: &str,
+) -> CallSiteValue<'a> {
+    match function {
+        UlarFunction::Closure {
+            context_pointer,
+            type_,
+        } => {
+            let argument_values = std::iter::once(worker_argument.into())
+                .chain(arguments)
+                .chain(std::iter::once(context_pointer.into()))
+                .collect::<Vec<_>>();
+
+            let generic_context_type = context.struct_type(
+                &[
+                    context.i32_type().into(),
+                    context.ptr_type(AddressSpace::default()).into(),
+                ],
+                false,
+            );
+
+            // SAFETY: The provided indices are valid for `generic_context_type`
+            let function_pointer_pointer = unsafe {
+                builder.build_in_bounds_gep(
+                    generic_context_type,
+                    context_pointer,
+                    &[
+                        context.i32_type().const_int(0, false),
+                        context.i32_type().const_int(1, false),
+                    ],
+                    function_pointer_pointer_name,
+                )
+            }
+            .unwrap();
+
+            let function_pointer = builder
+                .build_load(
+                    context.ptr_type(AddressSpace::default()),
+                    function_pointer_pointer,
+                    function_pointer_name,
+                )
+                .unwrap()
+                .into_pointer_value();
+
+            builder
+                .build_indirect_call(type_, function_pointer, &argument_values, result_name)
+                .unwrap()
+        }
+
+        UlarFunction::Function(function_value) => builder
+            .build_direct_call(
+                function_value,
+                &std::iter::once(worker_argument.into())
+                    .chain(arguments)
+                    .collect::<Vec<_>>(),
+                result_name,
+            )
+            .unwrap(),
     }
 }
 

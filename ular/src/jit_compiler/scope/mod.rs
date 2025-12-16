@@ -49,13 +49,15 @@ impl<'a, 'context> JitCompilerScope<'a, 'context> {
                 Ok(self.built_in_values.get(path, local_name, builder).unwrap())
             }
 
-            AnalyzedExpressionRef::Expression { index, .. } => self
-                .get_expression(*index)
-                .ok_or(InternalError::JitCompilerUnknownExpression { index: *index }),
+            AnalyzedExpressionRef::Expression(expression_graph_ref) => self
+                .get_expression(expression_graph_ref.index)
+                .ok_or(InternalError::JitCompilerUnknownExpression {
+                    index: expression_graph_ref.index,
+                }),
 
             AnalyzedExpressionRef::Function { index, .. } => {
                 match self.scope_context.function_values.get(*index) {
-                    Some(value) => Ok(UlarValue::Function(UlarFunction::DirectReference(*value))),
+                    Some(value) => Ok(UlarValue::Function(UlarFunction::Function(*value))),
                     None => Err(InternalError::JitCompilerUnknownFunction { index: *index }),
                 }
             }
@@ -83,7 +85,7 @@ impl<'a, 'context> JitCompilerScope<'a, 'context> {
                     .get(*struct_index)
                     .and_then(|method_values| method_values.get(*method_index))
                 {
-                    Some(value) => Ok(UlarValue::Function(UlarFunction::DirectReference(*value))),
+                    Some(value) => Ok(UlarValue::Function(UlarFunction::Function(*value))),
                     None => Err(InternalError::JitCompilerUnknownStructMethod {
                         struct_index: *struct_index,
                         method_index: *method_index,
