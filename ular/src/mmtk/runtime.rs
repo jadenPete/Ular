@@ -278,7 +278,7 @@ pub(crate) extern "C" fn mmtk_init(plan: GarbageCollectionPlan) {
     }
 }
 
-fn mmtk_maybe_pause_at_safepoint() {
+pub(crate) fn mmtk_maybe_pause_at_safepoint() {
     SAFEPOINT_STATE.with(|safepoint_state| {
         if safepoint_state.should_pause.load(Ordering::Relaxed) {
             mmtk_pause_at_safepoint();

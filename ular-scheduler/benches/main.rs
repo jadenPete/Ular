@@ -7,7 +7,7 @@ use std::{
     time::Duration,
 };
 use ular_scheduler::{
-    Configuration, Job, StandardThreadSpawner, ValueBuffer, Worker, WorkerPool, option::FfiOption,
+    Configuration, Job, Runtime, ValueBuffer, Worker, WorkerPool, option::FfiOption,
 };
 
 #[derive(Clone, Copy)]
@@ -20,6 +20,16 @@ impl Display for Benchmark {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
         self.layers.fmt(formatter)
     }
+}
+
+struct BenchmarkRuntime;
+
+impl Runtime for BenchmarkRuntime {
+    fn spawn_thread<A: FnOnce() + Send + 'static>(callback: A) -> std::thread::JoinHandle<()> {
+        std::thread::spawn(callback)
+    }
+
+    fn tick() {}
 }
 
 struct Node {
@@ -64,7 +74,7 @@ fn benchmark_chili(bencher: Bencher, benchmark: Benchmark) {
 
 #[divan::bench(args = benchmarks(), threads = false)]
 fn benchmark_heartbeat(bencher: Bencher, benchmark: Benchmark) {
-    let thread_pool = WorkerPool::new::<StandardThreadSpawner>(Configuration {
+    let thread_pool = WorkerPool::new::<BenchmarkRuntime>(Configuration {
         thread_count: NonZero::new(num_cpus::get()).unwrap_or(nonzero!(1_usize)),
         heartbeat_interval: Duration::from_micros(100),
     });

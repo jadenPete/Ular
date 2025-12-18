@@ -6,7 +6,10 @@ use crate::{
         scope::LocalName,
         value::{UlarFunction, UlarValue},
     },
-    mmtk::runtime::{mmtk_alloc, mmtk_bind_current_mutator, mmtk_bind_mutator, mmtk_init},
+    mmtk::runtime::{
+        mmtk_alloc, mmtk_bind_current_mutator, mmtk_bind_mutator, mmtk_init,
+        mmtk_maybe_pause_at_safepoint,
+    },
     parser::type_::NumericType,
     phase::built_in_values::{BuiltInPathBuf, BuiltInValueProducer, BuiltInValues},
 };
@@ -31,7 +34,7 @@ use std::{
     ops::Div,
     ptr::null,
 };
-use ular_scheduler::{Job, ThreadSpawner, Worker, WorkerPool, VALUE_BUFFER_WORD_SIZE};
+use ular_scheduler::{Job, Runtime, Worker, WorkerPool, VALUE_BUFFER_WORD_SIZE};
 
 extern "C" {
     fn __cxa_allocate_exception(size: usize) -> *mut *mut c_char;
@@ -614,15 +617,19 @@ impl Display for UlarString {
     }
 }
 
-struct UlarThreadSpawner {}
+struct UlarRuntime {}
 
-impl ThreadSpawner for UlarThreadSpawner {
+impl Runtime for UlarRuntime {
     fn spawn_thread<A: FnOnce() + Send + 'static>(callback: A) -> std::thread::JoinHandle<()> {
-        let handle = std::thread::spawn(callback);
+        std::thread::spawn(|| {
+            mmtk_bind_mutator(std::thread::current().clone());
 
-        mmtk_bind_mutator(handle.thread().clone());
+            callback();
+        })
+    }
 
-        handle
+    fn tick() {
+        mmtk_maybe_pause_at_safepoint();
     }
 }
 
@@ -657,7 +664,7 @@ unsafe extern "C" fn _print_c_string(string: *mut c_char) {
 }
 
 extern "C" fn _workerpool_new() -> *mut WorkerPool {
-    Box::into_raw(Box::new(WorkerPool::new::<UlarThreadSpawner>(
+    Box::into_raw(Box::new(WorkerPool::new::<UlarRuntime>(
         ular_scheduler::Configuration::default(),
     )))
 }

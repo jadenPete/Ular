@@ -33,16 +33,9 @@ impl Default for Configuration {
     }
 }
 
-pub trait ThreadSpawner {
+pub trait Runtime {
     fn spawn_thread<A: FnOnce() + Send + 'static>(callback: A) -> JoinHandle<()>;
-}
-
-pub struct StandardThreadSpawner;
-
-impl ThreadSpawner for StandardThreadSpawner {
-    fn spawn_thread<A: FnOnce() + Send + 'static>(callback: A) -> JoinHandle<()> {
-        std::thread::spawn(callback)
-    }
+    fn tick();
 }
 
 struct WorkerContext {
@@ -82,7 +75,7 @@ impl WorkerPool {
         Ok(())
     }
 
-    pub fn new<A: ThreadSpawner>(configuration: Configuration) -> Self {
+    pub fn new<A: Runtime>(configuration: Configuration) -> Self {
         let context = Arc::new(WorkerContext::new());
         let thread_count = configuration.thread_count.into();
         let worker_threads = (0..thread_count)
@@ -99,7 +92,7 @@ impl WorkerPool {
 
                     let mut worker = Worker::new(cloned_context, heartbeat_value);
 
-                    worker.execute_background_thread()
+                    worker.execute_background_thread(A::tick)
                 })
             })
             .collect();
@@ -148,8 +141,10 @@ impl Worker {
         function(self, context)
     }
 
-    fn execute_background_thread(&mut self) {
+    fn execute_background_thread<A: FnMut()>(&mut self, mut ticker: A) {
         while !self.context.is_stopping.load(Ordering::Relaxed) {
+            ticker();
+
             self.execute_shared_job();
         }
     }
