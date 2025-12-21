@@ -24,17 +24,13 @@ impl<A> NumberMap<A> {
     }
 
     pub(crate) fn get(&self, key: usize) -> Option<&A> {
-        self.values
-            .get(key - self.offset)
-            .and_then(|value| value.as_ref())
+        self.values.get(key.checked_sub(self.offset)?)?.as_ref()
     }
 
     pub(crate) fn get_mut(&mut self, key: usize) -> Option<&mut A> {
         let offset = self.offset;
 
-        self.values
-            .get_mut(key - offset)
-            .and_then(|value| value.as_mut())
+        self.values.get_mut(key.checked_sub(offset)?)?.as_mut()
     }
 
     pub(crate) fn get_or_insert_with<F: FnOnce() -> A>(
