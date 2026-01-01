@@ -169,7 +169,7 @@ fn increment(x: i32): i32 {
     x + 1
 }
 
-fn conditional_incrementer(add_one: bool): i32 => i32 {
+fn conditional_incrementor(add_one: bool): i32 => i32 {
     if add_one {
         increment
     } else {
@@ -178,8 +178,8 @@ fn conditional_incrementer(add_one: bool): i32 => i32 {
 }
 
 seq {
-    println_i32(conditional_incrementer(false)(42));
-    println_i32(conditional_incrementer(true)(42));
+    println_i32(conditional_incrementor(false)(42));
+    println_i32(conditional_incrementor(true)(42));
 };
 ",
         true,
