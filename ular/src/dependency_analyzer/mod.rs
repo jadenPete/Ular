@@ -458,6 +458,8 @@ impl<'phase> Analyzer<'_, 'phase> {
         let mut struct_indices = Vec::new();
         let mut function_indices = Vec::new();
 
+        // "Hoist" the structs and functions by registering them with the scope first, so they're
+        // accessible in the rest of the block regardless of where or in what order they're declared
         for statement in statements {
             match statement {
                 TypedStatement::StructDefinition(definition) => {
@@ -468,13 +470,6 @@ impl<'phase> Analyzer<'_, 'phase> {
                 }
 
                 TypedStatement::FunctionDefinition(definition) => {
-                    if self.scope.has_parent() {
-                        return Err(CompilationError {
-                            message: CompilationErrorMessage::NestedFunctionsNotSupported,
-                            position: Some(definition.get_position()),
-                        });
-                    }
-
                     let i = self.scope_context.functions_mut().reserve_definition();
 
                     function_indices.push(i);
@@ -496,11 +491,6 @@ impl<'phase> Analyzer<'_, 'phase> {
             }
         }
 
-        /*
-         * Analyze the struct methods and functions first, so they don't yet have access to
-         * global variables. The typechecker should've already prevented this, but it never hurts to
-         * check again.
-         */
         for (i, definition) in statements
             .iter()
             .filter_map(|statement| match statement {

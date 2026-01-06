@@ -144,10 +144,6 @@ impl<'a> AnalyzerScope<'a> {
         )
     }
 
-    pub(super) fn has_parent(&self) -> bool {
-        self.parent.is_some()
-    }
-
     pub(super) fn with_parent(parent: &'a AnalyzerScope<'a>) -> Self {
         Self {
             built_in_values: parent.built_in_values,

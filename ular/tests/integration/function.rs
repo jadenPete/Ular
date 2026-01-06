@@ -224,7 +224,7 @@ Error: Unknown value `forty_two`.
 }
 
 #[test]
-fn nested_functions_unsupported() -> anyhow::Result<()> {
+fn nested_functions_supported() -> anyhow::Result<()> {
     let output = evaluate_program(
         "\
 fn outer() {
@@ -237,23 +237,117 @@ fn outer() {
 
 outer();
 ",
+        true,
+    )?;
+
+    assert_eq!(output, "42\n",);
+
+    Ok(())
+}
+
+#[test]
+fn nested_functions_hoisted() -> anyhow::Result<()> {
+    let output = evaluate_program(
+        "\
+fn outer() {
+    inner();
+
+    fn inner() {
+        println_i32(42);
+    }
+}
+
+outer();
+",
+        true,
+    )?;
+
+    assert_eq!(output, "42\n");
+
+    Ok(())
+}
+
+#[test]
+fn nested_functions_can_access_outside_functions() -> anyhow::Result<()> {
+    let output = evaluate_program(
+        "\
+fn collatz_length(n: i32): i32 {
+    fn for_even(n: i32, accumulated: i32): i32 {
+        inner(n / 2, accumulated + 1)
+    }
+
+    fn for_odd(n: i32, accumulated: i32): i32 {
+        inner(3 * n + 1, accumulated + 1)
+    }
+
+    fn inner(n: i32, accumulated: i32): i32 {
+        if n == 1 {
+            accumulated
+        } else if n % 2 == 0 {
+            for_even(n, accumulated)
+        } else {
+            for_odd(n, accumulated)
+        }
+    }
+
+    inner(n, 0)
+}
+        
+collatz_1 = collatz_length(1);
+collatz_10 = collatz_length(10);
+collatz_1005 = collatz_length(1005);
+
+seq {
+    println_i32(collatz_1);
+    println_i32(collatz_10);
+    println_i32(collatz_1005);
+};
+",
+        true,
+    )?;
+
+    assert_eq!(
+        output,
+        "\
+0
+6
+67
+"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn nested_functions_cannot_access_outside_values() -> anyhow::Result<()> {
+    let output = evaluate_program(
+        "\
+one = 1;
+
+fn increment(n: i32): i32 {
+    fn result() {
+        n + one
+    }
+
+    result()
+}
+",
         false,
     )?;
 
     assert_eq!(
         output,
         "\
-Error: Nested functions aren't currently supported.
+Error: Unknown value `n`.
 
- 1 │ fn outer() {
- 2 │     fn inner() {
-   │     ^^^^^^^^^^^^
- 3 │         println_i32(42);
- 4 │     }
- 5 │ 
- 6 │     inner();
+ 3 │ fn increment(n: i32): i32 {
+ 4 │     fn result() {
+ 5 │         n + one
+   │         ^
+ 6 │     }
+ 7 │ 
 
-",
+"
     );
 
     Ok(())

@@ -55,7 +55,6 @@ pub enum CompilationErrorMessage {
         fields: Vec<String>,
     },
 
-    NestedFunctionsNotSupported,
     NumberOutOfRange {
         expected_type: Option<String>,
         value: i128,
@@ -194,10 +193,6 @@ These parameters are missing type annotations: ",
                 }
 
                 Ok(())
-            }
-
-            Self::NestedFunctionsNotSupported => {
-                write!(formatter, "Nested functions aren't currently supported.")
             }
 
             Self::NumberOutOfRange {

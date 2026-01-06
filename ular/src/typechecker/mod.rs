@@ -24,7 +24,7 @@ use crate::{
     },
     typechecker::{
         built_in_values::{TypecheckerBuiltInValueProducer, TypecheckerBuiltInValues},
-        scope::TypecheckerScope,
+        scope::{TypecheckerScope, TypecheckerScopeKind, TypecheckerVariableKind},
         typed_program::{
             Typed, TypedBlock, TypedCall, TypedClosure, TypedExpression, TypedFunctionDefinition,
             TypedIdentifier, TypedIf, TypedInfixOperation, TypedNumber, TypedPath,
@@ -42,10 +42,17 @@ struct Typechecker<'a> {
 }
 
 impl<'a> Typechecker<'a> {
-    fn with_parent(parent: &'a Typechecker<'a>) -> Self {
+    fn new(built_in_values: &'a TypecheckerBuiltInValues) -> Self {
         Self {
-            built_in_values: parent.built_in_values,
-            scope: TypecheckerScope::with_parent(&parent.scope),
+            built_in_values,
+            scope: TypecheckerScope::new(TypecheckerScopeKind::Other),
+        }
+    }
+
+    fn new_child(&self, kind: TypecheckerScopeKind) -> Typechecker<'_> {
+        Typechecker {
+            built_in_values: self.built_in_values,
+            scope: self.scope.new_child(kind),
         }
     }
 
@@ -53,8 +60,9 @@ impl<'a> Typechecker<'a> {
         &self,
         block: &SimpleBlock,
         suggested_type: Option<&Type>,
+        kind: TypecheckerScopeKind,
     ) -> Result<TypedBlock, CompilationError> {
-        let mut typechecker = Typechecker::with_parent(self);
+        let mut typechecker = self.new_child(kind);
         let typechecked_statements =
             typechecker.typecheck_statements_with_hoisting(&block.statements)?;
 
@@ -196,12 +204,14 @@ impl<'a> Typechecker<'a> {
             })
             .collect::<Vec<_>>();
 
-        let mut typechecker = Typechecker::with_parent(self);
+        let mut typechecker = self.new_child(TypecheckerScopeKind::Other);
 
         for parameter in &inferred_parameters {
-            typechecker
-                .scope
-                .declare_variable(&parameter.underlying, parameter.get_type())?;
+            typechecker.scope.declare_variable(
+                &parameter.underlying,
+                TypecheckerVariableKind::Value,
+                parameter.get_type(),
+            )?;
         }
 
         let typechecked_statements =
@@ -308,7 +318,7 @@ impl<'a> Typechecker<'a> {
             }
 
             SimpleExpression::SequentialBlock(block) => Ok(TypedExpression::SequentialBlock(
-                self.typecheck_block(block, suggested_type)?,
+                self.typecheck_block(block, suggested_type, TypecheckerScopeKind::Other)?,
             )),
 
             SimpleExpression::Unit(Unit { position }) => Ok(TypedExpression::Unit(TypedUnit {
@@ -327,12 +337,14 @@ impl<'a> Typechecker<'a> {
 
         self.validate_type(&definition.return_type)?;
 
-        let mut typechecker = Typechecker::with_parent(self);
+        let mut typechecker = self.new_child(TypecheckerScopeKind::Function);
 
         for parameter in &definition.parameters {
-            typechecker
-                .scope
-                .declare_variable(&parameter.name, parameter.type_.clone())?;
+            typechecker.scope.declare_variable(
+                &parameter.name,
+                TypecheckerVariableKind::Value,
+                parameter.type_.clone(),
+            )?;
         }
 
         let typechecked_statements =
@@ -436,11 +448,17 @@ impl<'a> Typechecker<'a> {
 
         assert_type(&typechecked_condition, &Type::Bool)?;
 
-        let typechecked_then_block =
-            self.typecheck_block(&if_expression.then_block, suggested_type)?;
+        let typechecked_then_block = self.typecheck_block(
+            &if_expression.then_block,
+            suggested_type,
+            TypecheckerScopeKind::Other,
+        )?;
 
-        let typechecked_else_block =
-            self.typecheck_block(&if_expression.else_block, suggested_type)?;
+        let typechecked_else_block = self.typecheck_block(
+            &if_expression.else_block,
+            suggested_type,
+            TypecheckerScopeKind::Other,
+        )?;
 
         let type_ = if typechecked_then_block.get_type() == Type::Unit
             || typechecked_else_block.get_type() == Type::Unit
@@ -712,6 +730,8 @@ impl<'a> Typechecker<'a> {
         &mut self,
         statements: &'a [SimpleStatement],
     ) -> Result<Vec<TypedStatement>, CompilationError> {
+        // "Hoist" the structs and functions by registering them with the scope first, so they're
+        // accessible in the rest of the block regardless of where or in what order they're declared
         for statement in statements {
             match statement {
                 SimpleStatement::StructDefinition(definition) => {
@@ -719,8 +739,11 @@ impl<'a> Typechecker<'a> {
                 }
 
                 SimpleStatement::FunctionDefinition(definition) => {
-                    self.scope
-                        .declare_variable(&definition.name, definition.reference_type())?;
+                    self.scope.declare_variable(
+                        &definition.name,
+                        TypecheckerVariableKind::Function,
+                        definition.reference_type(),
+                    )?;
                 }
 
                 _ => {}
@@ -733,46 +756,10 @@ impl<'a> Typechecker<'a> {
             }
         }
 
-        let mut result: Vec<Option<TypedStatement>> = vec![None; statements.len()];
-
-        /*
-         * Typecheck the functions first, so they don't yet have access to global variables.
-         *
-         * This won't prevent nested functions from accessing the parameters of the functions within
-         * which they're nested, but the analyzer phase will take care of detecting nested functions
-         * and erroring when one is detected.
-         */
-        for (i, statement) in statements.iter().enumerate() {
-            match statement {
-                SimpleStatement::StructDefinition(definition) => {
-                    result[i] = Some(TypedStatement::StructDefinition(
-                        self.typecheck_struct_definition(definition)?,
-                    ));
-                }
-
-                SimpleStatement::FunctionDefinition(definition) => {
-                    result[i] = Some(TypedStatement::FunctionDefinition(
-                        self.typecheck_function_definition(definition)?,
-                    ));
-                }
-
-                _ => {}
-            }
-        }
-
-        for (i, statement) in statements.iter().enumerate() {
-            if let SimpleStatement::StructDefinition(_) | SimpleStatement::FunctionDefinition(_) =
-                statement
-            {
-            } else {
-                result[i] = Some(self.typecheck_statement(statement)?);
-            }
-        }
-
-        Ok(result
-            .into_iter()
-            .map(|statement| statement.unwrap())
-            .collect())
+        statements
+            .iter()
+            .map(|statement| self.typecheck_statement(statement))
+            .collect()
     }
 
     fn typecheck_struct_application(
@@ -880,8 +867,11 @@ impl<'a> Typechecker<'a> {
     ) -> Result<TypedVariableDefinition, CompilationError> {
         let result = self.typecheck_expression(&definition.value, None)?;
 
-        self.scope
-            .declare_variable(&definition.name, result.get_type())?;
+        self.scope.declare_variable(
+            &definition.name,
+            TypecheckerVariableKind::Value,
+            result.get_type(),
+        )?;
 
         Ok(TypedVariableDefinition {
             name: definition.name.clone(),
@@ -934,10 +924,7 @@ impl Phase<&SimpleProgram> for TypecheckerPhase {
             self.additional_values.clone(),
         );
 
-        let mut typechecker = Typechecker {
-            built_in_values: &built_in_values,
-            scope: TypecheckerScope::without_parent(),
-        };
+        let mut typechecker = Typechecker::new(&built_in_values);
 
         Ok(TypedProgram {
             statements: typechecker.typecheck_statements_with_hoisting(&program.statements)?,

@@ -14,29 +14,26 @@ pub(super) struct IndexableStructDefinition<'a> {
     pub(super) method_indices: HashMap<&'a str, usize>,
 }
 
+#[derive(Eq, PartialEq)]
+pub(super) enum TypecheckerScopeKind {
+    Function,
+    Other,
+}
+
+#[derive(Eq, PartialEq)]
+pub(super) enum TypecheckerVariableKind {
+    Function,
+    Value,
+}
+
 pub(super) struct TypecheckerScope<'a> {
     parent: Option<&'a TypecheckerScope<'a>>,
+    kind: TypecheckerScopeKind,
     structs: HashMap<&'a str, IndexableStructDefinition<'a>>,
-    variable_types: HashMap<String, Type>,
+    variables: HashMap<String, Variable>,
 }
 
 impl<'a> TypecheckerScope<'a> {
-    pub(super) fn with_parent(parent: &'a TypecheckerScope<'a>) -> Self {
-        Self {
-            parent: Some(parent),
-            structs: HashMap::new(),
-            variable_types: HashMap::new(),
-        }
-    }
-
-    pub(super) fn without_parent() -> Self {
-        Self {
-            parent: None,
-            structs: HashMap::new(),
-            variable_types: HashMap::new(),
-        }
-    }
-
     pub(super) fn declare_and_validate_struct(
         &mut self,
         definition: &'a SimpleStructDefinition,
@@ -95,9 +92,13 @@ impl<'a> TypecheckerScope<'a> {
     pub(super) fn declare_variable(
         &mut self,
         name: &Identifier,
+        kind: TypecheckerVariableKind,
         type_: Type,
     ) -> Result<(), CompilationError> {
-        match self.variable_types.insert(name.value.clone(), type_) {
+        match self
+            .variables
+            .insert(name.value.clone(), Variable { kind, type_ })
+        {
             Some(_) => Err(CompilationError {
                 message: CompilationErrorMessage::VariableAlreadyDefined {
                     name: name.value.clone(),
@@ -110,6 +111,17 @@ impl<'a> TypecheckerScope<'a> {
         }
     }
 
+    fn get_function_type(&self, name: &str) -> Option<Type> {
+        self.variables
+            .get(name)
+            .filter(|variable| variable.kind == TypecheckerVariableKind::Function)
+            .map(|variable| variable.type_.clone())
+            .or_else(|| {
+                self.parent
+                    .and_then(|parent| parent.get_function_type(name))
+            })
+    }
+
     pub(super) fn get_struct_definition(&self, name: &str) -> Option<&IndexableStructDefinition> {
         self.structs.get(name).or_else(|| {
             self.parent
@@ -118,9 +130,40 @@ impl<'a> TypecheckerScope<'a> {
     }
 
     pub(super) fn get_variable_type(&self, name: &str) -> Option<Type> {
-        self.variable_types.get(name).cloned().or_else(|| {
-            self.parent
-                .and_then(|parent| parent.get_variable_type(name))
-        })
+        self.variables
+            .get(name)
+            .map(|variable| variable.type_.clone())
+            .or_else(|| {
+                self.parent.and_then(|parent| {
+                    if self.kind == TypecheckerScopeKind::Function {
+                        parent.get_function_type(name)
+                    } else {
+                        parent.get_variable_type(name)
+                    }
+                })
+            })
     }
+
+    pub(super) fn new(kind: TypecheckerScopeKind) -> Self {
+        Self {
+            parent: None,
+            kind,
+            structs: HashMap::new(),
+            variables: HashMap::new(),
+        }
+    }
+
+    pub(super) fn new_child(&self, kind: TypecheckerScopeKind) -> TypecheckerScope<'_> {
+        TypecheckerScope {
+            parent: Some(self),
+            kind,
+            structs: HashMap::new(),
+            variables: HashMap::new(),
+        }
+    }
+}
+
+struct Variable {
+    kind: TypecheckerVariableKind,
+    type_: Type,
 }
